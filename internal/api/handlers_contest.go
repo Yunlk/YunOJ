@@ -829,7 +829,9 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 			fb = fa
 		}
 		standings, frozenSubs := contest.BuildACMStandings(cctx, subs, fb)
-		resp["standings"] = acmStandingsDTO(standings, problems, avatars)
+		dtos := acmStandingsDTO(standings, problems, avatars)
+		markFirstBlood(dtos)
+		resp["standings"] = dtos
 		if frozenActive {
 			resp["freeze_at"] = fa
 			resp["frozen_submissions"] = len(frozenSubs)
@@ -905,6 +907,8 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	dtos := make([]rollEventDTO, 0, len(events))
 	for _, e := range events {
+		sd := acmStandingsDTO(e.Standings, problems, avatars)
+		markFirstBlood(sd)
 		dtos = append(dtos, rollEventDTO{
 			SubmissionID: e.Submission.ID,
 			ProblemID:    e.Submission.ProblemID,
@@ -913,13 +917,15 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 			TeamAvatar:   avatars[e.TeamID],
 			RankBefore:   e.RankBefore,
 			RankAfter:    e.RankAfter,
-			Standings:    acmStandingsDTO(e.Standings, problems, avatars),
+			Standings:    sd,
 		})
 	}
+	initial := acmStandingsDTO(base, problems, avatars)
+	markFirstBlood(initial)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"contest": c, "problems": problems,
 		"freeze_at": freezeAt(c), "events": dtos,
-		"initial_standings": acmStandingsDTO(base, problems, avatars),
+		"initial_standings": initial,
 	})
 }
 
@@ -929,6 +935,43 @@ type acmProblemDTO struct {
 	Solved         bool   `json:"solved"`
 	FailedAttempts int    `json:"failed_attempts"`
 	SolvedAt       string `json:"solved_at,omitempty"`
+	// FirstBlood 该题一血（全场最早通过）
+	FirstBlood bool `json:"first_blood"`
+}
+
+// markFirstBlood 标记每道题的一血：比较各队 solved_at 取最早者。
+// 字符串比较不可靠（时区/格式差异），统一解析为时间后比较。
+func markFirstBlood(dtos []acmStandingDTO) {
+	first := map[string]time.Time{} // displayID -> 最早通过时间
+	for _, s := range dtos {
+		for pid, ps := range s.Problems {
+			if !ps.Solved || ps.SolvedAt == "" {
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, ps.SolvedAt)
+			if err != nil {
+				continue
+			}
+			if cur, ok := first[pid]; !ok || t.Before(cur) {
+				first[pid] = t
+			}
+		}
+	}
+	for i := range dtos {
+		for pid, ps := range dtos[i].Problems {
+			if !ps.Solved || ps.SolvedAt == "" {
+				continue
+			}
+			t, err := time.Parse(time.RFC3339, ps.SolvedAt)
+			if err != nil {
+				continue
+			}
+			if ft, ok := first[pid]; ok && t.Equal(ft) {
+				ps.FirstBlood = true
+				dtos[i].Problems[pid] = ps
+			}
+		}
+	}
 }
 
 type acmStandingDTO struct {

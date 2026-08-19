@@ -7,7 +7,7 @@ import {
 } from '../api'
 import RollBoardPlayer from '../components/RollBoardPlayer'
 import type {
-  ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
+  ACMProblemState, ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
 } from '../types'
 import { minutesSinceStart, teamAvatarUrl } from '../utils/contest'
 import { formatTime } from '../utils/format'
@@ -22,6 +22,35 @@ function TeamAvatar({ contestId, teamId, avatar, size }: {
 }
 
 // ---------- 排行榜 ----------
+
+// ICPC 风格题目格：未提交无底色；WA 红色（-N）；AC 绿色（✓ 分钟）；
+// 一血深绿底色白字（★ 分钟）。仅在 AC 时改变排名（引擎语义），
+// 未通过尝试以红色负计数显示，不影响排名。
+function ACMCell({ state, startTime }: { state: ACMProblemState | undefined; startTime: string }) {
+  if (!state || (!state.solved && state.failed_attempts === 0)) {
+    return <td className="standings-cell" />
+  }
+  if (state.solved) {
+    const mins = state.solved_at ? minutesSinceStart(state.solved_at, startTime) : null
+    if (state.first_blood) {
+      return (
+        <td className="standings-cell fb-cell" title="一血！全场第一个通过">
+          ★ {mins ?? ''}
+        </td>
+      )
+    }
+    return (
+      <td className="standings-cell ac-cell" title={`通过于第 ${mins ?? '?'} 分钟`}>
+        ✓ {mins ?? ''}
+      </td>
+    )
+  }
+  return (
+    <td className="standings-cell wa-cell" title={`${state.failed_attempts} 次未通过尝试`}>
+      -{state.failed_attempts}
+    </td>
+  )
+}
 
 function ACMTable({ contestId, standings, problems, startTime }: {
   contestId: number
@@ -39,7 +68,7 @@ function ACMTable({ contestId, standings, problems, startTime }: {
             <th style={{ width: 70 }}>通过</th>
             <th style={{ width: 70 }}>罚时</th>
             {problems.map((p) => (
-              <th key={p.problem_id} title={p.title} style={{ width: 72 }}>{p.display_id}</th>
+              <th key={p.problem_id} title={p.title} style={{ width: 78 }}>{p.display_id}</th>
             ))}
           </tr>
         </thead>
@@ -58,18 +87,9 @@ function ACMTable({ contestId, standings, problems, startTime }: {
                 </td>
                 <td className="mono">{s.solved}</td>
                 <td className="mono">{s.penalty}</td>
-                {problems.map((p) => {
-                  const ps = s.problems[p.display_id]
-                  if (!ps) return <td key={p.problem_id} className="standings-cell" />
-                  if (ps.solved) {
-                    const mins = ps.solved_at ? minutesSinceStart(ps.solved_at, startTime) : null
-                    return <td key={p.problem_id} className="standings-cell ac-cell">{mins === null ? '✓' : `✓ ${mins}`}</td>
-                  }
-                  if (ps.failed_attempts > 0) {
-                    return <td key={p.problem_id} className="standings-cell wa-cell">+{ps.failed_attempts}</td>
-                  }
-                  return <td key={p.problem_id} className="standings-cell" />
-                })}
+                {problems.map((p) => (
+                  <ACMCell key={p.problem_id} state={s.problems[p.display_id]} startTime={startTime} />
+                ))}
               </tr>
             ))
           )}
@@ -135,26 +155,45 @@ function StandingsPanel({ contestId }: { contestId: number }) {
   const [standings, setStandings] = useState<ContestStandings | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [live, setLive] = useState(false)
 
-  const load = useCallback(() => {
-    setLoading(true)
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true)
     setError('')
     getContestStandings(contestId)
-      .then(setStandings)
+      .then((s) => {
+        setStandings(s)
+        // 比赛进行中且未封榜：保持 3 秒轮询，随提交实时更新
+        const now = Date.now()
+        const start = new Date(s.contest.start_time).getTime()
+        const end = new Date(s.contest.end_time).getTime()
+        const running = now >= start && now < end
+        const frozen = Boolean(s.freeze_at)
+        setLive(running && !frozen)
+      })
       .catch((err) => setError(extractError(err)))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!silent) setLoading(false)
+      })
   }, [contestId])
 
   useEffect(() => {
     load()
   }, [load])
 
+  // 比赛中每 3 秒静默刷新榜单（AC 后排名/格子即时变化；WA 显示红色 -N 不影响排名）
+  useEffect(() => {
+    if (!live) return
+    const t = window.setInterval(() => load(true), 3000)
+    return () => window.clearInterval(t)
+  }, [live, load])
+
   if (loading) return <div className="page-loading">排行榜加载中…</div>
-  if (error) {
+  if (error && !standings) {
     return (
       <div className="card notice-card">
         <p>{error}</p>
-        <button type="button" className="button button-secondary" onClick={load}>重试</button>
+        <button type="button" className="button button-secondary" onClick={() => load()}>重试</button>
       </div>
     )
   }
@@ -165,6 +204,11 @@ function StandingsPanel({ contestId }: { contestId: number }) {
 
   return (
     <div>
+      <div className="standings-toolbar">
+        {live && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
+        {frozen && !live && <span className="muted">榜单已冻结</span>}
+        <button type="button" className="link-button" onClick={() => load(true)}>刷新</button>
+      </div>
       {isACM && frozen && (
         <div className="notice-card freeze-notice">
           已封榜（{formatTime(standings.freeze_at!)}）

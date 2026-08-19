@@ -249,6 +249,7 @@ export interface ACMProblemState {
   solved: boolean
   failed_attempts: number
   solved_at?: string
+  first_blood?: boolean
 }
 
 export interface ACMStanding {

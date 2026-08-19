@@ -199,23 +199,29 @@ export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerP
                     <td className="mono">{s.penalty}</td>
                     {board.problems.map((p) => {
                       const ps = s.problems[p.display_id]
-                      if (!ps) return <td key={p.problem_id} className="standings-cell" />
+                      if (!ps || (!ps.solved && ps.failed_attempts === 0)) {
+                        return <td key={p.problem_id} className="standings-cell" />
+                      }
                       if (ps.solved) {
                         const mins = ps.solved_at ? minutesSinceStart(ps.solved_at, startTime) : null
+                        if (ps.first_blood) {
+                          return (
+                            <td key={p.problem_id} className="standings-cell fb-cell" title="一血！全场第一个通过">
+                              ★ {mins ?? ''}
+                            </td>
+                          )
+                        }
                         return (
-                          <td key={p.problem_id} className="standings-cell ac-cell">
-                            {mins === null ? '✓' : `✓ ${mins}`}
+                          <td key={p.problem_id} className="standings-cell ac-cell" title={`通过于第 ${mins ?? '?'} 分钟`}>
+                            ✓ {mins ?? ''}
                           </td>
                         )
                       }
-                      if (ps.failed_attempts > 0) {
-                        return (
-                          <td key={p.problem_id} className="standings-cell wa-cell">
-                            +{ps.failed_attempts}
-                          </td>
-                        )
-                      }
-                      return <td key={p.problem_id} className="standings-cell" />
+                      return (
+                        <td key={p.problem_id} className="standings-cell wa-cell" title={`${ps.failed_attempts} 次未通过尝试`}>
+                          -{ps.failed_attempts}
+                        </td>
+                      )
                     })}
                   </tr>
                 )

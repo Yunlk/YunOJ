@@ -10,15 +10,21 @@
 ## 功能
 
 - 注册 / 登录（JWT），首个注册用户自动成为管理员
-- 题目管理：Markdown 题面、样例、标签、难度、时限/内存限制（管理员）
+- 题目管理后台：列表搜索/难度/标签/题型/状态筛选、草稿-发布-停用状态机、
+  复制、批量操作、删除前比赛引用阻断
+- 题目类型：标准比较、Special Judge（含 0-100 部分分）、交互题（双沙箱管道通信）、输出题
+- 测试点管理：manifest 权威分值（编号稳定、删除不重排）、单点增删改、拖拽排序、
+  ZIP 上传前预览后确认导入（成对/分值/总分 100 校验）
 - 测试数据上传：zip 包（`N.in` / `N.out` 成对文件），带路径穿越与 zip 炸弹防护
 - 提交评测：C / C++ / Python 3，判定 `AC / WA / TLE / MLE / OLE / RE / CE / SE`
 - 提交记录：全局/按题目/按用户/按状态过滤，逐测试点详情（仅本人与管理员可见）
 - 重测（rejudge）、提交限流（每用户 10 秒 1 次）、评测机崩溃自动恢复
 - 在线 IDE：Monaco 编辑器，自测（自定义输入）与样例测试，不落库即时反馈
-- 题目类型：标准比较、Special Judge（含 0-100 部分分）、交互题（双沙箱管道通信）
-- 比赛系统：ACM（罚时 + 封榜滚榜）/ OI / IOI 三种赛制，报名（队伍名 + 头像）、
-  排行榜、盲评、提交次数限制、滚榜动画播放
+- 比赛工作台：报名（队伍名 + 头像）、总览（公告/倒计时/进度条/单题状态/通过率/
+  我的成绩）、比赛内作答页（常驻剩余时间、上一题/下一题）、我的提交、排行榜
+- 比赛系统：ACM（罚时 + 封榜滚榜）/ OI / IOI 三种赛制模板 + 自定义引擎组合、
+  盲评、报名时间窗、可见性（公开/私有）、提交次数上限（比赛默认 + 单题覆盖）、
+  比赛题目管理（题库搜索选择器、拖拽排序、题号/单题分值/上限）
 
 ## 架构
 
@@ -169,15 +175,30 @@ npm run build    # 产物输出到 web/dist，被后端 go:embed 嵌入
 | GET | `/languages` | 支持的语言列表 |
 | POST | `/problems/{id}/test` | 自测（登录，自定义输入，不落库） |
 | POST | `/problems/{id}/test-samples` | 样例测试（登录，不落库） |
-| GET | `/contests?page=&size=` | 比赛列表 |
+| POST | `/problems/{id}/copy` | 复制题目（管理员，含测试数据与分值，草稿态） |
+| PATCH | `/problems/{id}/status` | 草稿/发布/停用（管理员，发布校验总分 100） |
+| POST | `/problems/batch` | 批量发布/停用/删除（管理员） |
+| GET | `/problems/{id}/usage` | 删除影响范围：引用比赛与提交数（管理员） |
+| GET | `/problems/{id}/testcases` | 测试点列表（管理员，含总分与完整性） |
+| POST | `/problems/{id}/testcases/preview` | ZIP 解析预览（管理员，不落盘） |
+| POST | `/problems/{id}/testcases/import` | ZIP 确认导入 replace/append（管理员） |
+| POST/PUT/DELETE | `/problems/{id}/testcases[/{ordinal}]` | 单点增改删（管理员） |
+| PUT | `/problems/{id}/testcases/order` | 测试点重排（管理员，分值随编号移动） |
+| GET | `/contests?page=&size=` | 比赛列表（private 对非管理员隐藏） |
 | GET | `/contests/{id}` | 比赛详情（题目列表、是否已报名） |
-| POST/PUT/DELETE | `/contests[/{id}]` | 创建/更新/删除比赛（管理员） |
-| POST | `/contests/{id}/problems` | 添加比赛题目（管理员） |
-| POST | `/contests/{id}/register` | 报名（登录） |
-| POST | `/contests/{id}/submit` | 比赛内提交（登录，需报名且时间窗内） |
+| POST/PUT/DELETE | `/contests[/{id}]` | 创建/更新/删除比赛（管理员，含说明/可见性/报名窗/默认上限） |
+| POST | `/contests/{id}/problems` | 添加比赛题目（管理员，含分值/上限覆盖） |
+| PUT | `/contests/{id}/problems/{pid}` | 改题号/单题分值/单题上限（管理员） |
+| PUT | `/contests/{id}/problems/order` | 比赛题目拖拽排序（管理员） |
+| POST | `/contests/{id}/register` | 报名（登录，受报名时间窗约束） |
+| POST | `/contests/{id}/avatar` | 上传队伍头像（登录，已报名） |
+| POST | `/contests/{id}/submit` | 比赛内提交（登录，时间窗 `[start, end)` + 上限校验） |
+| GET | `/contests/{id}/overview` | 比赛总览（登录+报名，公告/统计/我的状态/我的成绩） |
+| GET | `/contests/{id}/problems/{pid}` | 比赛题面上下文（赛前非管理员 403） |
+| GET | `/contests/{id}/submissions` | 我的比赛提交（盲评中脱敏为 hidden） |
 | GET | `/contests/{id}/standings` | 排行榜（盲评进行中对非管理员隐藏） |
 | GET | `/contests/{id}/rollboard` | 滚榜数据（管理员，仅 ACM） |
-| GET | `/health` | 健康检查 |
+| GET | `/health` | 健康检查（含 server_time 供前端时钟校正） |
 
 判题状态：`pending`、`running`、`accepted`、`wrong_answer`、`time_limit_exceeded`、
 `memory_limit_exceeded`、`output_limit_exceeded`、`runtime_error`、`compile_error`、`system_error`。

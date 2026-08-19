@@ -169,6 +169,14 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_submissions_contest_status ON submissions (contest_id, status)`,
 		},
 	},
+	{
+		version: 6,
+		name:    "contest_overview_user_index",
+		stmts: []string{
+			// 总览/我的提交按 (contest_id, user_id) 查询的覆盖索引
+			`CREATE INDEX IF NOT EXISTS idx_submissions_contest_user ON submissions (contest_id, user_id, id DESC)`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

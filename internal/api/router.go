@@ -4,6 +4,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yunoj/yunoj/internal/config"
@@ -28,9 +29,12 @@ func (a *API) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(a.recoverer, a.cors, a.requestLog)
 
-	// 健康检查（Docker healthcheck 用）
+	// 健康检查（Docker healthcheck 用；server_time 供前端校正客户端时钟偏差）
 	r.Get("/api/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":      "ok",
+			"server_time": time.Now().Format(time.RFC3339Nano),
+		})
 	})
 
 	// 公开接口
@@ -66,6 +70,9 @@ func (a *API) Router() http.Handler {
 		r.Post("/api/contests/{id}/register", a.handleRegisterContest)
 		r.Post("/api/contests/{id}/avatar", a.handleUploadContestAvatar)
 		r.Post("/api/contests/{id}/submit", a.handleContestSubmit)
+		r.Get("/api/contests/{id}/overview", a.handleContestOverview)
+		r.Get("/api/contests/{id}/problems/{problem_id}", a.handleContestProblem)
+		r.Get("/api/contests/{id}/submissions", a.handleContestMySubmissions)
 	})
 
 	// 管理员接口
@@ -92,6 +99,8 @@ func (a *API) Router() http.Handler {
 		r.Put("/api/contests/{id}", a.handleUpdateContest)
 		r.Delete("/api/contests/{id}", a.handleDeleteContest)
 		r.Post("/api/contests/{id}/problems", a.handleAddContestProblem)
+		r.Put("/api/contests/{id}/problems/{problem_id}", a.handleUpdateContestProblem)
+		r.Put("/api/contests/{id}/problems/order", a.handleReorderContestProblems)
 		r.Delete("/api/contests/{id}/problems/{problem_id}", a.handleRemoveContestProblem)
 		r.Get("/api/contests/{id}/rollboard", a.handleContestRollBoard)
 	})

@@ -45,14 +45,18 @@ func (s *Store) GetContest(ctx context.Context, id int64) (model.Contest, error)
 	return c, err
 }
 
-// ListContests 分页列出比赛（按 ID 倒序）。
-func (s *Store) ListContests(ctx context.Context, page, size int) ([]model.Contest, int64, error) {
+// ListContests 分页列出比赛（按 ID 倒序）。includePrivate=false 时隐藏 private 比赛。
+func (s *Store) ListContests(ctx context.Context, page, size int, includePrivate bool) ([]model.Contest, int64, error) {
+	where := ""
+	if !includePrivate {
+		where = " WHERE visibility = 'public'"
+	}
 	var total int64
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM contests`).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM contests`+where).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+contestColumns+` FROM contests ORDER BY id DESC LIMIT $1 OFFSET $2`,
+		`SELECT `+contestColumns+` FROM contests`+where+` ORDER BY id DESC LIMIT $1 OFFSET $2`,
 		size, (page-1)*size)
 	if err != nil {
 		return nil, 0, err
@@ -261,6 +265,75 @@ func (s *Store) IsContestTeam(ctx context.Context, contestID, teamID int64) (boo
 }
 
 // ---------- 比赛提交 ----------
+
+// ProblemContestStat 比赛内单题聚合统计（总览用）。
+type ProblemContestStat struct {
+	ProblemID      int64
+	AttemptedUsers int64 // 提交过该题的用户数（含 CE）
+	AcceptedUsers  int64 // 通过该题的用户数
+	Submissions    int64 // 总提交数
+}
+
+// ContestProblemStats 按题聚合比赛统计。走 (contest_id, problem_id, user_id) 索引。
+func (s *Store) ContestProblemStats(ctx context.Context, contestID int64) (map[int64]ProblemContestStat, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT problem_id,
+			count(DISTINCT user_id) AS attempted_users,
+			count(DISTINCT user_id) FILTER (WHERE status = 'accepted') AS accepted_users,
+			count(*) AS submissions
+		 FROM submissions WHERE contest_id = $1 GROUP BY problem_id`, contestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stats := map[int64]ProblemContestStat{}
+	for rows.Next() {
+		var st ProblemContestStat
+		if err := rows.Scan(&st.ProblemID, &st.AttemptedUsers, &st.AcceptedUsers, &st.Submissions); err != nil {
+			return nil, err
+		}
+		stats[st.ProblemID] = st
+	}
+	return stats, rows.Err()
+}
+
+// UserProblemStat 用户在比赛内单题的提交聚合（总览的"我的状态"用）。
+type UserProblemStat struct {
+	ProblemID int64
+	Total     int64 // 提交总数
+	Judging   int64 // 评测中（pending/running）数量
+	Accepted  bool  // 是否存在 accepted
+	BestScore int   // 各次提交最高得分（IOI）
+	LastScore int   // 最后一次提交得分（OI）
+}
+
+// UserContestProblemStats 用户在比赛内的分题提交聚合。
+// 走 (contest_id, user_id) 索引。
+func (s *Store) UserContestProblemStats(ctx context.Context, contestID, userID int64) (map[int64]UserProblemStat, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT problem_id,
+			count(*) AS total,
+			count(*) FILTER (WHERE status IN ('pending','running')) AS judging,
+			bool_or(status = 'accepted') AS accepted,
+			coalesce(max(score), 0) AS best_score,
+			coalesce((array_agg(score ORDER BY id DESC))[1], 0) AS last_score
+		 FROM submissions WHERE contest_id = $1 AND user_id = $2
+		 GROUP BY problem_id`, contestID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	stats := map[int64]UserProblemStat{}
+	for rows.Next() {
+		var st UserProblemStat
+		if err := rows.Scan(&st.ProblemID, &st.Total, &st.Judging,
+			&st.Accepted, &st.BestScore, &st.LastScore); err != nil {
+			return nil, err
+		}
+		stats[st.ProblemID] = st
+	}
+	return stats, rows.Err()
+}
 
 // ListContestSubmissions 查询比赛的提交（排行榜引擎数据源）。
 // 返回全部提交，包含分数/逐点得分/冻结标记；不含代码等大字段。

@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -184,7 +185,10 @@ func (a *API) handleDeleteContest(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleListContests(w http.ResponseWriter, r *http.Request) {
 	page := clamp(queryInt(r, "page", 1), 1, 1<<20)
 	size := clamp(queryInt(r, "size", defaultPageSize), 1, maxPageSize)
-	items, total, err := a.store.ListContests(r.Context(), page, size)
+	u, loggedIn := userFromCtx(r.Context())
+	isAdmin := loggedIn && u.Role == model.RoleAdmin
+	// private 比赛不出现在公开列表（管理员可见全部）
+	items, total, err := a.store.ListContests(r.Context(), page, size, isAdmin)
 	if err != nil {
 		slogError(r, "比赛列表", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
@@ -193,12 +197,16 @@ func (a *API) handleListContests(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
 }
 
-// contestProblemDTO 比赛题目视图（含标题）。
+// contestProblemDTO 比赛题目视图（含标题与分值/上限覆盖）。
 type contestProblemDTO struct {
 	ProblemID int64  `json:"problem_id"`
 	DisplayID string `json:"display_id"`
 	SortOrder int    `json:"sort_order"`
 	Title     string `json:"title"`
+	// Score 单题分值覆盖（NULL = 用题目 manifest 总分）
+	Score *int `json:"score"`
+	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
+	SubmissionLimit *int `json:"submission_limit"`
 }
 
 func (a *API) contestProblemsDTO(ctx context.Context, contestID int64) ([]contestProblemDTO, error) {
@@ -208,13 +216,34 @@ func (a *API) contestProblemsDTO(ctx context.Context, contestID int64) ([]contes
 	}
 	dtos := make([]contestProblemDTO, 0, len(cps))
 	for _, cp := range cps {
-		dto := contestProblemDTO{ProblemID: cp.ProblemID, DisplayID: cp.DisplayID, SortOrder: cp.SortOrder}
+		dto := contestProblemDTO{
+			ProblemID: cp.ProblemID, DisplayID: cp.DisplayID, SortOrder: cp.SortOrder,
+			Score: cp.Score, SubmissionLimit: cp.SubmissionLimit,
+		}
 		if p, err := a.store.GetProblem(ctx, cp.ProblemID); err == nil {
 			dto.Title = p.Title
 		}
 		dtos = append(dtos, dto)
 	}
 	return dtos, nil
+}
+
+// contestVisibleTo 比赛可见性校验：private 比赛仅管理员与已报名用户可见
+// （不可见时返回 404 错误消息，隐藏存在性）。
+func (a *API) contestVisibleTo(r *http.Request, c model.Contest) (bool, string) {
+	if c.Visibility != model.ContestVisibilityPrivate {
+		return true, ""
+	}
+	u, loggedIn := userFromCtx(r.Context())
+	if loggedIn && u.Role == model.RoleAdmin {
+		return true, ""
+	}
+	if loggedIn {
+		if registered, err := a.store.IsContestTeam(r.Context(), c.ID, u.ID); err == nil && registered {
+			return true, ""
+		}
+	}
+	return false, "比赛不存在"
 }
 
 func (a *API) handleGetContest(w http.ResponseWriter, r *http.Request) {
@@ -231,6 +260,11 @@ func (a *API) handleGetContest(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slogError(r, "比赛详情", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	// private 比赛：仅管理员/报名者可见（404 隐藏存在性）
+	if visible, msg := a.contestVisibleTo(r, c); !visible {
+		writeError(w, http.StatusNotFound, msg)
 		return
 	}
 	problems, err := a.contestProblemsDTO(r.Context(), id)
@@ -256,6 +290,34 @@ func (a *API) handleGetContest(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 比赛题目管理（管理员） ----------
 
+// contestProblemPayload 添加/更新比赛题目的请求体。
+type contestProblemPayload struct {
+	ProblemID int64  `json:"problem_id"`
+	DisplayID string `json:"display_id"`
+	SortOrder int    `json:"sort_order"`
+	// Score 单题分值覆盖（NULL = 用题目 manifest 总分）
+	Score *int `json:"score"`
+	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
+	SubmissionLimit *int `json:"submission_limit"`
+}
+
+// validateContestProblemPayload 校验比赛题目字段。
+func validateContestProblemPayload(p *contestProblemPayload) string {
+	if strings.TrimSpace(p.DisplayID) == "" {
+		return "请填写题号（如 A、B、P1）"
+	}
+	if len([]rune(p.DisplayID)) > 32 {
+		return "题号最长 32 字符"
+	}
+	if p.Score != nil && (*p.Score < 0 || *p.Score > 100) {
+		return "单题分值需在 0-100 之间"
+	}
+	if p.SubmissionLimit != nil && (*p.SubmissionLimit < 0 || *p.SubmissionLimit > 1000) {
+		return "单题提交上限需在 0-1000 之间（0 = 不限）"
+	}
+	return ""
+}
+
 func (a *API) handleAddContestProblem(w http.ResponseWriter, r *http.Request) {
 	cid, err := idParam(r)
 	if err != nil {
@@ -266,12 +328,12 @@ func (a *API) handleAddContestProblem(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "比赛不存在")
 		return
 	}
-	var req struct {
-		ProblemID int64  `json:"problem_id"`
-		DisplayID string `json:"display_id"`
-		SortOrder int    `json:"sort_order"`
-	}
+	var req contestProblemPayload
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if msg := validateContestProblemPayload(&req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if _, err := a.store.GetProblem(r.Context(), req.ProblemID); err != nil {
@@ -279,9 +341,90 @@ func (a *API) handleAddContestProblem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.AddContestProblem(r.Context(), model.ContestProblem{
-		ContestID: cid, ProblemID: req.ProblemID, DisplayID: req.DisplayID, SortOrder: req.SortOrder,
+		ContestID: cid, ProblemID: req.ProblemID, DisplayID: strings.TrimSpace(req.DisplayID),
+		SortOrder: req.SortOrder, Score: req.Score, SubmissionLimit: req.SubmissionLimit,
 	}); err != nil {
 		slogError(r, "添加比赛题目", err)
+		writeError(w, http.StatusInternalServerError, "操作失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleUpdateContestProblem 更新单道比赛题目（题号/分值/上限覆盖）。
+func (a *API) handleUpdateContestProblem(w http.ResponseWriter, r *http.Request) {
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	pid, err := strconv.ParseInt(chi.URLParam(r, "problem_id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的题目 ID")
+		return
+	}
+	var req contestProblemPayload
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if msg := validateContestProblemPayload(&req); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if err := a.store.UpdateContestProblem(r.Context(), model.ContestProblem{
+		ContestID: cid, ProblemID: pid, DisplayID: strings.TrimSpace(req.DisplayID),
+		Score: req.Score, SubmissionLimit: req.SubmissionLimit,
+	}); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "该题目不属于本场比赛")
+			return
+		}
+		slogError(r, "更新比赛题目", err)
+		writeError(w, http.StatusInternalServerError, "操作失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleReorderContestProblems 拖拽排序：按给定题目 ID 顺序重写 sort_order。
+func (a *API) handleReorderContestProblems(w http.ResponseWriter, r *http.Request) {
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	var req struct {
+		ProblemIDs []int64 `json:"problem_ids"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cps, err := a.store.ListContestProblems(r.Context(), cid)
+	if err != nil {
+		slogError(r, "重排比赛题目", err)
+		writeError(w, http.StatusInternalServerError, "操作失败")
+		return
+	}
+	if len(req.ProblemIDs) != len(cps) {
+		writeError(w, http.StatusBadRequest, "必须提供全部比赛题目的完整排列")
+		return
+	}
+	seen := map[int64]bool{}
+	for _, pid := range req.ProblemIDs {
+		if seen[pid] {
+			writeError(w, http.StatusBadRequest, "题目 ID 重复")
+			return
+		}
+		seen[pid] = true
+	}
+	for _, cp := range cps {
+		if !seen[cp.ProblemID] {
+			writeError(w, http.StatusBadRequest, "排列与比赛题目不一致")
+			return
+		}
+	}
+	if err := a.store.ReorderContestProblems(r.Context(), cid, req.ProblemIDs); err != nil {
+		slogError(r, "重排比赛题目", err)
 		writeError(w, http.StatusInternalServerError, "操作失败")
 		return
 	}
@@ -328,6 +471,16 @@ func (a *API) handleRegisterContest(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.TeamName) == 0 || len(req.TeamName) > 64 {
 		writeError(w, http.StatusBadRequest, "队伍名长度需在 1-64 字符之间")
+		return
+	}
+	// 报名时间窗校验（默认随比赛时间窗）
+	c, err := a.store.GetContest(r.Context(), cid)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "比赛不存在")
+		return
+	}
+	if msg := contestRegWindowError(c, time.Now()); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	if err := a.store.AddContestTeam(r.Context(), model.ContestTeam{
@@ -448,6 +601,30 @@ func (a *API) handleServeContestAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- 比赛内提交 ----------
+
+// contestRegWindow 报名时间窗：未单独配置时随比赛时间窗。
+func contestRegWindow(c model.Contest) (start, end time.Time) {
+	start, end = c.StartTime, c.EndTime
+	if c.RegStartTime != nil {
+		start = *c.RegStartTime
+	}
+	if c.RegEndTime != nil {
+		end = *c.RegEndTime
+	}
+	return start, end
+}
+
+// contestRegWindowError 报名时间窗校验：[reg_start, reg_end)。返回空串表示可报名。
+func contestRegWindowError(c model.Contest, now time.Time) string {
+	start, end := contestRegWindow(c)
+	if now.Before(start) {
+		return "报名尚未开始"
+	}
+	if !now.Before(end) {
+		return "报名已截止"
+	}
+	return ""
+}
 
 // contestSubmitWindowError 比赛提交时间窗校验：有效区间为 [start_time, end_time)，
 // end_time 整点（含）起不再接受提交。返回空串表示在窗口内。
@@ -606,6 +783,12 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slogError(r, "排行榜", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+
+	// private 比赛：仅管理员/报名者可见（404 隐藏存在性）
+	if visible, msg := a.contestVisibleTo(r, c); !visible {
+		writeError(w, http.StatusNotFound, msg)
 		return
 	}
 

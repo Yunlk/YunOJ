@@ -55,6 +55,8 @@ type problemPayload struct {
 	TestcaseScores []int `json:"testcase_scores"`
 	// SubmissionLimit 比赛内提交次数上限（0 = 不限）
 	SubmissionLimit int `json:"submission_limit"`
+	// Status 题目状态：draft | published | disabled（空 = published）
+	Status string `json:"status"`
 }
 
 // handleListProblems 题目列表（分页 + 标题模糊搜索）。
@@ -66,7 +68,13 @@ func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		keyword = keyword[:64]
 	}
 
-	items, total, err := a.store.ListProblems(r.Context(), keyword, page, size)
+	items, total, err := a.store.ListProblems(r.Context(), store.ProblemFilter{
+		Keyword: keyword,
+		Page:    page,
+		Size:    size,
+		// 公共列表只返回已发布题目；管理员全量列表在管理后台接口提供
+		IncludeUnpublished: false,
+	})
 	if err != nil {
 		slogError(r, "题目列表", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
@@ -290,6 +298,15 @@ func validateProblem(p problemPayload) string {
 	if p.SubmissionLimit < 0 || p.SubmissionLimit > 100 {
 		return "提交次数限制需在 0-100 之间"
 	}
+	status := p.Status
+	if status == "" {
+		status = model.ProblemStatusPublished
+	}
+	switch status {
+	case model.ProblemStatusDraft, model.ProblemStatusPublished, model.ProblemStatusDisabled:
+	default:
+		return "无效的题目状态（draft/published/disabled）"
+	}
 	return ""
 }
 
@@ -311,6 +328,10 @@ func payloadToProblem(payload problemPayload) model.Problem {
 	if ptype == "" {
 		ptype = model.ProblemTypeStandard
 	}
+	status := payload.Status
+	if status == "" {
+		status = model.ProblemStatusPublished
+	}
 	return model.Problem{
 		Title:            strings.TrimSpace(payload.Title),
 		Statement:        payload.Statement,
@@ -327,6 +348,7 @@ func payloadToProblem(payload problemPayload) model.Problem {
 		InteractorSource: payload.InteractorSource,
 		TestcaseScores:   payload.TestcaseScores,
 		SubmissionLimit:  payload.SubmissionLimit,
+		Status:           status,
 	}
 }
 

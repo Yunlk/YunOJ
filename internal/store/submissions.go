@@ -15,6 +15,7 @@ import (
 type SubmissionFilter struct {
 	ProblemID *int64
 	UserID    *int64
+	ContestID *int64
 	Status    string
 	Page      int
 	Size      int
@@ -58,6 +59,10 @@ func (s *Store) ListSubmissions(ctx context.Context, f SubmissionFilter) ([]mode
 	if f.UserID != nil {
 		args = append(args, *f.UserID)
 		conds = append(conds, fmt.Sprintf("s.user_id = $%d", len(args)))
+	}
+	if f.ContestID != nil {
+		args = append(args, *f.ContestID)
+		conds = append(conds, fmt.Sprintf("s.contest_id = $%d", len(args)))
 	}
 	if f.Status != "" {
 		args = append(args, f.Status)

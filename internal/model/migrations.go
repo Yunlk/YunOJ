@@ -131,6 +131,44 @@ var migrations = []migration{
 			`ALTER TABLE contest_teams ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		version: 5,
+		name:    "problem_status_testcase_manifest_contest_meta",
+		stmts: []string{
+			// ---- 题目状态：draft | published | disabled ----
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'published'`,
+			// ---- 测试点 manifest：分值/编号稳定关联的权威来源 ----
+			// ordinal 为稳定编号（删除后留空档不重排），分值永远跟随 ordinal；
+			// 数据文件仍为 {DataDir}/problems/{id}/tests/{ordinal}.in/.out。
+			// problems.testcase_scores 自本迁移起弃用（仅回填时读取一次）。
+			`CREATE TABLE IF NOT EXISTS problem_testcases (
+				problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				ordinal    INTEGER NOT NULL,
+				score      INTEGER NOT NULL DEFAULT 0,
+				size_bytes BIGINT  NOT NULL DEFAULT 0,
+				input_sha  TEXT NOT NULL DEFAULT '',
+				output_sha TEXT NOT NULL DEFAULT '',
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (problem_id, ordinal)
+			)`,
+			// ---- 比赛元信息：说明/可见性/报名时间窗/默认提交上限 ----
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`,
+			// visibility: public | private（private 不出现在公开列表，需报名或管理员可访问）
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'public'`,
+			// 报名时间窗；NULL = 随比赛时间窗（reg_start=start_time, reg_end=end_time）
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS reg_start_time TIMESTAMPTZ`,
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS reg_end_time TIMESTAMPTZ`,
+			// 比赛默认单题提交上限（0 = 不限）；单题覆盖见 contest_problems.submission_limit
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS submission_limit INTEGER NOT NULL DEFAULT 0`,
+			// ---- 比赛题目：单题分值覆盖 + 单题提交上限覆盖 ----
+			// score: NULL = 用题目 manifest 总分；submission_limit: NULL = 继承比赛默认，0 = 不限
+			`ALTER TABLE contest_problems ADD COLUMN IF NOT EXISTS score INTEGER`,
+			`ALTER TABLE contest_problems ADD COLUMN IF NOT EXISTS submission_limit INTEGER`,
+			// ---- 总览统计索引：避免对全部比赛提交逐条扫描 ----
+			`CREATE INDEX IF NOT EXISTS idx_submissions_contest_problem_user ON submissions (contest_id, problem_id, user_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_submissions_contest_status ON submissions (contest_id, status)`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

@@ -22,15 +22,20 @@ import (
 // ---------- 请求/响应结构 ----------
 
 type contestPayload struct {
-	Title                 string    `json:"title"`
-	Mode                  string    `json:"mode"`
-	Feedback              string    `json:"feedback"`
-	ScoreMode             string    `json:"score_mode"`
-	PenaltyMinutes        int       `json:"penalty_minutes"`
-	FreezeDurationMinutes int       `json:"freeze_duration_minutes"`
-	RankKeys              []string  `json:"rank_keys"`
-	StartTime             time.Time `json:"start_time"`
-	EndTime               time.Time `json:"end_time"`
+	Title                 string     `json:"title"`
+	Mode                  string     `json:"mode"`
+	Feedback              string     `json:"feedback"`
+	ScoreMode             string     `json:"score_mode"`
+	PenaltyMinutes        int        `json:"penalty_minutes"`
+	FreezeDurationMinutes int        `json:"freeze_duration_minutes"`
+	RankKeys              []string   `json:"rank_keys"`
+	StartTime             time.Time  `json:"start_time"`
+	EndTime               time.Time  `json:"end_time"`
+	Description           string     `json:"description"`
+	Visibility            string     `json:"visibility"`
+	RegStartTime          *time.Time `json:"reg_start_time"`
+	RegEndTime            *time.Time `json:"reg_end_time"`
+	SubmissionLimit       int        `json:"submission_limit"`
 }
 
 func validateContestPayload(p *contestPayload) string {
@@ -61,10 +66,32 @@ func validateContestPayload(p *contestPayload) string {
 	if !p.EndTime.After(p.StartTime) {
 		return "结束时间必须晚于开始时间"
 	}
+	if len(p.Description) > 64<<10 {
+		return "比赛说明过长（最大 64KB）"
+	}
+	vis := p.Visibility
+	if vis == "" {
+		vis = model.ContestVisibilityPublic
+	}
+	switch vis {
+	case model.ContestVisibilityPublic, model.ContestVisibilityPrivate:
+	default:
+		return "无效的比赛可见性（public/private）"
+	}
+	if p.RegStartTime != nil && p.RegEndTime != nil && p.RegEndTime.Before(*p.RegStartTime) {
+		return "报名截止时间必须晚于报名开始时间"
+	}
+	if p.SubmissionLimit < 0 || p.SubmissionLimit > 1000 {
+		return "默认提交上限需在 0-1000 之间（0 = 不限）"
+	}
 	return ""
 }
 
 func payloadToContest(p *contestPayload) model.Contest {
+	vis := p.Visibility
+	if vis == "" {
+		vis = model.ContestVisibilityPublic
+	}
 	c := model.Contest{
 		Title:                 p.Title,
 		Mode:                  p.Mode,
@@ -75,6 +102,11 @@ func payloadToContest(p *contestPayload) model.Contest {
 		RankKeys:              p.RankKeys,
 		StartTime:             p.StartTime,
 		EndTime:               p.EndTime,
+		Description:           p.Description,
+		Visibility:            vis,
+		RegStartTime:          p.RegStartTime,
+		RegEndTime:            p.RegEndTime,
+		SubmissionLimit:       p.SubmissionLimit,
 	}
 	if c.RankKeys == nil {
 		c.RankKeys = []string{}

@@ -36,6 +36,12 @@ func main() {
 		slog.Error("数据库迁移失败", "err", err)
 		os.Exit(1)
 	}
+	// 旧数据回填：为「有测试数据文件但 manifest 为空」的题目导入测试点记录（幂等）
+	if n, err := st.BackfillTestcases(ctx, cfg.DataDir); err != nil {
+		slog.Error("测试点 manifest 回填失败", "err", err)
+	} else if n > 0 {
+		slog.Info("测试点 manifest 回填完成", "problems", n)
+	}
 
 	q := queue.New(cfg.RedisAddr)
 	defer q.Close()

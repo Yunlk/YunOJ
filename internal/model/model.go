@@ -61,12 +61,16 @@ type Problem struct {
 	SPJSource string `json:"spj_source"`
 	// InteractorSource 交互器源码（Type=interactive 时使用）
 	InteractorSource string `json:"interactor_source"`
-	// TestcaseScores 各测试点分数（与排序后的测试点对齐；空 = 平均分配）
+	// TestcaseScores 各测试点分数（与排序后的测试点对齐；空 = 平均分配）。
+	// 自迁移 5 起弃用：权威分值存于 problem_testcases，本列仅保留用于回填。
 	TestcaseScores []int `json:"testcase_scores"`
-	// SubmissionLimit 比赛内该题提交次数上限（0 = 不限）
-	SubmissionLimit int       `json:"submission_limit"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	// SubmissionLimit 比赛内该题提交次数上限（0 = 不限）。
+	// 自迁移 5 起弃用：比赛提交上限迁移到 contests.submission_limit / contest_problems.submission_limit。
+	SubmissionLimit int `json:"submission_limit"`
+	// Status 题目状态：draft | published | disabled（未发布题目不可通过公共接口访问）
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // 题目类型。
@@ -76,6 +80,25 @@ const (
 	ProblemTypeInteractive = "interactive"
 	ProblemTypeOutputOnly  = "output_only"
 )
+
+// 题目状态。
+const (
+	ProblemStatusDraft     = "draft"
+	ProblemStatusPublished = "published"
+	ProblemStatusDisabled  = "disabled"
+)
+
+// ProblemTestCase 测试点 manifest 行：分值/编号稳定关联的权威来源。
+// 数据文件为 {DataDir}/problems/{problemID}/tests/{ordinal}.in/.out。
+type ProblemTestCase struct {
+	ProblemID int64     `json:"problem_id"`
+	Ordinal   int       `json:"ordinal"`
+	Score     int       `json:"score"`
+	SizeBytes int64     `json:"size_bytes"`
+	InputSHA  string    `json:"input_sha"`
+	OutputSHA string    `json:"output_sha"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 // CaseResult 单个测试点的评测结果。
 type CaseResult struct {
@@ -118,6 +141,12 @@ const (
 	ContestModeIOI = "IOI"
 )
 
+// 比赛可见性。
+const (
+	ContestVisibilityPublic  = "public"
+	ContestVisibilityPrivate = "private"
+)
+
 // 比赛反馈模式。
 const (
 	FeedbackRealtime = "realtime"
@@ -142,7 +171,16 @@ type Contest struct {
 	RankKeys              []string  `json:"rank_keys"`
 	StartTime             time.Time `json:"start_time"`
 	EndTime               time.Time `json:"end_time"`
-	CreatedAt             time.Time `json:"created_at"`
+	// Description 比赛说明/公告（Markdown）
+	Description string `json:"description"`
+	// Visibility 可见性：public | private
+	Visibility string `json:"visibility"`
+	// RegStartTime/RegEndTime 报名时间窗；NULL = 随比赛时间窗
+	RegStartTime *time.Time `json:"reg_start_time,omitempty"`
+	RegEndTime   *time.Time `json:"reg_end_time,omitempty"`
+	// SubmissionLimit 比赛默认单题提交上限（0 = 不限）
+	SubmissionLimit int       `json:"submission_limit"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // ContestProblem 比赛与题目的关联（含展示编号与排序）。
@@ -151,6 +189,10 @@ type ContestProblem struct {
 	ProblemID int64  `json:"problem_id"`
 	DisplayID string `json:"display_id"`
 	SortOrder int    `json:"sort_order"`
+	// Score 单题分值覆盖（NULL = 用题目 manifest 总分）
+	Score *int `json:"score"`
+	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
+	SubmissionLimit *int `json:"submission_limit"`
 }
 
 // ContestTeam 比赛参赛队伍（映射到用户）。

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,7 @@ func scanProblem(row rowScanner) (model.Problem, error) {
 		&p.Hint, &samples, &p.TimeLimitMs, &p.MemoryLimitKb, &p.Difficulty,
 		&p.Tags, &p.AcceptedCount, &p.SubmissionCount,
 		&p.Type, &p.SPJSource, &p.InteractorSource, &scores, &p.SubmissionLimit,
-		&p.CreatedAt, &p.UpdatedAt)
+		&p.Status, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return model.Problem{}, err
 	}
@@ -44,15 +45,51 @@ func scanProblem(row rowScanner) (model.Problem, error) {
 const problemColumns = `id, title, statement, input_format, output_format,
 	hint, samples, time_limit_ms, memory_limit_kb, difficulty, tags,
 	accepted_count, submission_count, type, spj_source, interactor_source,
-	testcase_scores, submission_limit, created_at, updated_at`
+	testcase_scores, submission_limit, status, created_at, updated_at`
 
-// ListProblems 分页列出题目，支持按标题模糊搜索（keyword 为空则不过滤）。
-func (s *Store) ListProblems(ctx context.Context, keyword string, page, size int) ([]model.Problem, int64, error) {
-	where := ""
+// ProblemFilter 题目列表过滤条件。字段为 nil/空表示不过滤。
+type ProblemFilter struct {
+	Keyword            string
+	Difficulty         *int
+	Tag                string
+	Type               string
+	Status             string
+	IncludeUnpublished bool // 是否包含未发布（draft/disabled）题目（管理员列表用）
+	Page               int
+	Size               int
+}
+
+// ListProblems 分页列出题目，支持标题/难度/标签/题型/状态过滤。
+// 默认仅返回 published；IncludeUnpublished=true 时返回全部状态。
+func (s *Store) ListProblems(ctx context.Context, f ProblemFilter) ([]model.Problem, int64, error) {
+	conds := []string{}
 	args := []any{}
-	if keyword != "" {
-		args = append(args, "%"+strings.ToLower(keyword)+"%")
-		where = "WHERE title ILIKE $1"
+	if f.Keyword != "" {
+		args = append(args, "%"+strings.ToLower(f.Keyword)+"%")
+		conds = append(conds, fmt.Sprintf("title ILIKE $%d", len(args)))
+	}
+	if f.Difficulty != nil {
+		args = append(args, *f.Difficulty)
+		conds = append(conds, fmt.Sprintf("difficulty = $%d", len(args)))
+	}
+	if f.Tag != "" {
+		args = append(args, f.Tag)
+		conds = append(conds, fmt.Sprintf("$%d = ANY(tags)", len(args)))
+	}
+	if f.Type != "" {
+		args = append(args, f.Type)
+		conds = append(conds, fmt.Sprintf("type = $%d", len(args)))
+	}
+	if f.Status != "" {
+		args = append(args, f.Status)
+		conds = append(conds, fmt.Sprintf("status = $%d", len(args)))
+	}
+	if !f.IncludeUnpublished {
+		conds = append(conds, "status = 'published'")
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
 
 	var total int64
@@ -61,7 +98,7 @@ func (s *Store) ListProblems(ctx context.Context, keyword string, page, size int
 		return nil, 0, err
 	}
 
-	args = append(args, size, (page-1)*size)
+	args = append(args, f.Size, (f.Page-1)*f.Size)
 	query := `SELECT ` + problemColumns + ` FROM problems ` + where + ` ORDER BY id LIMIT $` +
 		strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -70,7 +107,7 @@ func (s *Store) ListProblems(ctx context.Context, keyword string, page, size int
 	}
 	defer rows.Close()
 
-	items := make([]model.Problem, 0, size)
+	items := make([]model.Problem, 0, f.Size)
 	for rows.Next() {
 		p, err := scanProblem(rows)
 		if err != nil {
@@ -104,13 +141,14 @@ func (s *Store) CreateProblem(ctx context.Context, p *model.Problem) error {
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO problems (title, statement, input_format, output_format, hint,
 			samples, time_limit_ms, memory_limit_kb, difficulty, tags,
-			type, spj_source, interactor_source, testcase_scores, submission_limit)
+			type, spj_source, interactor_source, testcase_scores, submission_limit, status)
 		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10,
-			$11, $12, $13, $14::jsonb, $15)
+			$11, $12, $13, $14::jsonb, $15, $16)
 		 RETURNING id, created_at, updated_at`,
 		p.Title, p.Statement, p.InputFormat, p.OutputFormat, p.Hint,
 		string(samples), p.TimeLimitMs, p.MemoryLimitKb, p.Difficulty, p.Tags,
 		p.Type, p.SPJSource, p.InteractorSource, string(scores), p.SubmissionLimit,
+		p.Status,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -130,11 +168,12 @@ func (s *Store) UpdateProblem(ctx context.Context, p *model.Problem) error {
 			hint = $6, samples = $7::jsonb, time_limit_ms = $8, memory_limit_kb = $9,
 			difficulty = $10, tags = $11, type = $12, spj_source = $13,
 			interactor_source = $14, testcase_scores = $15::jsonb,
-			submission_limit = $16, updated_at = now()
+			submission_limit = $16, status = $17, updated_at = now()
 		 WHERE id = $1`,
 		p.ID, p.Title, p.Statement, p.InputFormat, p.OutputFormat, p.Hint,
 		string(samples), p.TimeLimitMs, p.MemoryLimitKb, p.Difficulty, p.Tags,
 		p.Type, p.SPJSource, p.InteractorSource, string(scores), p.SubmissionLimit,
+		p.Status,
 	)
 	if err != nil {
 		return err
@@ -166,4 +205,39 @@ func (s *Store) AddSubmission(ctx context.Context, problemID int64, accepted boo
 			accepted_count = accepted_count + CASE WHEN $2 THEN 1 ELSE 0 END
 		 WHERE id = $1`, problemID, accepted)
 	return err
+}
+
+// ContestRef 引用题目的比赛信息（删除题目前的影响范围提示）。
+type ContestRef struct {
+	ContestID int64
+	Title     string
+}
+
+// ProblemUsage 统计题目的引用情况：被哪些比赛引用、有多少提交。
+func (s *Store) ProblemUsage(ctx context.Context, problemID int64) ([]ContestRef, int64, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT c.id, c.title FROM contest_problems cp
+		 JOIN contests c ON c.id = cp.contest_id
+		 WHERE cp.problem_id = $1 ORDER BY c.id`, problemID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	refs := []ContestRef{}
+	for rows.Next() {
+		var r ContestRef
+		if err := rows.Scan(&r.ContestID, &r.Title); err != nil {
+			return nil, 0, err
+		}
+		refs = append(refs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var subs int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM submissions WHERE problem_id = $1`, problemID).Scan(&subs); err != nil {
+		return nil, 0, err
+	}
+	return refs, subs, nil
 }

@@ -71,6 +71,8 @@ type Problem struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// TestcaseCount 测试点数量（查询时聚合，不落库）
+	TestcaseCount int64 `json:"-"`
 }
 
 // 题目类型。

@@ -12,6 +12,7 @@ import (
 
 	"github.com/yunoj/yunoj/internal/judge"
 	"github.com/yunoj/yunoj/internal/langs"
+	"github.com/yunoj/yunoj/internal/model"
 	"github.com/yunoj/yunoj/internal/store"
 )
 
@@ -65,7 +66,12 @@ func (a *API) handleRunTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "无效的题目 ID")
 		return
 	}
-	if _, err := a.store.GetProblem(r.Context(), id); err != nil {
+	p, err := a.store.GetProblem(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	if !problemPublicSubmitAllowed(p, u.Role == model.RoleAdmin) {
 		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
@@ -125,6 +131,10 @@ func (a *API) handleRunSamples(w http.ResponseWriter, r *http.Request) {
 		}
 		slogError(r, "样例测试", err)
 		writeError(w, http.StatusInternalServerError, "运行失败")
+		return
+	}
+	if !problemPublicSubmitAllowed(problem, u.Role == model.RoleAdmin) {
+		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
 	if len(problem.Samples) == 0 {

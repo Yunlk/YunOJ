@@ -74,7 +74,7 @@ type submissionDetail struct {
 }
 
 // handleSubmit 创建提交并入队评测。做三层防护：
-// 题目存在性、语言合法性、每用户提交限流。
+// 题目存在性与状态（未发布不可提交）、语言合法性、每用户提交限流。
 func (a *API) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	u, _ := userFromCtx(r.Context())
 
@@ -86,13 +86,18 @@ func (a *API) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "无效的题目 ID")
 		return
 	}
-	if _, err := a.store.GetProblem(r.Context(), req.ProblemID); err != nil {
+	p, err := a.store.GetProblem(r.Context(), req.ProblemID)
+	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "题目不存在")
 			return
 		}
 		slogError(r, "提交", err)
 		writeError(w, http.StatusInternalServerError, "提交失败")
+		return
+	}
+	if !problemPublicSubmitAllowed(p, u.Role == model.RoleAdmin) {
+		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
 	if msg, status := a.validateSubmitBasics(r, req.Language, req.Code, u.ID); msg != "" {

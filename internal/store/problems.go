@@ -25,7 +25,7 @@ func scanProblem(row rowScanner) (model.Problem, error) {
 		&p.Hint, &samples, &p.TimeLimitMs, &p.MemoryLimitKb, &p.Difficulty,
 		&p.Tags, &p.AcceptedCount, &p.SubmissionCount,
 		&p.Type, &p.SPJSource, &p.InteractorSource, &scores, &p.SubmissionLimit,
-		&p.Status, &p.CreatedAt, &p.UpdatedAt)
+		&p.Status, &p.TestcaseCount, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return model.Problem{}, err
 	}
@@ -45,7 +45,9 @@ func scanProblem(row rowScanner) (model.Problem, error) {
 const problemColumns = `id, title, statement, input_format, output_format,
 	hint, samples, time_limit_ms, memory_limit_kb, difficulty, tags,
 	accepted_count, submission_count, type, spj_source, interactor_source,
-	testcase_scores, submission_limit, status, created_at, updated_at`
+	testcase_scores, submission_limit, status,
+	(SELECT count(*) FROM problem_testcases pt WHERE pt.problem_id = problems.id) AS testcase_count,
+	created_at, updated_at`
 
 // ProblemFilter 题目列表过滤条件。字段为 nil/空表示不过滤。
 type ProblemFilter struct {
@@ -205,6 +207,19 @@ func (s *Store) AddSubmission(ctx context.Context, problemID int64, accepted boo
 			accepted_count = accepted_count + CASE WHEN $2 THEN 1 ELSE 0 END
 		 WHERE id = $1`, problemID, accepted)
 	return err
+}
+
+// UpdateProblemStatus 仅更新题目状态（草稿/发布/停用）。
+func (s *Store) UpdateProblemStatus(ctx context.Context, id int64, status string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE problems SET status = $2, updated_at = now() WHERE id = $1`, id, status)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ContestRef 引用题目的比赛信息（删除题目前的影响范围提示）。

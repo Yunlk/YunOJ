@@ -37,13 +37,13 @@ func (a *API) Router() http.Handler {
 	r.Post("/api/auth/register", a.handleRegister)
 	r.Post("/api/auth/login", a.handleLogin)
 	r.Get("/api/languages", a.handleLanguages)
-	r.Get("/api/problems", a.handleListProblems)
-	r.Get("/api/problems/{id}", a.handleGetProblem)
 	r.Get("/api/submissions", a.handleListSubmissions)
 
-	// 匿名可访问，但携带有效令牌时可见敏感字段（代码/逐点结果）
+	// 匿名可访问，但携带有效令牌时可见敏感字段（管理员看到草稿/停用题目与评测器源码）
 	r.Group(func(r chi.Router) {
 		r.Use(a.optionalAuth)
+		r.Get("/api/problems", a.handleListProblems)
+		r.Get("/api/problems/{id}", a.handleGetProblem)
 		r.Get("/api/submissions/{id}", a.handleGetSubmission)
 	})
 
@@ -75,6 +75,18 @@ func (a *API) Router() http.Handler {
 		r.Put("/api/problems/{id}", a.handleUpdateProblem)
 		r.Delete("/api/problems/{id}", a.handleDeleteProblem)
 		r.Post("/api/problems/{id}/tests", a.handleUploadTests)
+		r.Post("/api/problems/{id}/copy", a.handleCopyProblem)
+		r.Patch("/api/problems/{id}/status", a.handleUpdateProblemStatus)
+		r.Get("/api/problems/{id}/usage", a.handleProblemUsage)
+		r.Post("/api/problems/batch", a.handleProblemBatch)
+		// 测试点管理
+		r.Get("/api/problems/{id}/testcases", a.handleListTestcases)
+		r.Post("/api/problems/{id}/testcases/preview", a.handlePreviewTestsZIP)
+		r.Post("/api/problems/{id}/testcases/import", a.handleImportTestsZIP)
+		r.Post("/api/problems/{id}/testcases", a.handleAddTestcase)
+		r.Put("/api/problems/{id}/testcases/{ordinal}", a.handleUpdateTestcase)
+		r.Delete("/api/problems/{id}/testcases/{ordinal}", a.handleDeleteTestcase)
+		r.Put("/api/problems/{id}/testcases/order", a.handleReorderTestcases)
 		r.Post("/api/submissions/{id}/rejudge", a.handleRejudge)
 		r.Post("/api/contests", a.handleCreateContest)
 		r.Put("/api/contests/{id}", a.handleUpdateContest)

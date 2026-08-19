@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -31,6 +32,132 @@ type problemListItem struct {
 	SubmissionCount int64     `json:"submission_count"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// 以下字段仅管理员可见（管理后台列表），指针保证 0 值也输出
+	Type          *string `json:"type,omitempty"`
+	Status        *string `json:"status,omitempty"`
+	TestcaseCount *int64  `json:"testcase_count,omitempty"`
+}
+
+// handleListProblems 题目列表。
+// 公共：仅 published，关键词搜索；管理员：额外支持难度/标签/题型/状态过滤，返回全部状态。
+func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
+	page := clamp(queryInt(r, "page", 1), 1, 1<<20)
+	size := clamp(queryInt(r, "size", defaultPageSize), 1, maxPageSize)
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	if len(keyword) > 64 {
+		keyword = keyword[:64]
+	}
+	u, loggedIn := userFromCtx(r.Context())
+	isAdmin := loggedIn && u.Role == model.RoleAdmin
+
+	f := store.ProblemFilter{
+		Keyword: keyword,
+		Page:    page,
+		Size:    size,
+		// 公共列表只返回已发布题目；管理员可查看全部状态
+		IncludeUnpublished: isAdmin,
+	}
+	if isAdmin {
+		if v := queryInt(r, "difficulty", 0); v >= 1 && v <= 10 {
+			f.Difficulty = &v
+		}
+		f.Tag = strings.TrimSpace(r.URL.Query().Get("tag"))
+		f.Type = strings.TrimSpace(r.URL.Query().Get("type"))
+		f.Status = strings.TrimSpace(r.URL.Query().Get("status"))
+	}
+
+	items, total, err := a.store.ListProblems(r.Context(), f)
+	if err != nil {
+		slogError(r, "题目列表", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	list := make([]problemListItem, 0, len(items))
+	for _, p := range items {
+		item := problemListItem{
+			ID: p.ID, Title: p.Title, Difficulty: p.Difficulty, Tags: p.Tags,
+			AcceptedCount: p.AcceptedCount, SubmissionCount: p.SubmissionCount,
+			CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		}
+		if isAdmin {
+			item.Type = &p.Type
+			item.Status = &p.Status
+			item.TestcaseCount = &p.TestcaseCount
+		}
+		list = append(list, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
+}
+
+// problemDetailDTO 题目详情响应：评测器源码仅管理员可见。
+type problemDetailDTO struct {
+	ID              int64          `json:"id"`
+	Title           string         `json:"title"`
+	Statement       string         `json:"statement"`
+	InputFormat     string         `json:"input_format"`
+	OutputFormat    string         `json:"output_format"`
+	Hint            string         `json:"hint"`
+	Samples         []model.Sample `json:"samples"`
+	TimeLimitMs     int            `json:"time_limit_ms"`
+	MemoryLimitKb   int            `json:"memory_limit_kb"`
+	Difficulty      int            `json:"difficulty"`
+	Tags            []string       `json:"tags"`
+	AcceptedCount   int64          `json:"accepted_count"`
+	SubmissionCount int64          `json:"submission_count"`
+	Type            string         `json:"type"`
+	TestcaseScores  []int          `json:"testcase_scores"`
+	SubmissionLimit int            `json:"submission_limit"`
+	Status          string         `json:"status"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	// 管理员专属：评测器源码与测试点数量
+	SPJSource        string `json:"spj_source,omitempty"`
+	InteractorSource string `json:"interactor_source,omitempty"`
+	TestcaseCount    int64  `json:"testcase_count,omitempty"`
+}
+
+// handleGetProblem 题目详情。
+// 非管理员仅能访问已发布题目，且不返回评测器源码；
+// 管理员可访问任意状态并看到全部字段。
+func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的题目 ID")
+		return
+	}
+	p, err := a.store.GetProblem(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	if err != nil {
+		slogError(r, "题目详情", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	u, loggedIn := userFromCtx(r.Context())
+	isAdmin := loggedIn && u.Role == model.RoleAdmin
+	if !isAdmin && p.Status != model.ProblemStatusPublished {
+		// 未发布题目对公共接口不可见（与不存在同响应，避免泄露存在性）
+		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	dto := problemDetailDTO{
+		ID: p.ID, Title: p.Title, Statement: p.Statement,
+		InputFormat: p.InputFormat, OutputFormat: p.OutputFormat, Hint: p.Hint,
+		Samples: p.Samples, TimeLimitMs: p.TimeLimitMs, MemoryLimitKb: p.MemoryLimitKb,
+		Difficulty: p.Difficulty, Tags: p.Tags,
+		AcceptedCount: p.AcceptedCount, SubmissionCount: p.SubmissionCount,
+		Type: p.Type, TestcaseScores: p.TestcaseScores,
+		SubmissionLimit: p.SubmissionLimit, Status: p.Status,
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+	if isAdmin {
+		dto.SPJSource = p.SPJSource
+		dto.InteractorSource = p.InteractorSource
+		dto.TestcaseCount = p.TestcaseCount
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // problemPayload 创建/更新题目的请求体。
@@ -59,56 +186,14 @@ type problemPayload struct {
 	Status string `json:"status"`
 }
 
-// handleListProblems 题目列表（分页 + 标题模糊搜索）。
-func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
-	page := clamp(queryInt(r, "page", 1), 1, 1<<20)
-	size := clamp(queryInt(r, "size", defaultPageSize), 1, maxPageSize)
-	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-	if len(keyword) > 64 {
-		keyword = keyword[:64]
-	}
-
-	items, total, err := a.store.ListProblems(r.Context(), store.ProblemFilter{
-		Keyword: keyword,
-		Page:    page,
-		Size:    size,
-		// 公共列表只返回已发布题目；管理员全量列表在管理后台接口提供
-		IncludeUnpublished: false,
-	})
-	if err != nil {
-		slogError(r, "题目列表", err)
-		writeError(w, http.StatusInternalServerError, "查询失败")
-		return
-	}
-	list := make([]problemListItem, 0, len(items))
-	for _, p := range items {
-		list = append(list, problemListItem{
-			ID: p.ID, Title: p.Title, Difficulty: p.Difficulty, Tags: p.Tags,
-			AcceptedCount: p.AcceptedCount, SubmissionCount: p.SubmissionCount,
-			CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
-		})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
+// problemPublicSubmitAllowed 题目是否允许公开提交（published 或管理员）。
+func problemPublicSubmitAllowed(p model.Problem, isAdmin bool) bool {
+	return p.Status == model.ProblemStatusPublished || isAdmin
 }
 
-// handleGetProblem 题目详情。
-func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
-	id, err := idParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "无效的题目 ID")
-		return
-	}
-	p, err := a.store.GetProblem(r.Context(), id)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "题目不存在")
-		return
-	}
-	if err != nil {
-		slogError(r, "题目详情", err)
-		writeError(w, http.StatusInternalServerError, "查询失败")
-		return
-	}
-	writeJSON(w, http.StatusOK, p)
+// problemContestSubmitAllowed 比赛内提交：published 与 draft 均可（比赛专用题可为草稿），停用不可。
+func problemContestSubmitAllowed(p model.Problem) bool {
+	return p.Status == model.ProblemStatusPublished || p.Status == model.ProblemStatusDraft
 }
 
 // handleCreateProblem 创建题目（管理员）。
@@ -166,10 +251,30 @@ func (a *API) handleUpdateProblem(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteProblem 删除题目（管理员），同时清理测试数据文件。
+// 被比赛引用的题目拒绝删除（409），避免静默破坏比赛配置。
 func (a *API) handleDeleteProblem(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "无效的题目 ID")
+		return
+	}
+	if _, err := a.store.GetProblem(r.Context(), id); err != nil {
+		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	refs, _, err := a.store.ProblemUsage(r.Context(), id)
+	if err != nil {
+		slogError(r, "删除题目引用检查", err)
+		writeError(w, http.StatusInternalServerError, "查询引用失败")
+		return
+	}
+	if len(refs) > 0 {
+		names := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			names = append(names, fmt.Sprintf("#%d %s", ref.ContestID, ref.Title))
+		}
+		writeError(w, http.StatusConflict,
+			fmt.Sprintf("该题目被 %d 场比赛引用，不能删除：%s", len(refs), strings.Join(names, "、")))
 		return
 	}
 	if err := a.store.DeleteProblem(r.Context(), id); err != nil {

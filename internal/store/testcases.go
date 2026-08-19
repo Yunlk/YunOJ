@@ -177,6 +177,24 @@ func (s *Store) BackfillTestcases(ctx context.Context, dataDir string) (int, err
 	return backfilled, nil
 }
 
+// TestcaseFromFiles 根据磁盘上的 {ordinal}.in/.out 计算测试点记录（含摘要与大小）。
+func (s *Store) TestcaseFromFiles(dataDir string, problemID int64, ordinal, score int) (model.ProblemTestCase, error) {
+	inPath := TestcaseFilePath(dataDir, problemID, ordinal, "in")
+	outPath := TestcaseFilePath(dataDir, problemID, ordinal, "out")
+	inSHA, inSize, err := fileSHA(inPath)
+	if err != nil {
+		return model.ProblemTestCase{}, err
+	}
+	outSHA, outSize, err := fileSHA(outPath)
+	if err != nil {
+		return model.ProblemTestCase{}, err
+	}
+	return model.ProblemTestCase{
+		ProblemID: problemID, Ordinal: ordinal, Score: score,
+		SizeBytes: inSize + outSize, InputSHA: inSHA, OutputSHA: outSHA,
+	}, nil
+}
+
 // fileSHA 计算文件 SHA-256 与大小。
 func fileSHA(path string) (string, int64, error) {
 	f, err := os.Open(path)

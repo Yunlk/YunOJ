@@ -508,10 +508,14 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. 提交次数限制
+	// 4. 题目状态：published/draft 可提交（比赛专用题可为草稿），disabled 不可
 	problem, err := a.store.GetProblem(r.Context(), req.ProblemID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	if !problemContestSubmitAllowed(problem) {
+		writeError(w, http.StatusBadRequest, "该题目已停用，无法提交")
 		return
 	}
 	if problem.SubmissionLimit > 0 {

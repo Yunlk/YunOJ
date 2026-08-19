@@ -1,9 +1,9 @@
 import type { Contest } from '../types'
 
 export function contestModeLabel(mode: string): string {
-  if (mode === 'acm') return 'ACM'
-  if (mode === 'oi') return 'OI'
-  if (mode === 'ioi') return 'IOI'
+  if (mode === 'ACM') return 'ACM'
+  if (mode === 'OI') return 'OI'
+  if (mode === 'IOI') return 'IOI'
   return mode
 }
 
@@ -13,8 +13,9 @@ export function contestFeedbackLabel(feedback: string): string {
 }
 
 export function scoreModeLabel(mode: string): string {
-  if (mode === 'best') return '取最优'
-  return '取最后一次'
+  if (mode === 'all_or_nothing') return '整题通过才计分'
+  if (mode === 'partial') return '按测试点部分计分'
+  return mode
 }
 
 export type ContestPhase = 'upcoming' | 'running' | 'ended'
@@ -60,4 +61,10 @@ export function minutesSinceStart(solvedAt: string, startTime: string): number {
   const t = new Date(solvedAt).getTime() - new Date(startTime).getTime()
   if (Number.isNaN(t)) return 0
   return Math.max(0, Math.round(t / 60000))
+}
+
+/** 队伍头像 URL；无头像返回 null（前端渲染首字母占位） */
+export function teamAvatarUrl(contestId: number, teamId: number, avatar: string): string | null {
+  if (!avatar) return null
+  return `/api/contests/${contestId}/teams/${teamId}/avatar`
 }

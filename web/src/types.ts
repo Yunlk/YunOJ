@@ -89,9 +89,9 @@ export interface Language {
 
 // ---- 比赛 ----
 
-export type ContestMode = 'acm' | 'oi' | 'ioi'
-export type ContestFeedback = 'visible' | 'blind'
-export type ContestScoreMode = 'last' | 'best'
+export type ContestMode = 'ACM' | 'OI' | 'IOI'
+export type ContestFeedback = 'realtime' | 'blind'
+export type ContestScoreMode = 'all_or_nothing' | 'partial'
 
 export interface Contest {
   id: number
@@ -114,11 +114,17 @@ export interface ContestProblem {
   title: string
 }
 
+export interface MyTeam {
+  team_name: string
+  avatar: string
+}
+
 export interface ContestDetail {
   contest: Contest
   problems: ContestProblem[]
   is_registered?: boolean
   is_admin?: boolean
+  my_team?: MyTeam
 }
 
 export interface ContestInput {
@@ -143,6 +149,7 @@ export interface ACMStanding {
   rank: number
   team_id: number
   team_name: string
+  avatar: string
   solved: number
   penalty: number
   last_ac?: string
@@ -153,6 +160,7 @@ export interface OIStanding {
   rank: number
   team_id: number
   team_name: string
+  avatar: string
   total_score: number
   problem_scores: Record<string, number>
   problem_submissions: Record<string, number>
@@ -172,6 +180,7 @@ export interface RollEvent {
   problem_id: number
   team_id: number
   team_name: string
+  team_avatar: string
   rank_before: number
   rank_after: number
   standings: ACMStanding[]

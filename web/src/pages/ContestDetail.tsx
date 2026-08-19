@@ -11,6 +11,7 @@ import {
   registerContest,
   removeContestProblem,
   submitToContest,
+  uploadContestAvatar,
 } from '../api'
 import CodeEditor from '../components/CodeEditor'
 import RollBoardPlayer from '../components/RollBoardPlayer'
@@ -21,6 +22,7 @@ import type {
   ContestProblem,
   ContestStandings,
   Language,
+  MyTeam,
   OIStanding,
 } from '../types'
 import {
@@ -31,6 +33,7 @@ import {
   phaseClass,
   phaseLabel,
   scoreModeLabel,
+  teamAvatarUrl,
 } from '../utils/contest'
 import { formatTime } from '../utils/format'
 
@@ -121,13 +124,13 @@ export default function ContestDetail() {
           <span className="field-label">反馈</span>
           <span>{contestFeedbackLabel(contest.feedback)}</span>
         </div>
-        {contest.mode !== 'acm' && (
+        {contest.mode !== 'ACM' && (
           <div className="meta-item">
             <span className="field-label">计分</span>
             <span>{scoreModeLabel(contest.score_mode)}</span>
           </div>
         )}
-        {contest.mode === 'acm' && (
+        {contest.mode === 'ACM' && (
           <>
             <div className="meta-item">
               <span className="field-label">罚时</span>
@@ -206,7 +209,15 @@ export default function ContestDetail() {
             请先 <Link to="/login">登录</Link> 后再报名参赛。
           </div>
         ) : data.is_registered ? (
-          <SubmitPanel contestId={contest.id} problems={problems} phase={phase} />
+          <>
+            <TeamPanel
+              contestId={contest.id}
+              teamId={user.id}
+              team={data.my_team ?? { team_name: user.username, avatar: '' }}
+              onChanged={reload}
+            />
+            <SubmitPanel contestId={contest.id} problems={problems} phase={phase} />
+          </>
         ) : (
           <RegisterPanel contestId={contest.id} defaultName={user.username} onRegistered={reload} />
         )}
@@ -215,7 +226,7 @@ export default function ContestDetail() {
       <section className="contest-section">
         <div className="section-header">
           <h2>排行榜</h2>
-          {isAdmin && contest.mode === 'acm' && (
+          {isAdmin && contest.mode === 'ACM' && (
             <button
               type="button"
               className="button button-primary"
@@ -233,6 +244,69 @@ export default function ContestDetail() {
   )
 }
 
+// ---------- 头像选择 ----------
+
+const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+
+function AvatarPicker({
+  preview,
+  onPick,
+}: {
+  preview: string
+  onPick: (file: File) => void
+}) {
+  const inputId = `avatar-input-${Math.random().toString(36).slice(2, 8)}`
+  return (
+    <div className="avatar-picker">
+      <label htmlFor={inputId} className="avatar-button" title="点击选择头像图片（JPG/PNG/GIF/WebP，≤2MB）">
+        {preview ? <img src={preview} alt="头像预览" className="avatar-img" /> : <span className="avatar-placeholder">+</span>}
+      </label>
+      <input
+        id={inputId}
+        type="file"
+        accept={AVATAR_TYPES.join(',')}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (!f) return
+          if (!AVATAR_TYPES.includes(f.type)) {
+            window.alert('头像仅支持 JPG/PNG/GIF/WebP 图片')
+            return
+          }
+          if (f.size > 2 * 1024 * 1024) {
+            window.alert('头像不能超过 2MB')
+            return
+          }
+          onPick(f)
+        }}
+      />
+      <div className="avatar-picker-text">
+        <div className="avatar-picker-title">队伍头像</div>
+        <div className="muted">点击选择图片，将显示在排行榜与滚榜上（可选）</div>
+      </div>
+    </div>
+  )
+}
+
+function TeamAvatar({
+  contestId,
+  teamId,
+  avatar,
+  size,
+}: {
+  contestId: number
+  teamId: number
+  avatar: string
+  size: 'sm' | 'lg'
+}) {
+  const url = teamAvatarUrl(contestId, teamId, avatar)
+  const cls = size === 'lg' ? 'avatar-lg' : 'avatar-sm'
+  if (!url) {
+    return <span className={`${cls} avatar-fallback`}>?</span>
+  }
+  return <img src={url} alt="" className={cls} />
+}
+
 // ---------- 报名 ----------
 
 function RegisterPanel({
@@ -245,6 +319,8 @@ function RegisterPanel({
   onRegistered: () => void
 }) {
   const [teamName, setTeamName] = useState(defaultName)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -258,6 +334,14 @@ function RegisterPanel({
     setError('')
     try {
       await registerContest(contestId, teamName.trim())
+      if (avatarFile) {
+        try {
+          await uploadContestAvatar(contestId, avatarFile)
+        } catch {
+          // 头像失败不影响报名成功，仅提示
+          window.alert('报名成功，但头像上传失败，可在报名信息中重新上传')
+        }
+      }
       onRegistered()
     } catch (err) {
       setError(extractError(err))
@@ -269,6 +353,13 @@ function RegisterPanel({
   return (
     <div className="card">
       <form className="register-form" onSubmit={submit}>
+        <AvatarPicker
+          preview={preview}
+          onPick={(f) => {
+            setAvatarFile(f)
+            setPreview(URL.createObjectURL(f))
+          }}
+        />
         <div className="form-group">
           <label htmlFor="team-name">队伍名</label>
           <input
@@ -285,6 +376,56 @@ function RegisterPanel({
           {busy ? '报名中…' : '报名'}
         </button>
       </form>
+    </div>
+  )
+}
+
+// ---------- 我的报名信息 / 修改头像 ----------
+
+function TeamPanel({
+  contestId,
+  teamId,
+  team,
+  onChanged,
+}: {
+  contestId: number
+  teamId: number
+  team: MyTeam
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [preview, setPreview] = useState(teamAvatarUrl(contestId, teamId, team.avatar) ?? '')
+
+  return (
+    <div className="card team-panel">
+      <div className="team-panel-info">
+        <TeamAvatar contestId={contestId} teamId={teamId} avatar={team.avatar} size="lg" />
+        <div>
+          <div className="team-panel-name">{team.team_name}</div>
+          <div className="muted">已报名参赛</div>
+        </div>
+      </div>
+      <div className="team-panel-avatar">
+        <AvatarPicker
+          preview={preview}
+          onPick={async (f) => {
+            setBusy(true)
+            setError('')
+            setPreview(URL.createObjectURL(f))
+            try {
+              await uploadContestAvatar(contestId, f)
+              onChanged()
+            } catch (err) {
+              setError(extractError(err))
+            } finally {
+              setBusy(false)
+            }
+          }}
+        />
+        <span className="muted">{busy ? '上传中…' : '点击左侧圆框更换头像'}</span>
+      </div>
+      {error && <div className="error-message">{error}</div>}
     </div>
   )
 }
@@ -429,7 +570,7 @@ function StandingsPanel({ contestId, isAdmin }: { contestId: number; isAdmin: bo
   }
   if (!standings) return null
 
-  const isACM = standings.mode === 'acm'
+  const isACM = standings.mode === 'ACM'
   const frozen = Boolean(standings.freeze_at)
 
   return (
@@ -444,19 +585,30 @@ function StandingsPanel({ contestId, isAdmin }: { contestId: number; isAdmin: bo
         </div>
       )}
       {isACM ? (
-        <ACMTable standings={standings.standings as ACMStanding[]} problems={standings.problems} startTime={standings.contest.start_time} />
+        <ACMTable
+          contestId={contestId}
+          standings={standings.standings as ACMStanding[]}
+          problems={standings.problems}
+          startTime={standings.contest.start_time}
+        />
       ) : (
-        <OITable standings={standings.standings as OIStanding[]} problems={standings.problems} />
+        <OITable
+          contestId={contestId}
+          standings={standings.standings as OIStanding[]}
+          problems={standings.problems}
+        />
       )}
     </div>
   )
 }
 
 function ACMTable({
+  contestId,
   standings,
   problems,
   startTime,
 }: {
+  contestId: number
   standings: ACMStanding[]
   problems: ContestProblem[]
   startTime: string
@@ -488,7 +640,12 @@ function ACMTable({
             standings.map((s) => (
               <tr key={s.team_id}>
                 <td className="mono">{s.rank}</td>
-                <td>{s.team_name}</td>
+                <td>
+                  <span className="standings-team">
+                    <TeamAvatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
+                    <span>{s.team_name}</span>
+                  </span>
+                </td>
                 <td className="mono">{s.solved}</td>
                 <td className="mono">{s.penalty}</td>
                 {problems.map((p) => {
@@ -520,7 +677,15 @@ function ACMTable({
   )
 }
 
-function OITable({ standings, problems }: { standings: OIStanding[]; problems: ContestProblem[] }) {
+function OITable({
+  contestId,
+  standings,
+  problems,
+}: {
+  contestId: number
+  standings: OIStanding[]
+  problems: ContestProblem[]
+}) {
   return (
     <div className="standings-wrap">
       <table className="data-table standings-table">
@@ -547,7 +712,12 @@ function OITable({ standings, problems }: { standings: OIStanding[]; problems: C
             standings.map((s) => (
               <tr key={s.team_id}>
                 <td className="mono">{s.rank}</td>
-                <td>{s.team_name}</td>
+                <td>
+                  <span className="standings-team">
+                    <TeamAvatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
+                    <span>{s.team_name}</span>
+                  </span>
+                </td>
                 <td className="mono standings-total">{s.total_score}</td>
                 {problems.map((p) => {
                   const score = s.problem_scores[p.display_id]

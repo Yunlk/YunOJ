@@ -275,6 +275,13 @@ export async function registerContest(id: number | string, teamName: string) {
   return res.data
 }
 
+export async function uploadContestAvatar(id: number | string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<{ avatar: string }>(`/contests/${id}/avatar`, form)
+  return res.data
+}
+
 export async function submitToContest(
   id: number | string,
   problemId: number,

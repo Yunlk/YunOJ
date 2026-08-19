@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -210,6 +214,11 @@ func (a *API) handleGetContest(w http.ResponseWriter, r *http.Request) {
 		registered, _ := a.store.IsContestTeam(r.Context(), id, u.ID)
 		resp["is_registered"] = registered
 		resp["is_admin"] = u.Role == model.RoleAdmin
+		if registered {
+			if t, err := a.store.GetContestTeam(r.Context(), id, u.ID); err == nil {
+				resp["my_team"] = map[string]any{"team_name": t.TeamName, "avatar": t.Avatar}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -298,6 +307,113 @@ func (a *API) handleRegisterContest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// ---------- 队伍头像 ----------
+
+const maxAvatarBytes = 2 << 20 // 头像上限 2MB
+
+var avatarExtByType = map[string]string{
+	"image/jpeg": "jpg",
+	"image/png":  "png",
+	"image/gif":  "gif",
+	"image/webp": "webp",
+}
+
+// handleUploadContestAvatar 上传/更新本队头像（需已报名）。
+func (a *API) handleUploadContestAvatar(w http.ResponseWriter, r *http.Request) {
+	u, _ := userFromCtx(r.Context())
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	registered, err := a.store.IsContestTeam(r.Context(), cid, u.ID)
+	if err != nil || !registered {
+		writeError(w, http.StatusForbidden, "请先报名参加该比赛")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxAvatarBytes+1<<20)
+	if err := r.ParseMultipartForm(4 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "解析上传内容失败")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "缺少文件字段 file")
+		return
+	}
+	defer file.Close()
+	img, err := io.ReadAll(io.LimitReader(file, maxAvatarBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "读取文件失败")
+		return
+	}
+	if len(img) > maxAvatarBytes {
+		writeError(w, http.StatusBadRequest, "头像不能超过 2MB")
+		return
+	}
+	// 魔数校验：仅接受位图格式（拒绝 SVG 等可携带脚本的格式）
+	ct := http.DetectContentType(img)
+	ext, ok := avatarExtByType[ct]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "头像仅支持 JPG/PNG/GIF/WebP 图片")
+		return
+	}
+	// 时间戳文件名：重复上传不会命中旧缓存，旧文件随后删除
+	filename := fmt.Sprintf("avatars/c%d_t%d_%d.%s", cid, u.ID, time.Now().Unix(), ext)
+	if err := os.MkdirAll(filepath.Join(a.cfg.DataDir, "avatars"), 0o755); err != nil {
+		slogError(r, "创建头像目录", err)
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(a.cfg.DataDir, filename), img, 0o644); err != nil {
+		slogError(r, "保存头像", err)
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	if old, err := a.store.GetContestTeam(r.Context(), cid, u.ID); err == nil && old.Avatar != "" && old.Avatar != filename {
+		_ = os.Remove(filepath.Join(a.cfg.DataDir, old.Avatar))
+	}
+	if err := a.store.UpdateContestTeamAvatar(r.Context(), cid, u.ID, filename); err != nil {
+		slogError(r, "更新头像记录", err)
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"avatar": filename})
+}
+
+// handleServeContestAvatar 对外提供头像文件（排行榜/滚榜展示用，公开访问）。
+func (a *API) handleServeContestAvatar(w http.ResponseWriter, r *http.Request) {
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	tid, err := strconv.ParseInt(chi.URLParam(r, "team_id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的队伍 ID")
+		return
+	}
+	team, err := a.store.GetContestTeam(r.Context(), cid, tid)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "队伍不存在")
+		return
+	}
+	// 防路径穿越：必须是 avatars/ 下的单层纯文件名（路径统一使用正斜杠）
+	dir, base := path.Split(team.Avatar)
+	if team.Avatar == "" || dir != "avatars/" || base == "" || base == "." || base == ".." {
+		writeError(w, http.StatusNotFound, "该队伍未上传头像")
+		return
+	}
+	b, err := os.ReadFile(filepath.Join(a.cfg.DataDir, team.Avatar))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "头像文件不存在")
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(b))
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(b)
 }
 
 // ---------- 比赛内提交 ----------
@@ -393,18 +509,20 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 排行榜 ----------
 
-func (a *API) buildContestContext(ctx context.Context, c model.Contest) (contest.ContestContext, []contestProblemDTO, error) {
+func (a *API) buildContestContext(ctx context.Context, c model.Contest) (contest.ContestContext, []contestProblemDTO, map[int64]string, error) {
 	teams, err := a.store.ListContestTeams(ctx, c.ID)
 	if err != nil {
-		return contest.ContestContext{}, nil, err
+		return contest.ContestContext{}, nil, nil, err
 	}
 	teamMap := make(map[int64]string, len(teams))
+	avatarMap := make(map[int64]string, len(teams))
 	for _, t := range teams {
 		teamMap[t.TeamID] = t.TeamName
+		avatarMap[t.TeamID] = t.Avatar
 	}
 	problems, err := a.contestProblemsDTO(ctx, c.ID)
 	if err != nil {
-		return contest.ContestContext{}, nil, err
+		return contest.ContestContext{}, nil, nil, err
 	}
 	ids := make([]int64, 0, len(problems))
 	for _, p := range problems {
@@ -416,7 +534,7 @@ func (a *API) buildContestContext(ctx context.Context, c model.Contest) (contest
 		Problems:       ids,
 		Teams:          teamMap,
 		RankKeys:       c.RankKeys,
-	}, problems, nil
+	}, problems, avatarMap, nil
 }
 
 // freezeAt 返回封榜时间；无封榜返回零值。
@@ -453,7 +571,7 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	cctx, problems, err := a.buildContestContext(ctx, c)
+	cctx, problems, avatars, err := a.buildContestContext(ctx, c)
 	if err != nil {
 		slogError(r, "排行榜上下文", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
@@ -481,7 +599,7 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 			fb = fa
 		}
 		standings, frozenSubs := contest.BuildACMStandings(cctx, subs, fb)
-		resp["standings"] = acmStandingsDTO(standings, problems)
+		resp["standings"] = acmStandingsDTO(standings, problems, avatars)
 		if frozenActive {
 			resp["freeze_at"] = fa
 			resp["frozen_submissions"] = len(frozenSubs)
@@ -499,7 +617,7 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		}
 		modeA := c.Mode == model.ContestModeOI
 		standings := contest.BuildOIStandings(cctx, subs, scores, modeA)
-		resp["standings"] = oiStandingsDTO(standings, problems)
+		resp["standings"] = oiStandingsDTO(standings, problems, avatars)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -527,7 +645,7 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	cctx, problems, err := a.buildContestContext(ctx, c)
+	cctx, problems, avatars, err := a.buildContestContext(ctx, c)
 	if err != nil {
 		slogError(r, "滚榜上下文", err)
 		writeError(w, http.StatusInternalServerError, "查询失败")
@@ -547,6 +665,7 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 		ProblemID    int64            `json:"problem_id"`
 		TeamID       int64            `json:"team_id"`
 		TeamName     string           `json:"team_name"`
+		TeamAvatar   string           `json:"team_avatar"`
 		RankBefore   int              `json:"rank_before"`
 		RankAfter    int              `json:"rank_after"`
 		Standings    []acmStandingDTO `json:"standings"`
@@ -558,15 +677,16 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 			ProblemID:    e.Submission.ProblemID,
 			TeamID:       e.TeamID,
 			TeamName:     e.TeamName,
+			TeamAvatar:   avatars[e.TeamID],
 			RankBefore:   e.RankBefore,
 			RankAfter:    e.RankAfter,
-			Standings:    acmStandingsDTO(e.Standings, problems),
+			Standings:    acmStandingsDTO(e.Standings, problems, avatars),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"contest": c, "problems": problems,
 		"freeze_at": freezeAt(c), "events": dtos,
-		"initial_standings": acmStandingsDTO(base, problems),
+		"initial_standings": acmStandingsDTO(base, problems, avatars),
 	})
 }
 
@@ -582,13 +702,14 @@ type acmStandingDTO struct {
 	Rank     int                      `json:"rank"`
 	TeamID   int64                    `json:"team_id"`
 	TeamName string                   `json:"team_name"`
+	Avatar   string                   `json:"avatar"`
 	Solved   int                      `json:"solved"`
 	Penalty  int                      `json:"penalty"`
 	LastAC   string                   `json:"last_ac,omitempty"`
 	Problems map[string]acmProblemDTO `json:"problems"`
 }
 
-func acmStandingsDTO(standings []contest.ACMStanding, problems []contestProblemDTO) []acmStandingDTO {
+func acmStandingsDTO(standings []contest.ACMStanding, problems []contestProblemDTO, avatars map[int64]string) []acmStandingDTO {
 	display := make(map[int64]string, len(problems))
 	for _, p := range problems {
 		display[p.ProblemID] = p.DisplayID
@@ -596,7 +717,7 @@ func acmStandingsDTO(standings []contest.ACMStanding, problems []contestProblemD
 	dtos := make([]acmStandingDTO, 0, len(standings))
 	for _, s := range standings {
 		dto := acmStandingDTO{
-			Rank: s.Rank, TeamID: s.TeamID, TeamName: s.TeamName,
+			Rank: s.Rank, TeamID: s.TeamID, TeamName: s.TeamName, Avatar: avatars[s.TeamID],
 			Solved: s.Solved, Penalty: s.Penalty, Problems: map[string]acmProblemDTO{},
 		}
 		if !s.LastAC.IsZero() {
@@ -622,12 +743,13 @@ type oiStandingDTO struct {
 	Rank               int            `json:"rank"`
 	TeamID             int64          `json:"team_id"`
 	TeamName           string         `json:"team_name"`
+	Avatar             string         `json:"avatar"`
 	TotalScore         int            `json:"total_score"`
 	ProblemScores      map[string]int `json:"problem_scores"`
 	ProblemSubmissions map[string]int `json:"problem_submissions"`
 }
 
-func oiStandingsDTO(standings []contest.OIStanding, problems []contestProblemDTO) []oiStandingDTO {
+func oiStandingsDTO(standings []contest.OIStanding, problems []contestProblemDTO, avatars map[int64]string) []oiStandingDTO {
 	display := make(map[int64]string, len(problems))
 	for _, p := range problems {
 		display[p.ProblemID] = p.DisplayID
@@ -635,7 +757,7 @@ func oiStandingsDTO(standings []contest.OIStanding, problems []contestProblemDTO
 	dtos := make([]oiStandingDTO, 0, len(standings))
 	for _, s := range standings {
 		dto := oiStandingDTO{
-			Rank: s.Rank, TeamID: s.TeamID, TeamName: s.TeamName,
+			Rank: s.Rank, TeamID: s.TeamID, TeamName: s.TeamName, Avatar: avatars[s.TeamID],
 			TotalScore:         s.TotalScore,
 			ProblemScores:      map[string]int{},
 			ProblemSubmissions: map[string]int{},

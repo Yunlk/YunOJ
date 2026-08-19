@@ -1858,3 +1858,250 @@ textarea:focus {
 .rank-down {
   color: var(--red);
 }
+
+/* ---------- 比赛表单：模板 / 封榜 / 高级选项 ---------- */
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 14px;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.template-card:hover {
+  border-color: var(--primary);
+}
+
+.template-card-active {
+  border-color: var(--primary);
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px var(--primary) inset;
+}
+
+.template-card-label {
+  font-weight: 600;
+}
+
+.template-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.freeze-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 12px 14px;
+  margin-bottom: 18px;
+}
+
+.freeze-block .checkbox-label {
+  padding-bottom: 8px;
+}
+
+.freeze-block .form-group {
+  max-width: 220px;
+  margin: 0 0 8px;
+}
+
+.field-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
+
+.advanced-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  background: var(--bg);
+}
+
+.advanced-section summary {
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.advanced-section .form-group {
+  margin-top: 12px;
+}
+
+/* ---------- 头像 ---------- */
+
+.avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 1px dashed var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+
+.avatar-button:hover {
+  border-color: var(--primary);
+}
+
+.avatar-picker-text {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.avatar-picker-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-placeholder {
+  color: var(--text-secondary);
+  font-size: 20px;
+}
+
+.avatar-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.avatar-lg {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: inline-block;
+}
+
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  vertical-align: middle;
+}
+
+.avatar-fallback.avatar-lg {
+  font-size: 20px;
+}
+
+.standings-team {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.team-panel-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.team-panel-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.team-panel-avatar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---------- 滚榜事件横幅 ---------- */
+
+.rollboard-event {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.rollboard-event-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------- 错误边界 ---------- */
+
+.error-boundary {
+  max-width: 640px;
+  margin: 60px auto;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.error-boundary h2 {
+  margin: 0 0 8px;
+}
+
+.error-boundary-detail {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 12px 0;
+}
+
+.error-boundary .button + .button {
+  margin-left: 8px;
+}

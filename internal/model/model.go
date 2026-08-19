@@ -158,6 +158,7 @@ type ContestTeam struct {
 	ContestID int64  `json:"contest_id"`
 	TeamID    int64  `json:"team_id"`
 	TeamName  string `json:"team_name"`
+	Avatar    string `json:"avatar"` // data 目录下的相对路径，空 = 未上传
 }
 
 // IsFinal 判断状态是否为最终判定（非 pending/running）。

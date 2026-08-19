@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { extractError, getContestRollBoard } from '../api'
 import type { ACMStanding, RollBoard } from '../types'
 import { formatTime } from '../utils/format'
-import { minutesSinceStart } from '../utils/contest'
+import { minutesSinceStart, teamAvatarUrl } from '../utils/contest'
 
 interface RollBoardPlayerProps {
   contestId: number
@@ -10,6 +10,13 @@ interface RollBoardPlayerProps {
 }
 
 const PLAY_INTERVAL_MS = 1500
+
+function Avatar({ contestId, teamId, avatar, size }: { contestId: number; teamId: number; avatar: string; size: 'sm' | 'lg' }) {
+  const url = teamAvatarUrl(contestId, teamId, avatar)
+  const cls = size === 'lg' ? 'avatar-lg' : 'avatar-sm'
+  if (!url) return <span className={`${cls} avatar-fallback`}>?</span>
+  return <img src={url} alt="" className={cls} />
+}
 
 export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerProps) {
   const [board, setBoard] = useState<RollBoard | null>(null)
@@ -144,8 +151,11 @@ export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerP
 
         {event && (
           <div className="rollboard-event">
-            <span className="rollboard-event-team">{event.team_name}</span>
-            <span className="muted">提交 #{event.submission_id}</span>
+            <Avatar contestId={contestId} teamId={event.team_id} avatar={event.team_avatar} size="lg" />
+            <div className="rollboard-event-main">
+              <span className="rollboard-event-team">{event.team_name}</span>
+              <span className="muted">提交 #{event.submission_id}</span>
+            </div>
             <span className="rollboard-event-rank">
               第 {event.rank_before} 名 → 第 {event.rank_after} 名
             </span>
@@ -179,7 +189,12 @@ export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerP
                       {active && movedDown && <span className="rank-arrow rank-down">▼</span>}
                       {s.rank}
                     </td>
-                    <td className={active ? 'rollboard-active-team' : ''}>{s.team_name}</td>
+                    <td className={active ? 'rollboard-active-team' : ''}>
+                      <span className="standings-team">
+                        <Avatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
+                        <span>{s.team_name}</span>
+                      </span>
+                    </td>
                     <td className="mono">{s.solved}</td>
                     <td className="mono">{s.penalty}</td>
                     {board.problems.map((p) => {

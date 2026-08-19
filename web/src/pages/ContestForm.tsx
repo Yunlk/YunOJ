@@ -2,8 +2,24 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { createContest, extractError, getContest, updateContest } from '../api'
-import type { ContestInput } from '../types'
+import type { ContestInput, ContestMode } from '../types'
 import { fromLocalInput, toLocalInput } from '../utils/contest'
+
+/** 赛制模板：三个预置 + 自定义并列 */
+type Template = 'acm' | 'oi' | 'ioi' | 'custom'
+
+const TEMPLATES: { key: Template; label: string; desc: string }[] = [
+  { key: 'acm', label: 'ACM', desc: '按通过题数排名，罚时 = 分钟 + 错误次数 × 罚时' },
+  { key: 'oi', label: 'OI', desc: '按总分排名，每道题取最后一次提交得分' },
+  { key: 'ioi', label: 'IOI', desc: '按总分排名，每道题取各次提交最优得分' },
+  { key: 'custom', label: '自定义', desc: '自由组合评分引擎与全部参数' },
+]
+
+const ENGINES: { key: ContestMode; label: string; desc: string }[] = [
+  { key: 'ACM', label: 'ACM 罚时', desc: '通过题数 + 罚时排名' },
+  { key: 'OI', label: 'OI 总分（取最后一次）', desc: '总分排名，每题取最后一次提交' },
+  { key: 'IOI', label: 'IOI 总分（取最优）', desc: '总分排名，每题取最优一次提交' },
+]
 
 export default function ContestForm() {
   const { id } = useParams()
@@ -12,11 +28,13 @@ export default function ContestForm() {
   const contestId = Number(id)
 
   const [title, setTitle] = useState('')
-  const [mode, setMode] = useState<'acm' | 'oi' | 'ioi'>('acm')
-  const [feedback, setFeedback] = useState<'visible' | 'blind'>('visible')
-  const [scoreMode, setScoreMode] = useState<'last' | 'best'>('last')
+  const [template, setTemplate] = useState<Template>('acm')
+  const [engine, setEngine] = useState<ContestMode>('ACM')
+  const [feedback, setFeedback] = useState<'realtime' | 'blind'>('realtime')
+  const [scoreMode, setScoreMode] = useState<'all_or_nothing' | 'partial'>('all_or_nothing')
   const [penaltyMinutes, setPenaltyMinutes] = useState('20')
-  const [freezeMinutes, setFreezeMinutes] = useState('0')
+  const [freezeEnabled, setFreezeEnabled] = useState(false)
+  const [freezeMinutes, setFreezeMinutes] = useState('60')
   const [rankKeys, setRankKeys] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
@@ -32,11 +50,13 @@ export default function ContestForm() {
         if (cancelled) return
         const c = data.contest
         setTitle(c.title)
-        setMode(c.mode)
+        setEngine(c.mode)
+        setTemplate(c.mode.toLowerCase() as Template)
         setFeedback(c.feedback)
         setScoreMode(c.score_mode)
         setPenaltyMinutes(String(c.penalty_minutes))
-        setFreezeMinutes(String(c.freeze_duration_minutes))
+        setFreezeEnabled(c.freeze_duration_minutes > 0)
+        setFreezeMinutes(String(c.freeze_duration_minutes > 0 ? c.freeze_duration_minutes : 60))
         setRankKeys(c.rank_keys.join(', '))
         setStartTime(toLocalInput(c.start_time))
         setEndTime(toLocalInput(c.end_time))
@@ -51,6 +71,34 @@ export default function ContestForm() {
       cancelled = true
     }
   }, [isEdit, contestId])
+
+  const applyTemplate = (t: Template) => {
+    setTemplate(t)
+    switch (t) {
+      case 'acm':
+        setEngine('ACM')
+        setScoreMode('all_or_nothing')
+        setPenaltyMinutes((p) => p || '20')
+        break
+      case 'oi':
+        setEngine('OI')
+        setScoreMode('partial')
+        setFreezeEnabled(false)
+        break
+      case 'ioi':
+        setEngine('IOI')
+        setScoreMode('partial')
+        setFreezeEnabled(false)
+        break
+      case 'custom':
+        // 保留当前所有参数，仅切换为手动配置
+        break
+    }
+  }
+
+  const isACMEngine = engine === 'ACM'
+  const freezeMinutesNum = Math.max(0, Number(freezeMinutes) || 0)
+  const effectiveFreeze = freezeEnabled && isACMEngine ? freezeMinutesNum : 0
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -68,13 +116,17 @@ export default function ContestForm() {
       setError('结束时间必须晚于开始时间')
       return
     }
+    if (freezeEnabled && freezeMinutesNum <= 0) {
+      setError('封榜时长需大于 0 分钟')
+      return
+    }
     const payload: ContestInput = {
       title: title.trim(),
-      mode,
+      mode: engine,
       feedback,
       score_mode: scoreMode,
       penalty_minutes: Math.max(0, Number(penaltyMinutes) || 0),
-      freeze_duration_minutes: Math.max(0, Number(freezeMinutes) || 0),
+      freeze_duration_minutes: effectiveFreeze,
       rank_keys: rankKeys
         .split(/[,，\s]+/)
         .map((s) => s.trim())
@@ -116,15 +168,42 @@ export default function ContestForm() {
           />
         </div>
 
-        <div className="form-row">
-          <div className="form-group">
-            <label htmlFor="contest-mode">赛制</label>
-            <select id="contest-mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-              <option value="acm">ACM（按通过数排名，罚时=分钟+错误次数×罚时）</option>
-              <option value="oi">OI（按总分排名，每道题取最后一次提交得分）</option>
-              <option value="ioi">IOI（按总分排名，每道题取各次提交最优得分）</option>
-            </select>
+        <div className="form-group">
+          <label>赛制模板</label>
+          <div className="template-grid">
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                className={`template-card ${template === t.key ? 'template-card-active' : ''}`}
+                onClick={() => applyTemplate(t.key)}
+              >
+                <span className="template-card-label">{t.label}</span>
+                <span className="template-card-desc">{t.desc}</span>
+              </button>
+            ))}
           </div>
+        </div>
+
+        {template === 'custom' && (
+          <div className="form-group">
+            <label htmlFor="contest-engine">评分引擎</label>
+            <select
+              id="contest-engine"
+              value={engine}
+              onChange={(e) => setEngine(e.target.value as ContestMode)}
+            >
+              {ENGINES.map((en) => (
+                <option key={en.key} value={en.key}>
+                  {en.label}
+                </option>
+              ))}
+            </select>
+            <p className="field-hint">自定义模式需要选择一个底层评分引擎（排行榜按该引擎计算）。</p>
+          </div>
+        )}
+
+        <div className="form-row">
           <div className="form-group">
             <label htmlFor="contest-feedback">反馈方式</label>
             <select
@@ -132,50 +211,50 @@ export default function ContestForm() {
               value={feedback}
               onChange={(e) => setFeedback(e.target.value as typeof feedback)}
             >
-              <option value="visible">实时（提交后立即看到评测结果）</option>
+              <option value="realtime">实时（提交后立即看到评测结果与排行榜）</option>
               <option value="blind">盲评（比赛进行中隐藏评测结果与排行榜）</option>
             </select>
           </div>
-        </div>
-
-        <div className="form-row">
-          {mode !== 'acm' && (
+          {isACMEngine && (
             <div className="form-group">
-              <label htmlFor="contest-score-mode">OI 计分</label>
-              <select
-                id="contest-score-mode"
-                value={scoreMode}
-                onChange={(e) => setScoreMode(e.target.value as typeof scoreMode)}
-              >
-                <option value="last">取最后一次提交</option>
-                <option value="best">取最优一次提交</option>
-              </select>
+              <label htmlFor="contest-penalty">罚时（分钟/次错误提交）</label>
+              <input
+                id="contest-penalty"
+                type="number"
+                min={0}
+                value={penaltyMinutes}
+                onChange={(e) => setPenaltyMinutes(e.target.value)}
+              />
             </div>
           )}
-          {mode === 'acm' && (
-            <>
-              <div className="form-group">
-                <label htmlFor="contest-penalty">罚时（分钟/次错误提交）</label>
-                <input
-                  id="contest-penalty"
-                  type="number"
-                  min={0}
-                  value={penaltyMinutes}
-                  onChange={(e) => setPenaltyMinutes(e.target.value)}
-                />
-              </div>
-              <div className="form-group">
-                <label htmlFor="contest-freeze">封榜时长（分钟，0=不封榜）</label>
-                <input
-                  id="contest-freeze"
-                  type="number"
-                  min={0}
-                  value={freezeMinutes}
-                  onChange={(e) => setFreezeMinutes(e.target.value)}
-                />
-              </div>
-            </>
-          )}
+        </div>
+
+        <div className="freeze-block">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={freezeEnabled}
+              disabled={!isACMEngine}
+              onChange={(e) => setFreezeEnabled(e.target.checked)}
+            />
+            <span>启用封榜</span>
+          </label>
+          <div className="form-group">
+            <label htmlFor="contest-freeze">封榜时长（分钟）</label>
+            <input
+              id="contest-freeze"
+              type="number"
+              min={1}
+              value={freezeMinutes}
+              disabled={!freezeEnabled || !isACMEngine}
+              onChange={(e) => setFreezeMinutes(e.target.value)}
+            />
+          </div>
+          <p className="field-hint">
+            {isACMEngine
+              ? '封榜后（比赛最后 N 分钟）新提交不再更新排行榜，比赛结束后可滚榜解冻揭晓。'
+              : '封榜仅 ACM 赛制支持（OI/IOI 为按分数排名，无封榜概念）。'}
+          </p>
         </div>
 
         <div className="form-row">
@@ -199,16 +278,36 @@ export default function ContestForm() {
           </div>
         </div>
 
-        <div className="form-group">
-          <label htmlFor="contest-rank-keys">排名附加关键字</label>
-          <input
-            id="contest-rank-keys"
-            type="text"
-            value={rankKeys}
-            onChange={(e) => setRankKeys(e.target.value)}
-            placeholder="队伍名包含这些关键词的排在最前，逗号分隔（可留空）"
-          />
-        </div>
+        <details className="advanced-section">
+          <summary>高级选项</summary>
+          <div className="form-group">
+            <label htmlFor="contest-rank-keys">排名附加关键字</label>
+            <input
+              id="contest-rank-keys"
+              type="text"
+              value={rankKeys}
+              onChange={(e) => setRankKeys(e.target.value)}
+              placeholder="如：打星, 出题人"
+            />
+            <p className="field-hint">
+              队伍名包含这些关键词的队伍会<b>固定排在最前面</b>（如"打星队"——不计入正式排名的选手、
+              出题人自测队等），普通比赛留空即可。多个关键词用逗号分隔。
+            </p>
+          </div>
+          {template === 'custom' && (
+            <div className="form-group">
+              <label htmlFor="contest-score-mode">计分粒度</label>
+              <select
+                id="contest-score-mode"
+                value={scoreMode}
+                onChange={(e) => setScoreMode(e.target.value as typeof scoreMode)}
+              >
+                <option value="all_or_nothing">整题通过才计分</option>
+                <option value="partial">按测试点部分计分</option>
+              </select>
+            </div>
+          )}
+        </details>
 
         {error && <div className="error-message">{error}</div>}
 

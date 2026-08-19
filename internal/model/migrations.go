@@ -123,6 +123,14 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_submissions_contest ON submissions (contest_id, id)`,
 		},
 	},
+	{
+		version: 4,
+		name:    "contest_team_avatar",
+		stmts: []string{
+			// 队伍头像：data 目录下的相对路径（如 avatars/c1_t1_1710000000.png），空 = 未上传
+			`ALTER TABLE contest_teams ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

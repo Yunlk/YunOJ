@@ -140,20 +140,47 @@ func (s *Store) RemoveContestProblem(ctx context.Context, contestID, problemID i
 
 // ---------- 比赛队伍 ----------
 
-// AddContestTeam 报名/更新参赛队伍。
+// AddContestTeam 报名/更新参赛队伍（重报名保留已有头像）。
 func (s *Store) AddContestTeam(ctx context.Context, t model.ContestTeam) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO contest_teams (contest_id, team_id, team_name)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO contest_teams (contest_id, team_id, team_name, avatar)
+		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (contest_id, team_id) DO UPDATE SET team_name = $3`,
-		t.ContestID, t.TeamID, t.TeamName)
+		t.ContestID, t.TeamID, t.TeamName, t.Avatar)
 	return err
+}
+
+// GetContestTeam 查询单个队伍报名信息。
+func (s *Store) GetContestTeam(ctx context.Context, contestID, teamID int64) (model.ContestTeam, error) {
+	var t model.ContestTeam
+	err := s.pool.QueryRow(ctx,
+		`SELECT contest_id, team_id, team_name, avatar FROM contest_teams
+		 WHERE contest_id = $1 AND team_id = $2`, contestID, teamID,
+	).Scan(&t.ContestID, &t.TeamID, &t.TeamName, &t.Avatar)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ContestTeam{}, ErrNotFound
+	}
+	return t, err
+}
+
+// UpdateContestTeamAvatar 更新队伍头像路径。
+func (s *Store) UpdateContestTeamAvatar(ctx context.Context, contestID, teamID int64, avatar string) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE contest_teams SET avatar = $3 WHERE contest_id = $1 AND team_id = $2`,
+		contestID, teamID, avatar)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ListContestTeams 列出参赛队伍。
 func (s *Store) ListContestTeams(ctx context.Context, contestID int64) ([]model.ContestTeam, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT contest_id, team_id, team_name FROM contest_teams
+		`SELECT contest_id, team_id, team_name, avatar FROM contest_teams
 		 WHERE contest_id = $1 ORDER BY team_id`, contestID)
 	if err != nil {
 		return nil, err
@@ -162,7 +189,7 @@ func (s *Store) ListContestTeams(ctx context.Context, contestID int64) ([]model.
 	items := []model.ContestTeam{}
 	for rows.Next() {
 		var t model.ContestTeam
-		if err := rows.Scan(&t.ContestID, &t.TeamID, &t.TeamName); err != nil {
+		if err := rows.Scan(&t.ContestID, &t.TeamID, &t.TeamName, &t.Avatar); err != nil {
 			return nil, err
 		}
 		items = append(items, t)

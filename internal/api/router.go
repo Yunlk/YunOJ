@@ -47,10 +47,14 @@ func (a *API) Router() http.Handler {
 		r.Get("/api/submissions/{id}", a.handleGetSubmission)
 	})
 
-	// 比赛公开接口（详情/排行榜）
-	r.Get("/api/contests", a.handleListContests)
-	r.Get("/api/contests/{id}", a.handleGetContest)
-	r.Get("/api/contests/{id}/standings", a.handleContestStandings)
+	// 比赛接口：匿名可访问，携带有效令牌时返回报名状态/管理员标记
+	r.Group(func(r chi.Router) {
+		r.Use(a.optionalAuth)
+		r.Get("/api/contests", a.handleListContests)
+		r.Get("/api/contests/{id}", a.handleGetContest)
+		r.Get("/api/contests/{id}/standings", a.handleContestStandings)
+		r.Get("/api/contests/{id}/teams/{team_id}/avatar", a.handleServeContestAvatar)
+	})
 
 	// 登录用户接口
 	r.Group(func(r chi.Router) {
@@ -60,6 +64,7 @@ func (a *API) Router() http.Handler {
 		r.Post("/api/problems/{id}/test", a.handleRunTest)
 		r.Post("/api/problems/{id}/test-samples", a.handleRunSamples)
 		r.Post("/api/contests/{id}/register", a.handleRegisterContest)
+		r.Post("/api/contests/{id}/avatar", a.handleUploadContestAvatar)
 		r.Post("/api/contests/{id}/submit", a.handleContestSubmit)
 	})
 

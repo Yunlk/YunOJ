@@ -3,6 +3,8 @@ import type {
   Contest,
   ContestDetail,
   ContestInput,
+  ContestOverview,
+  ContestProblemView,
   ContestStandings,
   Language,
   Page,
@@ -12,7 +14,9 @@ import type {
   Sample,
   SubmissionDetail,
   SubmissionListItem,
+  TestcasesResp,
   User,
+  ZipPreview,
 } from './types'
 
 export const TOKEN_KEY = 'yunoj_token'
@@ -86,6 +90,10 @@ export async function getProblems(params: {
   page: number
   size: number
   keyword?: string
+  difficulty?: number
+  tag?: string
+  type?: string
+  status?: string
 }) {
   const res = await api.get<Page<ProblemListItem>>('/problems', { params })
   return res.data
@@ -107,6 +115,101 @@ export interface ProblemInput {
   memory_limit_kb: number
   difficulty: number
   tags: string[]
+  type: string
+  spj_source: string
+  interactor_source: string
+  testcase_scores: number[]
+  submission_limit: number
+  status: string
+}
+
+// ---- 题目管理后台 ----
+
+export async function copyProblem(id: number | string) {
+  const res = await api.post<ProblemDetail>(`/problems/${id}/copy`)
+  return res.data
+}
+
+export async function updateProblemStatus(id: number | string, status: string) {
+  const res = await api.patch<{ id: number; status: string }>(`/problems/${id}/status`, { status })
+  return res.data
+}
+
+export async function batchProblems(ids: number[], action: 'publish' | 'disable' | 'delete') {
+  const res = await api.post<{ results: { id: number; ok: boolean; error?: string }[] }>(
+    '/problems/batch',
+    { ids, action },
+  )
+  return res.data
+}
+
+export async function getProblemUsage(id: number | string) {
+  const res = await api.get<{ contests: { id: number; title: string }[]; submissions: number }>(
+    `/problems/${id}/usage`,
+  )
+  return res.data
+}
+
+// ---- 测试点管理 ----
+
+export async function getTestcases(id: number | string) {
+  const res = await api.get<TestcasesResp>(`/problems/${id}/testcases`)
+  return res.data
+}
+
+export async function previewTestsZip(id: number | string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<ZipPreview>(`/problems/${id}/testcases/preview`, form)
+  return res.data
+}
+
+export async function importTestsZip(
+  id: number | string,
+  file: File,
+  mode: 'replace' | 'append',
+  scores: number[],
+) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('mode', mode)
+  form.append('scores', JSON.stringify(scores))
+  const res = await api.post<{ count: number; ordinals?: number[]; start_ordinal?: number }>(
+    `/problems/${id}/testcases/import`,
+    form,
+  )
+  return res.data
+}
+
+export async function addTestcase(
+  id: number | string,
+  inFile: File,
+  outFile: File,
+  score: number,
+) {
+  const form = new FormData()
+  form.append('in', inFile)
+  form.append('out', outFile)
+  form.append('score', String(score))
+  const res = await api.post<{ ordinal: number; score: number }>(`/problems/${id}/testcases`, form)
+  return res.data
+}
+
+export async function updateTestcase(id: number | string, ordinal: number, score: number) {
+  const res = await api.put<{ ordinal: number; score: number }>(
+    `/problems/${id}/testcases/${ordinal}`,
+    { score },
+  )
+  return res.data
+}
+
+export async function deleteTestcase(id: number | string, ordinal: number) {
+  await api.delete(`/problems/${id}/testcases/${ordinal}`)
+}
+
+export async function reorderTestcases(id: number | string, ordinals: number[]) {
+  const res = await api.put<{ ordinals: number[] }>(`/problems/${id}/testcases/order`, { ordinals })
+  return res.data
 }
 
 export async function createProblem(data: ProblemInput) {
@@ -306,4 +409,49 @@ export async function getContestStandings(id: number | string) {
 export async function getContestRollBoard(id: number | string) {
   const res = await api.get<RollBoard>(`/contests/${id}/rollboard`)
   return res.data
+}
+
+// ---- 比赛总览 / 题目上下文 / 我的提交 ----
+
+export async function getContestOverview(id: number | string) {
+  const res = await api.get<ContestOverview>(`/contests/${id}/overview`)
+  return res.data
+}
+
+export async function getContestProblem(id: number | string, problemId: number | string) {
+  const res = await api.get<ContestProblemView>(`/contests/${id}/problems/${problemId}`)
+  return res.data
+}
+
+export async function getContestMySubmissions(params: {
+  id: number | string
+  page: number
+  size: number
+  problem_id?: number
+  status?: string
+}) {
+  const { id, ...rest } = params
+  const res = await api.get<Page<SubmissionListItem>>(`/contests/${id}/submissions`, { params: rest })
+  return res.data
+}
+
+export async function updateContestProblem(
+  id: number | string,
+  problemId: number,
+  data: { display_id: string; score: number | null; submission_limit: number | null },
+) {
+  const res = await api.put<{ ok: boolean }>(`/contests/${id}/problems/${problemId}`, data)
+  return res.data
+}
+
+export async function reorderContestProblems(id: number | string, problemIds: number[]) {
+  const res = await api.put<{ ok: boolean }>(`/contests/${id}/problems/order`, {
+    problem_ids: problemIds,
+  })
+  return res.data
+}
+
+export async function getServerTime(): Promise<string> {
+  const res = await api.get<{ server_time: string }>('/health')
+  return res.data.server_time
 }

@@ -16,6 +16,8 @@ const STATUS_MAP: Record<string, StatusInfo> = {
   runtime_error: { label: '运行时错误', color: 'red' },
   compile_error: { label: '编译错误', color: 'yellow' },
   system_error: { label: '系统错误', color: 'red' },
+  // 盲评进行中的脱敏状态
+  hidden: { label: '盲评中', color: 'gray' },
 }
 
 export function getStatusInfo(status: string): StatusInfo {

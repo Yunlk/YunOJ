@@ -6,8 +6,12 @@ import ProtectedRoute from './components/ProtectedRoute'
 import ContestDetail from './pages/ContestDetail'
 import ContestForm from './pages/ContestForm'
 import ContestList from './pages/ContestList'
+import ContestMySubmissions from './pages/ContestMySubmissions'
+import ContestProblemPage from './pages/ContestProblemPage'
+import ContestStandingsPage from './pages/ContestStandingsPage'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
+import ProblemAdmin from './pages/ProblemAdmin'
 import ProblemDetail from './pages/ProblemDetail'
 import ProblemForm from './pages/ProblemForm'
 import ProblemList from './pages/ProblemList'
@@ -15,6 +19,7 @@ import Register from './pages/Register'
 import Status from './pages/Status'
 import SubmissionDetail from './pages/SubmissionDetail'
 import SubmitFile from './pages/SubmitFile'
+import TestcaseAdmin from './pages/TestcaseAdmin'
 
 export default function App() {
   return (
@@ -31,6 +36,11 @@ export default function App() {
             <Route path="/contest/new" element={<AdminRoute><ContestForm /></AdminRoute>} />
             <Route path="/contest/:id" element={<ContestDetail />} />
             <Route path="/contest/:id/edit" element={<AdminRoute><ContestForm /></AdminRoute>} />
+            <Route path="/contest/:id/problem/:pid" element={<ProtectedRoute><ContestProblemPage /></ProtectedRoute>} />
+            <Route path="/contest/:id/submissions" element={<ProtectedRoute><ContestMySubmissions /></ProtectedRoute>} />
+            <Route path="/contest/:id/standings" element={<ContestStandingsPage />} />
+            <Route path="/admin/problems" element={<AdminRoute><ProblemAdmin /></AdminRoute>} />
+            <Route path="/admin/problems/:id/tests" element={<AdminRoute><TestcaseAdmin /></AdminRoute>} />
             <Route path="/problem/new" element={<AdminRoute><ProblemForm /></AdminRoute>} />
             <Route path="/problem/:id" element={<ProblemDetail />} />
             <Route path="/problem/:id/edit" element={<AdminRoute><ProblemForm /></AdminRoute>} />

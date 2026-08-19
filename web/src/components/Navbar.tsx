@@ -24,7 +24,7 @@ export default function Navbar() {
           <Link to="/contests">比赛</Link>
           {user?.role === 'admin' && (
             <>
-              <Link to="/problem/new">新建题目</Link>
+              <Link to="/admin/problems">题目管理</Link>
               <Link to="/contest/new">新建比赛</Link>
             </>
           )}

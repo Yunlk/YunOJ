@@ -22,7 +22,14 @@ export interface ProblemListItem {
   submission_count: number
   created_at: string
   updated_at: string
+  // 管理员列表专属
+  type?: ProblemType
+  status?: ProblemStatus
+  testcase_count?: number
 }
+
+export type ProblemStatus = 'draft' | 'published' | 'disabled'
+export type ProblemType = 'standard' | 'spj' | 'interactive' | 'output_only'
 
 export interface Sample {
   input: string
@@ -38,6 +45,41 @@ export interface ProblemDetail extends ProblemListItem {
   samples: Sample[]
   time_limit_ms: number
   memory_limit_kb: number
+  type: ProblemType
+  testcase_scores: number[]
+  submission_limit: number
+  status: ProblemStatus
+  // 管理员专属
+  spj_source?: string
+  interactor_source?: string
+  testcase_count?: number
+}
+
+export interface TestcaseItem {
+  ordinal: number
+  score: number
+  size_bytes: number
+  input_sha: string
+  output_sha: string
+  input_exists: boolean
+  output_exists: boolean
+  valid: boolean
+}
+
+export interface TestcasesResp {
+  items: TestcaseItem[]
+  count: number
+  total_score: number
+  problem_type: ProblemType
+  score_valid: boolean
+}
+
+export interface ZipPreview {
+  entries: { name: string; size: number }[]
+  pairs: { name: string; in_size: number; out_size: number }[]
+  unpaired: string[]
+  total_size: number
+  valid: boolean
 }
 
 export const SUBMISSION_STATUSES = [
@@ -65,6 +107,7 @@ export interface SubmissionListItem {
   status: string
   time_ms: number
   memory_kb: number
+  score: number
   created_at: string
 }
 
@@ -104,6 +147,11 @@ export interface Contest {
   rank_keys: string[]
   start_time: string
   end_time: string
+  description: string
+  visibility: 'public' | 'private'
+  reg_start_time?: string
+  reg_end_time?: string
+  submission_limit: number
   created_at: string
 }
 
@@ -112,6 +160,8 @@ export interface ContestProblem {
   display_id: string
   sort_order: number
   title: string
+  score?: number | null
+  submission_limit?: number | null
 }
 
 export interface MyTeam {
@@ -137,6 +187,62 @@ export interface ContestInput {
   rank_keys: string[]
   start_time: string
   end_time: string
+  description: string
+  visibility: 'public' | 'private'
+  reg_start_time?: string
+  reg_end_time?: string
+  submission_limit: number
+}
+
+// ---- 比赛总览 ----
+
+export interface OverviewProblem {
+  problem_id: number
+  display_id: string
+  sort_order: number
+  title: string
+  score: number
+  submission_limit: number
+  submission_count: number
+  attempted_users: number
+  accepted_users: number
+  my_submissions: number
+  my_remaining: number | null
+  my_status: 'untried' | 'judging' | 'passed' | 'failed'
+  my_score: number
+}
+
+export interface ContestOverview {
+  contest: Contest
+  problems: OverviewProblem[]
+  phase: 'upcoming' | 'running' | 'ended'
+  server_time: string
+  my_summary?: {
+    rank: number
+    solved?: number
+    penalty?: number
+    total_score?: number
+    visible: boolean
+  }
+}
+
+export interface ContestProblemView {
+  problem: ProblemDetail
+  contest_problem: {
+    problem_id: number
+    display_id: string
+    sort_order: number
+    score: number
+    submission_limit: number
+  }
+  prev_problem_id?: number
+  next_problem_id?: number
+  my?: {
+    submissions: number
+    status: string
+    score: number
+    remaining?: number
+  }
 }
 
 export interface ACMProblemState {

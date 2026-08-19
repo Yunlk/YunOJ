@@ -38,6 +38,12 @@ export default function ContestForm() {
   const [rankKeys, setRankKeys] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
+  const [description, setDescription] = useState('')
+  const [visibility, setVisibility] = useState<'public' | 'private'>('public')
+  const [regEnabled, setRegEnabled] = useState(false)
+  const [regStart, setRegStart] = useState('')
+  const [regEnd, setRegEnd] = useState('')
+  const [submissionLimit, setSubmissionLimit] = useState('0')
   const [loading, setLoading] = useState(isEdit)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -60,6 +66,12 @@ export default function ContestForm() {
         setRankKeys(c.rank_keys.join(', '))
         setStartTime(toLocalInput(c.start_time))
         setEndTime(toLocalInput(c.end_time))
+        setDescription(c.description ?? '')
+        setVisibility(c.visibility ?? 'public')
+        setRegEnabled(Boolean(c.reg_start_time))
+        setRegStart(c.reg_start_time ? toLocalInput(c.reg_start_time) : '')
+        setRegEnd(c.reg_end_time ? toLocalInput(c.reg_end_time) : '')
+        setSubmissionLimit(String(c.submission_limit ?? 0))
       })
       .catch((err) => {
         if (!cancelled) setError(extractError(err))
@@ -120,6 +132,17 @@ export default function ContestForm() {
       setError('封榜时长需大于 0 分钟')
       return
     }
+    // 比赛已开始后修改关键配置：明确风险提示
+    if (isEdit && Date.now() >= start) {
+      const risk = [
+        '比赛已经开始，修改计分/罚时/题目或时间会影响已产生的排行榜与提交判定',
+        '已封榜的比赛修改配置可能导致滚榜数据与榜单不一致',
+      ].join('\n')
+      if (!window.confirm(`${risk}\n\n确定继续保存？`)) {
+        setBusy(false)
+        return
+      }
+    }
     const payload: ContestInput = {
       title: title.trim(),
       mode: engine,
@@ -133,6 +156,12 @@ export default function ContestForm() {
         .filter(Boolean),
       start_time: fromLocalInput(startTime),
       end_time: fromLocalInput(endTime),
+      description,
+      visibility,
+      submission_limit: Math.max(0, Number(submissionLimit) || 0),
+      ...(regEnabled && regStart && regEnd
+        ? { reg_start_time: fromLocalInput(regStart), reg_end_time: fromLocalInput(regEnd) }
+        : {}),
     }
     setBusy(true)
     setError('')
@@ -276,6 +305,73 @@ export default function ContestForm() {
               onChange={(e) => setEndTime(e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="contest-desc">比赛说明 / 公告（Markdown，显示在总览顶部）</label>
+          <textarea
+            id="contest-desc"
+            className="markdown-editor small"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="比赛规则、注意事项、公告…"
+          />
+        </div>
+
+        <div className="form-row">
+          <div className="form-group">
+            <label htmlFor="contest-visibility">可见性</label>
+            <select
+              id="contest-visibility"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as 'public' | 'private')}
+            >
+              <option value="public">公开（出现在比赛列表）</option>
+              <option value="private">私有（仅管理员与已报名用户可见）</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="contest-default-limit">默认单题提交上限（0 = 不限）</label>
+            <input
+              id="contest-default-limit"
+              type="number"
+              min={0}
+              max={1000}
+              value={submissionLimit}
+              onChange={(e) => setSubmissionLimit(e.target.value)}
+            />
+            <p className="field-hint">可在排行榜页的题目管理中为单题设置覆盖值。</p>
+          </div>
+        </div>
+
+        <div className="freeze-block">
+          <label className="checkbox-label">
+            <input type="checkbox" checked={regEnabled} onChange={(e) => setRegEnabled(e.target.checked)} />
+            <span>设置独立报名时间窗</span>
+          </label>
+          {regEnabled && (
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="reg-start">报名开始</label>
+                <input
+                  id="reg-start"
+                  type="datetime-local"
+                  value={regStart}
+                  onChange={(e) => setRegStart(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="reg-end">报名截止</label>
+                <input
+                  id="reg-end"
+                  type="datetime-local"
+                  value={regEnd}
+                  onChange={(e) => setRegEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <p className="field-hint">未设置时报名时间窗随比赛时间窗。</p>
         </div>
 
         <details className="advanced-section">

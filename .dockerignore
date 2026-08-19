@@ -1,0 +1,11 @@
+.git
+.gitignore
+.tools
+.env
+data
+node_modules
+**/node_modules
+.npm-cache
+web/dist
+*.log
+*.exe

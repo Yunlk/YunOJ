@@ -1,0 +1,87 @@
+services:
+  postgres:
+    image: ${REGISTRY_PREFIX:-}postgres:16-alpine
+    environment:
+      POSTGRES_USER: yunoj
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yunoj}
+      POSTGRES_DB: yunoj
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # 仅绑定回环：本地原生开发时后端直连，不对外暴露
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yunoj -d yunoj"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: ${REGISTRY_PREFIX:-}redis:7-alpine
+    # 仅绑定回环：本地原生开发时后端直连，不对外暴露
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REGISTRY_PREFIX: ${REGISTRY_PREFIX:-}
+    environment:
+      DATABASE_URL: postgres://yunoj:${POSTGRES_PASSWORD:-yunoj}@postgres:5432/yunoj?sslmode=disable
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      DATA_DIR: /data
+    volumes:
+      # 与 judge 共享题目测试数据
+      - ./data:/data
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  judge:
+    build:
+      context: .
+      dockerfile: Dockerfile.judge
+      args:
+        REGISTRY_PREFIX: ${REGISTRY_PREFIX:-}
+    # 评测沙箱需要完整的 namespace/cgroup 权限，这是 OJ 评测机的通行做法。
+    # 安全说明：
+    #   1. judge 容器不暴露任何端口，不运行任何网络服务；
+    #   2. 用户代码本身仍被 isolate 沙箱严格隔离（无网络、限制资源、
+    #      seccomp 系统调用白名单）；
+    #   3. 如需多机扩展，将 judge 单独部署到专用评测节点（非生产业务机）。
+    privileged: true
+    environment:
+      DATABASE_URL: postgres://yunoj:${POSTGRES_PASSWORD:-yunoj}@postgres:5432/yunoj?sslmode=disable
+      REDIS_ADDR: redis:6379
+      DATA_DIR: /data
+      JUDGE_WORKERS: ${JUDGE_WORKERS:-2}
+      ISOLATE_PATH: /usr/local/bin/isolate
+      ISOLATE_DIR: /var/local/lib/isolate
+      # cgroup 精确内存计量：裸 Linux 服务器可设 true；Docker Desktop/WSL2 保持 false
+      ISOLATE_CG: ${ISOLATE_CG:-false}
+    volumes:
+      - ./data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

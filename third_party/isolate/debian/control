@@ -1,0 +1,17 @@
+Source: isolate
+Section: ucw
+Priority: optional
+Maintainer: Martin Mareš <mj@ucw.cz>
+Standards-Version: 4.6.0.1
+Build-Depends: debhelper (>= 13.0), debhelper-compat (= 13),
+	pkg-config, libcap-dev, libsystemd-dev, libseccomp-dev, asciidoc
+
+Package: isolate
+Architecture: any
+Description: Sandbox for programming contests
+ Isolate is a sandbox built to safely run untrusted executables, like
+ programs submitted by competitors in a programming contest. Isolate
+ gives them a limited-access environment, preventing them from affecting
+ the host system. It takes advantage of features specific to the Linux
+ kernel, like namespaces and control groups.
+Depends: adduser, ${shlibs:Depends}

@@ -1,0 +1,22 @@
+# 环境与密钥
+.env
+
+# 运行时数据（题目测试数据、沙箱工作目录）
+data/
+
+# 本地工具链
+.tools/
+
+# Node
+node_modules/
+web/node_modules/
+.npm-cache/
+
+# 前端构建产物（web/dist/.gitkeep 除外，保证 go:embed 在未构建前端时也能编译）
+web/dist/*
+!web/dist/.gitkeep
+
+# 二进制与日志
+*.exe
+*.log
+bin/

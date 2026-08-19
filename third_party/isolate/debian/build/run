@@ -1,0 +1,75 @@
+#!/bin/bash
+set -euo pipefail
+
+BUILD_DIR=build-tmp
+
+build ()
+{
+	local BUILD_IMAGE=isolate-build-$ARCH-$SUITE
+	local TEST_IMAGE=isolate-test-$ARCH-$SUITE
+	local PLATFORM="--platform linux/$ARCH"
+
+	echo "### Building packages for $SUITE/$ARCH"
+
+	echo "# Updating build container"
+	podman build $PLATFORM --file container-build/$SUITE --tag $BUILD_IMAGE
+
+	echo "# Updating build container"
+	podman build $PLATFORM --file container-test/$SUITE --tag $TEST_IMAGE
+
+	echo "# Creating build directory"
+	rm -rf $BDIR
+	mkdir -p $BDIR
+	cp do-build do-test $BDIR/
+	( cd ../.. && git archive --prefix=isolate/ HEAD ) | ( cd $BDIR && tar x )
+
+	echo "# Building"
+	podman run $PLATFORM -it --rm --volume ./$BDIR:/build --workdir /build $BUILD_IMAGE ./do-build
+
+	echo "# Testing"
+	podman run $PLATFORM -it --rm --volume ./$BDIR:/build --workdir /build $BUILD_IMAGE ./do-test
+}
+
+publish ()
+{
+	echo "### Publishing packages for $SUITE/$ARCH"
+	rsync $BDIR/*.deb jw:/projects/isolate/www/debian/dists/$SUITE-isolate/main/binary-$ARCH/
+}
+
+try_dist ()
+{
+	local SUITE=$1
+	local ARCH=$2
+	local BDIR=$BUILD_DIR/$ARCH-$SUITE
+	$STEP
+}
+
+try_all_dists ()
+{
+	local STEP=$1
+
+	try_dist bookworm amd64
+	try_dist trixie amd64
+	try_dist jammy amd64
+	try_dist noble amd64
+	try_dist resolute amd64
+
+	# Cross-building for amd64 requires qemu-user-static installed
+	try_dist bookworm arm64
+	try_dist trixie arm64
+}
+
+try_all_dists build
+
+echo -n "Press Enter to publish packages or Ctrl-C to abort ... "
+read ENTER
+
+try_all_dists publish
+
+echo "### Updating package index"
+ssh -t jw 'cd /projects/isolate/debian && ./genpkg'
+
+echo "### Cleaning up"
+rm -rf $BUILD_DIR
+
+echo "### Done"

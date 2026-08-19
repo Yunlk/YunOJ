@@ -1,0 +1,2 @@
+# 统一 LF 换行：保证 Windows / Linux 克隆后构建脚本与 Dockerfile 行为一致
+* text=auto eol=lf

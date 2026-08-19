@@ -1,0 +1,151 @@
+Version 2.6  [2026-05-25]
+
+  *  /dev/shm is no longer shared among sandboxes. It was never
+     intentional, but it happened when we made all mounts recursive
+     by default and it provided a side channel between sandboxes.
+
+     The default directory rules now bind-mount /dev non-recursively
+     and they mount a fresh instance of tmpfs on /dev/shm.
+
+     Thanks to Gunnar Kreitz <gkreitz@gmail.com> for reporting
+     the problem.
+
+  *  The system call filter disables io_uring by default, since it can
+     be also used to create AF_VSOCK sockets. It is unlikely that there
+     is a competition-related program which requires the uring.
+
+  *  By default, the system call filter rejected syscalls on non-native
+     architectures (e.g., 32-bit syscalls on amd64 systems). We added
+     a flag for allowing legacy architectures.
+
+Version 2.5  [2026-05-01]
+
+  This version fixes several security vulnerabilities discovered
+  by Luca Versari and Google Gemini. None of the vulnerabilities
+  compromises security of the sandbox, but they could be exploited
+  by the user running Isolate to bypass system privilege boundaries.
+
+  *  When opening the meta-file we switched the UID back to the
+     calling user, but not the GID. This could allow the caller to
+     overwrite files that are writeable by the "root" group, or
+     create/rename files in directories writeable by it.
+
+     When evaluating severity of this problem, we looked for such
+     files in typical Linux installations. Only a few cases were
+     found: TeXlive caches, /dev/uinput (which could be possibly
+     used to inject keystrokes), several configuration knobs in /sys
+     (where the content written is unlikely to be syntactically
+     correct) and triggers of removal of PCI devices (which can
+     cause a denial-of-service attack).
+
+  *  Although we dropped privileges properly when bind-mounting a directory,
+     we did not in the preliminary check of existence used with the "maybe"
+     option. This provided an oracle for testing existence of directories
+     behind path components unreachable to the calling user.
+
+  *  Directory rules allowed mounting of arbitrary deviceless
+     filesystems. We are not sure if all of them are safe to expose,
+     so we limit the filesystems to a set of safe ones now. If you need
+     to expand the list, please let us know.
+
+  Besides the security fixes, we improved robustness, error
+  reporting, and documentation at several places.
+
+Version 2.4.1  [2026-04-27]
+
+  *  Fixed a bug in parsing of /etc/sub[ug]id — by mistake,
+     Isolate used /etc/subuid for both user and group IDs.
+
+Version 2.4  [2026-04-26]
+
+  *  A seccomp-based system call filter has been added to thwart
+     several potential information leaks across sandbox boundaries.
+     See "System calls restrictions" in the man page for details.
+
+  *  "isolate --check-config -vv" prints parsed configuration.
+
+Version 2.3  [2026-04-04]
+
+  *  The UID and GID range for the sandboxes is obtained from /etc/sub[ug]ids
+     entries of a configured user. The old method of configuring the
+     ranges explicitly is still supported, but no longer the default.
+
+  *  "isolate --check-config" can be used to verify correctness of the
+     configuration file.
+
+Version 2.2.1  [2025-09-29]
+
+  *  Fixed the check for asymmetric cores in isolate-check-environment.
+
+Version 2.2  [2025-09-01]
+
+  *  Switched to a new kernel API for setting filesystem quotas,
+     which works with more filesystems (e.g., tmpfs).
+
+  *  Wall-clock time is reported correctly even if the system
+     clock is re-set during program execution.
+
+Version 2.1.2  [2025-08-14]
+
+  *  Build date and commit are recorded in built binaries only
+     when building from a Git checkout.
+
+Version 2.1.1  [2025-08-14]
+
+  *  isolate-check-environment checks for asymmetric cores.
+
+  *  By mistake, isolate was compiled without optimization.
+     Added -O2 to CFLAGS.
+
+  *  Added packaging for Debian Trixie on both amd64 and arm64.
+
+Version 2.1  [2025-06-08]
+
+  •  There are official packages for Debian Bookworm (amd64, arm64)
+     and last two LTS releases of Ubuntu (amd64 only). Packaged Isolate
+     takes care of starting systemd services properly. It is available
+     only to users that are members of "isolate" group.
+
+  •  Unit files for systemd are installed by default.
+
+  •  Cgroup-based timing works when --run is used multiple times
+     on the same sandbox.
+
+  •  Added manual pages for isolate-cg-keeper and isolate-check-environment.
+     The man page for isolate explains more about cgroups and containers.
+
+  •  isolate-check-environment checks presence of simultaneous
+     multi-threading.
+
+  •  All binaries are compiled with security hardening flags.
+
+  •  Minor bug fixes.
+
+Version 2.0  [2024-02-28]
+
+  •  This version runs only on systems supporting CGroup v2, which are
+     basically all new Linux systems. If you need to stick with CGroup v1,
+     please use Isolate 1.10.1.
+
+  •  If you are running systemd, Isolate now comes with isolate.service
+     that delegates a subtree of the cgroup hierarchy to Isolate.
+     On systems without systemd, you have to set up the delegation
+     yourself and set its root in Isolate's configuration file.
+
+  •  The --cg-timing switch has been removed. In control group mode,
+     this mode of timing is always used.
+
+  •  Added a simple protocol for locking sandboxes. When a sandbox is
+     initialized using "isolate --init", it is reserved for the calling
+     user until "isolate --cleanup" is used. It is also not allowed
+     to call "isolate --run" multiple times in parallel on the same box.
+
+  •  "isolate --init" resets the sandbox if it already existed.
+
+  •  Root can operate sandboxes on behalf of other users using
+     --as-uid and --as-gid options.
+
+  •  Configuration can specify than only root is allowed to create new
+     sandboxes. Together with the previous feature, it allows for creation
+     of system-wide daemons allocating sandboxes to users. One such daemon
+     will probably appear in a future release of Isolate.

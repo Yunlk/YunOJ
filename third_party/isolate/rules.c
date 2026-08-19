@@ -1,0 +1,533 @@
+/*
+ *	Process Isolator -- Rules
+ *
+ *	(c) 2012-2026 Martin Mares <mj@ucw.cz>
+ *	(c) 2012-2014 Bernard Blackham <bernard@blackham.com.au>
+ */
+
+#include "isolate.h"
+
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <mntent.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/capability.h>
+#include <sys/mount.h>
+#include <sys/quota.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <sys/vfs.h>
+#include <unistd.h>
+
+/*** Environment rules ***/
+
+struct env_rule {
+  char *var;			// Variable to match
+  char *val;			// ""=clear, NULL=inherit
+  int var_len;
+  struct env_rule *next;
+};
+
+static struct env_rule *first_env_rule;
+static struct env_rule **last_env_rule = &first_env_rule;
+
+static struct env_rule default_env_rules[] = {
+  { .var = "LIBC_FATAL_STDERR_", .val = "1", .var_len = 18 },
+};
+
+int
+set_env_action(char *a0)
+{
+  struct env_rule *r = xmalloc(sizeof(*r) + strlen(a0) + 1);
+  char *a = (char *)(r+1);
+  strcpy(a, a0);
+
+  char *sep = strchr(a, '=');
+  if (sep == a)
+    return 0;
+  r->var = a;
+  if (sep)
+    {
+      *sep++ = 0;
+      r->val = sep;
+    }
+  else
+    r->val = NULL;
+  *last_env_rule = r;
+  last_env_rule = &r->next;
+  r->next = NULL;
+  return 1;
+}
+
+static int
+match_env_var(char *env_entry, struct env_rule *r)
+{
+  if (strncmp(env_entry, r->var, r->var_len))
+    return 0;
+  return (env_entry[r->var_len] == '=');
+}
+
+static void
+apply_env_rule(char **env, int *env_sizep, struct env_rule *r)
+{
+  // First remove the variable if already set
+  int pos = 0;
+  while (pos < *env_sizep && !match_env_var(env[pos], r))
+    pos++;
+  if (pos < *env_sizep)
+    {
+      (*env_sizep)--;
+      env[pos] = env[*env_sizep];
+      env[*env_sizep] = NULL;
+    }
+
+  // What is the new value?
+  char *new;
+  if (r->val)
+    {
+      if (!r->val[0])
+	return;
+      new = xmalloc(r->var_len + 1 + strlen(r->val) + 1);
+      sprintf(new, "%s=%s", r->var, r->val);
+    }
+  else
+    {
+      pos = 0;
+      while (environ[pos] && !match_env_var(environ[pos], r))
+	pos++;
+      if (!(new = environ[pos]))
+	return;
+    }
+
+  // Add it at the end of the array
+  env[(*env_sizep)++] = new;
+  env[*env_sizep] = NULL;
+}
+
+char **
+setup_environment(void)
+{
+  // Link built-in rules with user rules
+  for (int i=ARRAY_SIZE(default_env_rules)-1; i >= 0; i--)
+    {
+      default_env_rules[i].next = first_env_rule;
+      first_env_rule = &default_env_rules[i];
+    }
+
+  // Scan the original environment
+  char **orig_env = environ;
+  int orig_size = 0;
+  while (orig_env[orig_size])
+    orig_size++;
+
+  // For each rule, reserve one more slot and calculate length
+  int num_rules = 0;
+  for (struct env_rule *r = first_env_rule; r; r=r->next)
+    {
+      num_rules++;
+      r->var_len = strlen(r->var);
+    }
+
+  // Create a new environment
+  char **env = xmalloc((orig_size + num_rules + 1) * sizeof(char *));
+  int size;
+  if (pass_environ)
+    {
+      memcpy(env, environ, orig_size * sizeof(char *));
+      size = orig_size;
+    }
+  else
+    size = 0;
+  env[size] = NULL;
+
+  // Apply the rules one by one
+  for (struct env_rule *r = first_env_rule; r; r=r->next)
+    apply_env_rule(env, &size, r);
+
+  // Return the new env and pass some gossip
+  if (verbose > 1)
+    {
+      fprintf(stderr, "Passing environment:\n");
+      for (int i=0; env[i]; i++)
+	fprintf(stderr, "\t%s\n", env[i]);
+    }
+  return env;
+}
+
+/*** Directory rules ***/
+
+struct dir_rule {
+  char *inside;			// A relative path
+  char *outside;		// This can be an absolute path or a relative path starting with "./"
+  unsigned int flags;		// DIR_FLAG_xxx
+  struct dir_rule *next;
+};
+
+enum dir_rule_flags {
+  DIR_FLAG_RW = 1,
+  DIR_FLAG_NOEXEC = 2,
+  DIR_FLAG_FS = 4,
+  DIR_FLAG_MAYBE = 8,
+  DIR_FLAG_DEV = 16,
+  DIR_FLAG_TMP = 32,
+  DIR_FLAG_NOREC = 64,
+  DIR_FLAG_DEFAULT = 1U << 15,	// Used internally
+  DIR_FLAG_DISABLED = 1U << 16,	// Used internally
+};
+
+static const char * const dir_flag_names[] = { "rw", "noexec", "fs", "maybe", "dev", "tmp", "norec" };
+
+static struct dir_rule *first_dir_rule;
+static struct dir_rule **last_dir_rule = &first_dir_rule;
+
+static char *
+sanitize_dir_path(char *path)
+{
+  // Strip leading slashes
+  while (*path == '/')
+    path++;
+  if (!*path)
+    return NULL;
+
+  // Check for ".." components
+  char *p = path;
+  while (*p)
+    {
+      char *next = strchr(p, '/');
+      if (!next)
+	next = p + strlen(p);
+
+      int len = next - p;
+      if (len == 2 && !memcmp(p, "..", 2))
+	return NULL;
+
+      p = *next ? next+1 : next;
+    }
+
+  return path;
+}
+
+static const char *
+add_dir_rule(char *in, char *out, unsigned int flags)
+{
+  // Make sure that "in" does not try to escape the box
+  in = sanitize_dir_path(in);
+  if (!in)
+    return "Invalid path";
+
+  // Override an existing rule
+  struct dir_rule *r;
+  for (r = first_dir_rule; r; r = r->next)
+    if (!strcmp(r->inside, in))
+      break;
+
+  // Add a new rule
+  if (!r)
+    {
+      r = xmalloc(sizeof(*r));
+      r->inside = in;
+      *last_dir_rule = r;
+      last_dir_rule = &r->next;
+      r->next = NULL;
+    }
+  r->outside = out;
+  r->flags = flags;
+  return NULL;
+}
+
+static bool
+parse_dir_option(char *opt, unsigned int *dest)
+{
+  for (unsigned int i = 0; i < ARRAY_SIZE(dir_flag_names); i++)
+    if (!strcmp(opt, dir_flag_names[i]))
+      {
+	*dest = 1U << i;
+	return true;
+      }
+  return false;
+}
+
+static bool
+valid_filesystem_p(const char *fs)
+{
+  return (!strcmp(fs, "proc") ||
+          !strcmp(fs, "sysfs") ||
+          !strcmp(fs, "tmpfs") ||
+          !strcmp(fs, "devpts"));
+}
+
+static const char *
+set_dir_action_ext(const char *arg, unsigned int ext_flags)
+{
+  char *copy = xstrdup(arg);
+
+  char *colon = strchr(copy, ':');
+  unsigned int flags = ext_flags;
+  while (colon)
+    {
+      *colon = 0;
+      char *opt = colon + 1;
+      char *next = strchr(opt, ':');
+      if (next)
+	*next = 0;
+      unsigned flag;
+      if (!parse_dir_option(opt, &flag))
+	// We leak memory, but we are going to die anyway
+	return xsprintf("Unknown option '%s'", opt);
+      flags |= flag;
+      colon = next;
+    }
+
+  char *eq = strchr(copy, '=');
+  if (eq)
+    *eq++ = 0;
+
+  if ((flags & DIR_FLAG_FS) && (flags & DIR_FLAG_TMP))
+    return "Flags 'fs' and 'tmp' are mutually exclusive";
+
+  if (flags & DIR_FLAG_FS)
+    {
+      if (!eq)
+	return "Missing filesystem name";
+      if (!valid_filesystem_p(eq))
+	return "This filesystem is not supported";
+      return add_dir_rule(copy, eq, flags);
+    }
+  else if (flags & DIR_FLAG_TMP)
+    {
+      if (eq)
+	return "Temporary directory mounts do not have a right-hand side";
+      /*
+       *  Construct an outside temporary directory, which will be later
+       *  chowned to box_uid. The hierarchy of these directories is intentionally
+       *  flat, so that we avoid writing to a directory which might have already
+       *  tampered with in a previous run of the sandbox.
+       */
+      char out[1024];
+      snprintf(out, sizeof(out), "./tmp/%s", copy);
+      for (char *p = out + strlen("./tmp/"); *p; p++)
+	if (*p == '/')
+	  *p = ':';		// This is safe, there were no colons in "out"
+      return add_dir_rule(copy, xstrdup(out), flags | DIR_FLAG_RW);
+    }
+  else if (eq)
+    {
+      if (!eq[0])
+	return add_dir_rule(copy, NULL, flags);
+      if (eq[0] != '/' && strncmp(eq, "./", 2))
+	return "Right-hand side must start with '/' or './'";
+      return add_dir_rule(copy, eq, flags);
+    }
+  else
+    {
+      char *out = xmalloc(1 + strlen(copy) + 1);
+      sprintf(out, "/%s", copy);
+      return add_dir_rule(copy, out, flags);
+    }
+}
+
+const char *
+set_dir_action(const char *arg)
+{
+  return set_dir_action_ext(arg, 0);
+}
+
+static void
+set_dir_action_default(const char *arg)
+{
+  const char *err = set_dir_action_ext(arg, DIR_FLAG_DEFAULT);
+  if (err)
+    die("Error parsing built-in directory rule '%s': %s", arg, err);
+}
+
+void
+init_dir_rules(void)
+{
+  set_dir_action_default("box=./box:rw");
+  set_dir_action_default("bin");
+  set_dir_action_default("dev:dev:norec");
+  set_dir_action_default("dev/shm=tmpfs:fs:rw");
+  set_dir_action_default("lib");
+  set_dir_action_default("lib64:maybe");
+  set_dir_action_default("proc=proc:fs");
+  set_dir_action_default("tmp:tmp");
+  set_dir_action_default("usr");
+}
+
+static void
+set_cap_sys_admin(void)
+{
+  cap_t caps;
+  if (!(caps = cap_get_proc()))
+    die("Cannot get capabilities: %m");
+
+  cap_value_t cap_list[] = { CAP_SYS_ADMIN };
+  if (cap_set_flag(caps, CAP_EFFECTIVE, 1, cap_list, CAP_SET) < 0)
+    die("Cannot modify capabilities");
+
+  if (cap_set_proc(caps) < 0)
+    die("Cannot set capabilities: %m");
+
+  cap_free(caps);
+}
+
+void
+apply_dir_rules(int with_defaults)
+{
+  /*
+   * Before mounting anything, we create all mount points inside the box.
+   * This is necessary to avoid bypassing directory permissions. If you
+   * want nested binds, you have to create the mount points explicitly.
+   */
+  for (struct dir_rule *r = first_dir_rule; r; r=r->next)
+    {
+      if (!with_defaults && (r->flags & DIR_FLAG_DEFAULT))
+        continue;
+
+      char *in = r->inside;
+      char *out = r->outside;
+
+      if (!out)
+	{
+	  msg("Not binding anything on %s\n", in);
+	  r->flags |= DIR_FLAG_DISABLED;
+	  continue;
+	}
+
+      if (r->flags & DIR_FLAG_MAYBE)
+	{
+	  switch_fsid_to_caller();
+	  bool exists = dir_exists(out);
+	  switch_fsid_back();
+	  if (!exists)
+	    {
+	      msg("Not binding %s on %s (does not exist)\n", out, r->inside);
+	      r->flags |= DIR_FLAG_DISABLED;
+	      continue;
+	    }
+	}
+
+      char root_in[1024];
+      snprintf(root_in, sizeof(root_in), "root/%s", in);
+      make_dir(root_in);
+    }
+
+  for (struct dir_rule *r = first_dir_rule; r; r=r->next)
+    {
+      if (r->flags & DIR_FLAG_DISABLED)
+	continue;
+      if (!with_defaults && (r->flags & DIR_FLAG_DEFAULT))
+        continue;
+
+      char *in = r->inside;
+      char *out = r->outside;
+      char root_in[1024];
+      snprintf(root_in, sizeof(root_in), "root/%s", in);
+
+      if (r->flags & DIR_FLAG_TMP)
+	{
+	  make_dir(out);
+	  if (chown(out, box_uid, box_gid) < 0)
+	    die("Cannot chown %s: %m", out);
+	  if (chmod(out, 0700) < 0)
+	    die("Cannot chmod %s: %m", out);
+	}
+
+      unsigned long mount_flags = 0;
+      if (!(r->flags & DIR_FLAG_RW))
+	mount_flags |= MS_RDONLY;
+      if (r->flags & DIR_FLAG_NOEXEC)
+	mount_flags |= MS_NOEXEC;
+      if (!(r->flags & DIR_FLAG_DEV))
+	mount_flags |= MS_NODEV;
+
+      if (r->flags & DIR_FLAG_FS)
+	{
+	  msg("Mounting %s on %s (flags %lx)\n", out, in, mount_flags);
+	  if (mount("none", root_in, out, mount_flags, "") < 0)
+	    die("Cannot mount %s on %s: %m", out, in);
+	  if (!strcmp(in, "proc"))
+	    {
+	      // If we are mounting procfs, add hidepid=2, so that only the processes
+	      // of the same user are visible. This has to be done as a remount.
+	      if (mount("none", root_in, out, MS_REMOUNT | mount_flags, "hidepid=2") < 0)
+		die("Cannot re-mount proc with hidepid option: %m");
+	    }
+	}
+      else
+	{
+	  mount_flags |= MS_BIND | MS_NOSUID;
+	  if (!(r->flags & DIR_FLAG_NOREC))
+	    mount_flags |= MS_REC;
+	  msg("Binding %s on %s (flags %lx)\n", out, in, mount_flags);
+
+	  /*
+	   *  This is tricky. We cannot run mount() with root privileges, since
+	   *  it could be used to bypass access control if the mounted path
+	   *  contains elements inaccessible to the user running isolate.
+	   *
+	   *  We switch effective UID and GID back to the calling user (which clears
+	   *  all capabilities, but keeps them in the permitted set) and then
+	   *  enable CAP_SYS_ADMIN. So we have CAP_SYS_ADMIN (needed for mount),
+	   *  but not CAP_DAC_OVERRIDE (which allows to bypass permission checks).
+	   */
+
+	  if (setresuid(orig_uid, orig_uid, 0) < 0 ||
+	      setresgid(orig_gid, orig_gid, 0) < 0)
+	    die("Cannot switch UID and GID: %m");
+
+	  set_cap_sys_admin();
+
+	  // Most mount flags need remount to work
+	  if (mount(out, root_in, "none", mount_flags, "") < 0 ||
+	      mount(out, root_in, "none", MS_REMOUNT | mount_flags, "") < 0)
+	    die("Cannot mount %s on %s: %m", out, in);
+
+	  if (setresuid(orig_uid, 0, orig_uid) < 0 ||
+	      setresgid(orig_gid, 0, orig_gid) < 0)
+	    die("Cannot switch UID and GID: %m");
+	}
+    }
+}
+
+/*** Disk quotas ***/
+
+static void
+quotactl_error(void)
+{
+  // This errno has an outstandingly unhelpful message of "no such process".
+  if (errno == ESRCH)
+    die("Cannot set disk quota: quotas have not been enabled for this filesystem");
+  die("Cannot set disk quota: %m");
+}
+
+void
+set_quota(void)
+{
+  if (!block_quota)
+    return;
+
+  struct dqblk dq = {
+    .dqb_bhardlimit = block_quota,
+    .dqb_bsoftlimit = block_quota,
+    .dqb_ihardlimit = inode_quota,
+    .dqb_isoftlimit = inode_quota,
+    .dqb_valid = QIF_LIMITS,
+  };
+  void *dq_ptr = (void*)&dq;
+  int quota_op = QCMD(Q_SETQUOTA, USRQUOTA);
+
+  int cwd_fd = open(".", O_DIRECTORY | O_PATH);
+  if (cwd_fd < 0)
+    die("open: %m");
+
+  if (syscall(SYS_quotactl_fd, cwd_fd, quota_op, box_uid, dq_ptr) < 0)
+    quotactl_error();
+
+  close(cwd_fd);
+
+  msg("Quota: Set block quota %d and inode quota %d\n", block_quota, inode_quota);
+}

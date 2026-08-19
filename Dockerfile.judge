@@ -1,0 +1,57 @@
+# 基础镜像前缀（国内默认走 docker.1ms.run 加速；海外/服务器可用
+# `docker compose build --build-arg REGISTRY_PREFIX=` 关闭）
+ARG REGISTRY_PREFIX=docker.1ms.run/
+
+# ============ 阶段 1：编译 isolate 沙箱（源码固化于 third_party/） ============
+FROM ${REGISTRY_PREFIX}debian:bookworm-slim AS isolate-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential libcap-dev libseccomp-dev libsystemd-dev \
+        pkg-config asciidoc-base \
+    && rm -rf /var/lib/apt/lists/*
+# isolate 源码随仓库分发（third_party/isolate），构建时无需访问 GitHub，
+# 版本锁定见 third_party/ISOLATE_VERSION
+# 直接构建 install 目标（跳过 man 手册，容器内用不到）
+COPY third_party/isolate /opt/isolate
+RUN cd /opt/isolate \
+    && make -j"$(nproc)" install
+
+# ============ 阶段 2：构建评测守护进程 ============
+FROM ${REGISTRY_PREFIX}golang:1.25-alpine AS backend
+WORKDIR /src
+# 国内网络走 goproxy.cn 镜像；海外环境可删除此行
+ENV GOPROXY=https://goproxy.cn,direct
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/judge ./cmd/judge
+
+# ============ 阶段 3：评测机运行镜像 ============
+FROM ${REGISTRY_PREFIX}debian:bookworm-slim
+# gcc/g++/python3 是沙箱内编译与解释执行需要的工具链
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ python3 ca-certificates libcap2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --home /nonexistent --shell /usr/sbin/nologin isolate \
+    && mkdir -p /var/local/lib/isolate \
+    && chown isolate:isolate /var/local/lib/isolate \
+    && echo 'isolate:100000:65536' >> /etc/subuid \
+    && echo 'isolate:100000:65536' >> /etc/subgid
+COPY --from=isolate-builder /usr/local/bin/isolate /usr/local/bin/isolate
+COPY --from=backend /out/judge /usr/local/bin/judge
+# isolate 2.x 启动时必须读取配置文件；cg_root 直接指向容器内 cgroup2 挂载点，
+# 避免依赖 systemd/cg-keeper 守护进程（容器内不跑 systemd）
+RUN printf '%s\n' \
+        'box_root = /var/local/lib/isolate' \
+        'lock_root = /run/isolate/locks' \
+        'cg_root = /sys/fs/cgroup' \
+        'subid_user = isolate' \
+        > /usr/local/etc/isolate
+ENV DATA_DIR=/data \
+    ISOLATE_PATH=/usr/local/bin/isolate \
+    ISOLATE_DIR=/var/local/lib/isolate
+# 评测机必须以 root 运行：isolate 需要创建 namespace 进行隔离。
+# 该容器不暴露任何端口，建议部署在专用评测节点上（见 docker-compose 注释）。
+# /run 是 tmpfs，启动时重建 lock 目录。
+# cgroup 精确计量由 ISOLATE_CG 开关控制（默认关闭，兼容 Docker Desktop/WSL2；
+# 裸 Linux 服务器可设 true 获得 cgroup 级内存计量）。
+ENTRYPOINT ["/bin/sh", "-c", "mkdir -p /run/isolate/locks && exec /usr/local/bin/judge"]

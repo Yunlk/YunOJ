@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -6,7 +6,6 @@ import {
   removeContestProblem, reorderContestProblems, updateContestProblem,
 } from '../api'
 import { ACMCell, TeamAvatar } from '../components/ContestBoardParts'
-import RollBoardPlayer from '../components/RollBoardPlayer'
 import type {
   ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
 } from '../types'
@@ -14,11 +13,14 @@ import { formatTime } from '../utils/format'
 
 // ---------- 排行榜 ----------
 
-function ACMTable({ contestId, standings, problems, startTime }: {
+function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus }: {
   contestId: number
   standings: ACMStanding[]
   problems: ContestProblem[]
   startTime: string
+  activeTeamId?: number
+  activeProblemId?: number
+  activeStatus?: string
 }) {
   return (
     <div className="standings-wrap">
@@ -39,7 +41,7 @@ function ACMTable({ contestId, standings, problems, startTime }: {
             <tr><td colSpan={4 + problems.length} className="table-empty">暂无队伍</td></tr>
           ) : (
             standings.map((s) => (
-              <tr key={s.team_id}>
+              <tr key={`${s.team_id}-${s.rank}`} data-team-id={s.team_id} className={activeTeamId === s.team_id ? 'standings-active-row' : ''}>
                 <td className="mono">{s.rank}</td>
                 <td>
                   <span className="standings-team">
@@ -50,7 +52,9 @@ function ACMTable({ contestId, standings, problems, startTime }: {
                 <td className="mono">{s.solved}</td>
                 <td className="mono">{s.penalty}</td>
                 {problems.map((p) => (
-                  <ACMCell key={p.problem_id} state={s.problems[p.display_id]} startTime={startTime} />
+                  activeTeamId === s.team_id && activeProblemId === p.problem_id && (activeStatus === 'pending' || activeStatus === 'running')
+                    ? <td key={p.problem_id} className="standings-cell judging-cell">评测中</td>
+                    : <ACMCell key={p.problem_id} state={s.problems[p.display_id]} startTime={startTime} />
                 ))}
               </tr>
             ))
@@ -59,6 +63,20 @@ function ACMTable({ contestId, standings, problems, startTime }: {
       </table>
     </div>
   )
+}
+
+function submissionStatusLabel(status?: string): string {
+  if (status === 'pending') return '等待评测'
+  if (status === 'running') return '评测中'
+  if (status === 'accepted') return 'AC'
+  if (status === 'wrong_answer') return 'WA'
+  if (status === 'compile_error') return 'CE'
+  if (status === 'time_limit_exceeded') return 'TLE'
+  if (status === 'memory_limit_exceeded') return 'MLE'
+  if (status === 'runtime_error') return 'RE'
+  if (status === 'output_limit_exceeded') return 'OLE'
+  if (status === 'system_error') return 'SE'
+  return status || ''
 }
 
 function OITable({ contestId, standings, problems }: {
@@ -118,6 +136,12 @@ function StandingsPanel({ contestId }: { contestId: number }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [live, setLive] = useState(false)
+  const [liveActivity, setLiveActivity] = useState<ContestStandings['latest_submission']>()
+  const seenLiveKey = useRef<string | null>(null)
+  const rollStarted = useRef(false)
+  const [rollStep, setRollStep] = useState(-1)
+  const [rollPhase, setRollPhase] = useState<'focus' | 'judging' | 'result' | 'settled' | 'done'>('done')
+  const [rolling, setRolling] = useState(false)
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true)
@@ -131,7 +155,27 @@ function StandingsPanel({ contestId }: { contestId: number }) {
         const end = new Date(s.contest.end_time).getTime()
         const running = now >= start && now < end
         const frozen = Boolean(s.freeze_at)
-        setLive(running && !frozen)
+        // 封榜期间仍保持轮询，比赛结束后自动拉取揭晓事件。
+        setLive(running || (frozen && !rollStarted.current))
+        const latest = s.latest_submission
+        if (latest) {
+          const key = `${latest.submission_id}:${latest.status}`
+          if (seenLiveKey.current === null) {
+            seenLiveKey.current = key
+            if (latest.status === 'pending' || latest.status === 'running') {
+              setLiveActivity(latest)
+            }
+          } else if (seenLiveKey.current !== key) {
+            seenLiveKey.current = key
+            setLiveActivity(latest)
+          }
+        }
+        if (s.roll_available && s.roll_events && s.roll_events.length > 0 && !rollStarted.current) {
+          rollStarted.current = true
+          setRollStep(0)
+          setRollPhase('focus')
+          setRolling(true)
+        }
       })
       .catch((err) => setError(extractError(err)))
       .finally(() => {
@@ -150,6 +194,56 @@ function StandingsPanel({ contestId }: { contestId: number }) {
     return () => window.clearInterval(t)
   }, [live, load])
 
+  useEffect(() => {
+    if (!liveActivity) return
+    const timer = window.setTimeout(() => setLiveActivity(undefined), 2600)
+    return () => window.clearTimeout(timer)
+  }, [liveActivity])
+
+  useEffect(() => {
+    if (!rolling || !standings?.roll_events || rollStep < 0) return
+    const event = standings.roll_events[rollStep]
+    if (!event) {
+      setRolling(false)
+      setRollPhase('done')
+      return
+    }
+    const duration = rollPhase === 'focus' ? 900 : rollPhase === 'judging' ? 1200 : rollPhase === 'result' ? 1000 : 700
+    const timer = window.setTimeout(() => {
+      if (rollPhase === 'focus') setRollPhase('judging')
+      else if (rollPhase === 'judging') setRollPhase('result')
+      else if (rollPhase === 'result') setRollPhase('settled')
+      else if (rollPhase === 'settled') {
+        if (rollStep >= standings.roll_events!.length - 1) {
+          setRolling(false)
+          setRollPhase('done')
+          const finalStandings = event.standings
+          setStandings((current) => current ? {
+            ...current,
+            standings: finalStandings,
+            roll_available: false,
+            roll_events: undefined,
+            roll_initial_standings: undefined,
+            frozen_submissions: 0,
+          } : current)
+        } else {
+          setRollStep((step) => step + 1)
+          setRollPhase('focus')
+        }
+      }
+    }, duration)
+    return () => window.clearTimeout(timer)
+  }, [rolling, rollPhase, rollStep, standings])
+
+  useEffect(() => {
+    const event = rolling && standings?.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : null
+    const liveSubmission = !rolling ? liveActivity : null
+    const teamID = event?.team_id ?? liveSubmission?.team_id
+    if (teamID === undefined) return
+    const row = document.querySelector(`[data-team-id="${teamID}"]`)
+    row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [rolling, rollStep, rollPhase, standings, liveActivity])
+
   if (loading) return <div className="page-loading">排行榜加载中…</div>
   if (error && !standings) {
     return (
@@ -163,12 +257,24 @@ function StandingsPanel({ contestId }: { contestId: number }) {
 
   const isACM = standings.mode === 'ACM'
   const frozen = Boolean(standings.freeze_at)
+  const rollEvent = rolling && standings.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : undefined
+  const liveSubmission = !rolling ? liveActivity : undefined
+  const activeTeamId = rollEvent?.team_id ?? liveSubmission?.team_id
+  const activeProblemId = rollEvent?.problem_id ?? liveSubmission?.problem_id
+  const activeStatus = rollEvent ? (rollPhase === 'focus' ? 'pending' : rollPhase === 'judging' ? 'running' : rollEvent.status) : liveSubmission?.status
+  let visibleACM = standings.standings as ACMStanding[]
+  if (rolling && rollEvent && rollStep >= 0 && rollPhase !== 'settled') {
+    visibleACM = rollStep === 0 ? (standings.roll_initial_standings ?? visibleACM) : standings.roll_events![rollStep - 1].standings
+  } else if (rolling && rollEvent && rollPhase === 'settled') {
+    visibleACM = rollEvent.standings
+  }
 
   return (
     <div>
       <div className="standings-toolbar">
-        {live && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
-        {frozen && !live && <span className="muted">榜单已冻结</span>}
+        {live && !frozen && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
+        {frozen && !live && !rolling && <span className="muted">榜单已冻结</span>}
+        {rolling && <span className="live-indicator"><span className="live-dot" />动态揭晓</span>}
         <button type="button" className="link-button" onClick={() => load(true)}>刷新</button>
       </div>
       {isACM && frozen && (
@@ -180,12 +286,25 @@ function StandingsPanel({ contestId }: { contestId: number }) {
         </div>
       )}
       {isACM ? (
-        <ACMTable
+        <>
+          {(rollEvent || liveSubmission) && (
+            <div className={`standings-focus ${rolling ? 'standings-focus-roll' : ''}`}>
+              <TeamAvatar contestId={contestId} teamId={activeTeamId!} avatar={rollEvent?.team_avatar ?? liveSubmission?.team_avatar ?? ''} size="sm" />
+              <strong>{rollEvent?.team_name ?? liveSubmission?.team_name}</strong>
+              <span className="muted">{rollEvent ? `提交 #${rollEvent.submission_id}` : `提交 #${liveSubmission?.submission_id}`}</span>
+              <span className="focus-status">{submissionStatusLabel(activeStatus)}</span>
+            </div>
+          )}
+          <ACMTable
           contestId={contestId}
-          standings={standings.standings as ACMStanding[]}
+          standings={visibleACM}
           problems={standings.problems}
           startTime={standings.contest.start_time}
-        />
+          activeTeamId={activeTeamId}
+          activeProblemId={activeProblemId}
+          activeStatus={activeStatus}
+          />
+        </>
       ) : (
         <OITable
           contestId={contestId}
@@ -415,7 +534,6 @@ export default function ContestStandingsPage() {
   const { id } = useParams()
   const contestId = Number(id)
   const [data, setData] = useState<ContestDetailData | null>(null)
-  const [rollboardOpen, setRollboardOpen] = useState(false)
   const [error, setError] = useState('')
 
   const reload = useCallback(() => {
@@ -441,29 +559,15 @@ export default function ContestStandingsPage() {
         <div className="contest-badges">
           <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
           {isAdmin && mode === 'ACM' && (
-            <>
-              <button type="button" className="button button-primary" onClick={() => setRollboardOpen(true)}>
-                滚榜
-              </button>
-              <a
-                className="button button-secondary"
-                href={`/contest/${contestId}/board`}
-                target="_blank"
-                rel="noreferrer"
-                title="在新标签页打开独立榜单展示页（投影用）"
-              >
-                榜单展示页 ↗
-              </a>
-              <a
-                className="button button-primary"
-                href={`/contest/${contestId}/roll`}
-                target="_blank"
-                rel="noreferrer"
-                title="在新标签页打开独立滚榜展示页（投影用）"
-              >
-                滚榜展示页 ↗
-              </a>
-            </>
+            <a
+              className="button button-secondary"
+              href={`/contest/${contestId}/standings`}
+              target="_blank"
+              rel="noreferrer"
+              title="在新标签页打开统一动态榜单展示页"
+            >
+              动态榜单 ↗
+            </a>
           )}
         </div>
       </div>
@@ -471,7 +575,6 @@ export default function ContestStandingsPage() {
       {isAdmin && (
         <AdminProblemManager contestId={contestId} problems={data.problems} onChanged={reload} />
       )}
-      {rollboardOpen && <RollBoardPlayer contestId={contestId} onClose={() => setRollboardOpen(false)} />}
     </div>
   )
 }

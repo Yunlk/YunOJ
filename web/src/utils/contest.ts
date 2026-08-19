@@ -56,7 +56,7 @@ export function fromLocalInput(s: string): string {
   return d.toISOString()
 }
 
-/** 距离比赛开始的分钟数（滚榜里的 solved_at） */
+/** 距离比赛开始的分钟数（动态排行榜里的 solved_at） */
 export function minutesSinceStart(solvedAt: string, startTime: string): number {
   const t = new Date(solvedAt).getTime() - new Date(startTime).getTime()
   if (Number.isNaN(t)) return 0

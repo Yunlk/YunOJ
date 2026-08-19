@@ -1,6 +1,8 @@
 # YunOJ
 
-一个从零实现的轻量在线评测系统（Online Judge），Docker 一键部署。
+一个从零实现的轻量在线评测系统（Online Judge），支持题库、在线评测和 ACM/OI/IOI 比赛，Docker 一键部署。
+
+项目地址：[github.com/Yunlk/YunOJ](https://github.com/Yunlk/YunOJ)
 
 - **后端**：Go（web/API 服务 + 评测守护进程两个二进制），性能优先、单文件部署
 - **评测沙箱**：IOI 官方 [isolate](https://github.com/ioi/isolate)（namespace + seccomp 隔离）
@@ -22,9 +24,11 @@
 - 在线 IDE：Monaco 编辑器，自测（自定义输入）与样例测试，不落库即时反馈
 - 比赛工作台：报名（队伍名 + 头像）、总览（公告/倒计时/进度条/单题状态/通过率/
   我的成绩）、比赛内作答页（常驻剩余时间、上一题/下一题）、我的提交、排行榜
-- 比赛系统：ACM（罚时 + 封榜滚榜）/ OI / IOI 三种赛制模板 + 自定义引擎组合、
+- 比赛系统：ACM（罚时 + 封榜动态揭晓）/ OI / IOI 三种赛制模板 + 自定义引擎组合、
   盲评、报名时间窗、可见性（公开/私有）、提交次数上限（比赛默认 + 单题覆盖）、
   比赛题目管理（题库搜索选择器、拖拽排序、题号/单题分值/上限）
+
+ACM 比赛的榜单与动态揭晓使用同一个排行榜页面：封榜前实时显示最新评测状态；比赛结束后，系统按提交时间逐条展示封榜期间的评测结果，最终停留在正式排名，不展示名次变化文案。
 
 ## 架构
 
@@ -48,7 +52,7 @@
   无法委派 memory 控制器的环境）
 - **比较器**：按空白切 token 比较，忽略行末空格/文末换行，避免 Windows 换行误判
 - **计数一致性**：题目通过/提交数仅在首次评测时更新，重测不重复计数
-- **比赛引擎为纯函数**：ACM 罚时 / OI·IOI 计分 / 封榜 / 滚榜均为内存纯计算，
+- **比赛引擎为纯函数**：ACM 罚时 / OI·IOI 计分 / 封榜 / 动态揭晓均为内存纯计算，
   结果可复现、可单元测试，判定落库时仅多写一条冻结标记
 
 ## 快速开始（Docker）
@@ -56,7 +60,7 @@
 前置：Docker + Docker Compose。
 
 ```bash
-git clone <本仓库> && cd YunOJ
+git clone https://github.com/Yunlk/YunOJ.git && cd YunOJ
 cp .env.example .env          # 按需修改，生产环境务必更换 JWT_SECRET
 mkdir -p data
 # Linux 主机注意：web 容器以 uid 1000 写入 ./data，需放开权限
@@ -140,6 +144,13 @@ cd web
 npm run build    # 产物输出到 web/dist，被后端 go:embed 嵌入
 ```
 
+### 常用校验命令
+
+```bash
+go test ./...
+cd web && npm run build
+```
+
 ## 配置项
 
 | 环境变量 | 默认值 | 说明 |
@@ -197,7 +208,6 @@ npm run build    # 产物输出到 web/dist，被后端 go:embed 嵌入
 | GET | `/contests/{id}/problems/{pid}` | 比赛题面上下文（赛前非管理员 403） |
 | GET | `/contests/{id}/submissions` | 我的比赛提交（盲评中脱敏为 hidden） |
 | GET | `/contests/{id}/standings` | 排行榜（盲评进行中对非管理员隐藏） |
-| GET | `/contests/{id}/rollboard` | 滚榜数据（管理员，仅 ACM） |
 | GET | `/health` | 健康检查（含 server_time 供前端时钟校正） |
 
 判题状态：`pending`、`running`、`accepted`、`wrong_answer`、`time_limit_exceeded`、
@@ -235,7 +245,7 @@ Dockerfile.judge      评测机镜像（isolate 编译 + 工具链 + judge）
 
 ## 已知边界与 Roadmap
 
-- [x] 比赛模块（ACM 罚时 / OI 计分、封榜滚榜）
+- [x] 比赛模块（ACM 罚时 / OI 计分、封榜动态揭晓）
 - [x] Special Judge、部分分、交互题
 - [ ] 多评测机动态调度与心跳监控
 - [ ] 代码查重（SIM/MOSS 类）

@@ -43,7 +43,7 @@ function AvatarPicker({ preview, onPick }: { preview: string; onPick: (f: File) 
       />
       <div className="avatar-picker-text">
         <div className="avatar-picker-title">队伍头像</div>
-        <div className="muted">点击选择图片，将显示在排行榜与滚榜上（可选）</div>
+        <div className="muted">点击选择图片，将显示在动态排行榜上（可选）</div>
       </div>
     </div>
   )

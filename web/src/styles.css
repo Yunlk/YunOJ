@@ -1732,6 +1732,59 @@ textarea:focus {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.standings-active-row td {
+  background: #eff6ff;
+  animation: standings-row-focus 0.8s ease-out;
+}
+
+.standings-table tbody tr {
+  animation: standings-row-settle 0.55s ease-out;
+}
+
+.standings-focus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.standings-focus-roll {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
+
+.focus-status {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.judging-cell {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  animation: judging-pulse 1s ease-in-out infinite alternate;
+}
+
+@keyframes standings-row-focus {
+  from { background: #dbeafe; }
+  to { background: #eff6ff; }
+}
+
+@keyframes judging-pulse {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+@keyframes standings-row-settle {
+  from { opacity: 0.35; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .standings-toolbar {
   display: flex;
@@ -1789,131 +1842,6 @@ textarea:focus {
 
 .link-button.danger:hover {
   background: #fef2f2;
-}
-
-/* ---------- 滚榜播放器 ---------- */
-
-.rollboard-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.55);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-  padding: 24px;
-}
-
-.rollboard-modal {
-  background: var(--surface);
-  border-radius: 12px;
-  width: 100%;
-  max-width: 1100px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
-  padding: 20px 24px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-}
-
-.rollboard-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.rollboard-title h2 {
-  font-size: 19px;
-  margin: 0 0 4px;
-}
-
-.rollboard-title .muted {
-  font-size: 13px;
-}
-
-.rollboard-controls {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.rollboard-progress {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 14px 0 10px;
-}
-
-.rollboard-progress-bar {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--bg);
-  overflow: hidden;
-}
-
-.rollboard-progress-fill {
-  height: 100%;
-  background: var(--primary);
-  border-radius: 3px;
-  transition: width 0.3s ease;
-}
-
-.rollboard-event {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  margin-bottom: 12px;
-  font-size: 14px;
-}
-
-.rollboard-event-team {
-  font-weight: 600;
-  font-size: 15px;
-}
-
-.rollboard-event-rank {
-  margin-left: auto;
-  font-weight: 600;
-  color: var(--primary);
-}
-
-.rollboard-table-wrap {
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.rollboard-table-wrap .data-table {
-  border: none;
-  margin: 0;
-}
-
-.rollboard-active-row td {
-  background: #eff6ff;
-}
-
-.rollboard-active-team {
-  font-weight: 700;
-}
-
-.rank-arrow {
-  margin-right: 4px;
-  font-size: 11px;
-}
-
-.rank-up {
-  color: #15803d;
-}
-
-.rank-down {
-  color: var(--red);
 }
 
 /* ---------- 比赛表单：模板 / 封榜 / 高级选项 ---------- */
@@ -2111,26 +2039,6 @@ textarea:focus {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-/* ---------- 滚榜事件横幅 ---------- */
-
-.rollboard-event {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  margin-bottom: 12px;
-  font-size: 14px;
-}
-
-.rollboard-event-main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 /* ---------- 错误边界 ---------- */
@@ -2483,114 +2391,4 @@ textarea:focus {
   .contest-topbar {
     position: static;
   }
-}
-
-/* ---------- 独立展示页（投影模式） ---------- */
-
-.board-standalone {
-  min-height: 100vh;
-  background: var(--surface);
-  padding: 24px 32px 40px;
-  box-sizing: border-box;
-}
-
-.board-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 20px;
-}
-
-.board-header h1 {
-  font-size: 28px;
-  margin: 0;
-}
-
-.board-meta {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  font-size: 16px;
-}
-
-.board-frozen {
-  color: #b45309;
-  font-weight: 600;
-}
-
-.board-clock {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.board-error {
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 18px;
-}
-
-.board-table {
-  width: 100%;
-  border-collapse: collapse;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 18px;
-}
-
-.board-table th,
-.board-table td {
-  padding: 14px 12px;
-  text-align: center;
-  border-bottom: 1px solid var(--bg);
-}
-
-.board-table thead th {
-  background: var(--bg);
-  font-size: 16px;
-  color: var(--text-secondary);
-}
-
-.board-table tbody tr:nth-child(even) {
-  background: #fafbfc;
-}
-
-.board-table td:first-child,
-.board-table th:first-child,
-.board-table td:nth-child(2),
-.board-table th:nth-child(2) {
-  text-align: left;
-}
-
-.board-rank {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 展示页格子加粗加大 */
-.board-table td.ac-cell,
-.board-table td.wa-cell,
-.board-table td.fb-cell {
-  font-size: 16px;
-}
-
-/* 滚榜独立展示页 */
-.roll-standalone {
-  min-height: 100vh;
-  background: var(--bg);
-  padding: 16px;
-  box-sizing: border-box;
-}
-
-.rollboard-embedded .rollboard-modal {
-  max-width: 1400px;
-  margin: 0 auto;
-  min-height: calc(100vh - 32px);
-}
-
-.rollboard-embedded .rollboard-modal .rollboard-table-wrap {
-  flex: 1;
 }

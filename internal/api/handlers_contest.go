@@ -567,7 +567,7 @@ func (a *API) handleUploadContestAvatar(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"avatar": filename})
 }
 
-// handleServeContestAvatar 对外提供头像文件（排行榜/滚榜展示用，公开访问）。
+// handleServeContestAvatar 对外提供头像文件（动态排行榜展示用，公开访问）。
 func (a *API) handleServeContestAvatar(w http.ResponseWriter, r *http.Request) {
 	cid, err := idParam(r)
 	if err != nil {
@@ -823,7 +823,8 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 	switch c.Mode {
 	case model.ContestModeACM:
 		fa := freezeAt(c)
-		frozenActive := !fa.IsZero() && time.Now().After(fa)
+		now := time.Now()
+		frozenActive := !fa.IsZero() && now.After(fa)
 		fb := time.Time{}
 		if frozenActive {
 			fb = fa
@@ -832,9 +833,24 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		dtos := acmStandingsDTO(standings, problems, avatars)
 		markFirstBlood(dtos)
 		resp["standings"] = dtos
+		// 封榜前公开最近提交的生命周期，供统一榜单聚焦 pending/running/终态。
+		// 进入封榜后立即停止返回，避免泄露冻结提交与判定。
+		if !frozenActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
+			if latest, ok := latestSubmissionDTO(subs, problems, cctx.Teams, avatars); ok {
+				resp["latest_submission"] = latest
+			}
+		}
 		if frozenActive {
 			resp["freeze_at"] = fa
 			resp["frozen_submissions"] = len(frozenSubs)
+			// 比赛结束后把封榜提交作为同一榜单页面上的揭晓事件返回。
+			// 比赛进行中不返回事件，避免提前泄露冻结结果。
+			if now.After(c.EndTime) && len(frozenSubs) > 0 {
+				events := contest.RollBoard(cctx, standings, frozenSubs)
+				resp["roll_events"] = rollEventDTOs(events, problems, avatars)
+				resp["roll_initial_standings"] = dtos
+				resp["roll_available"] = true
+			}
 		}
 	case model.ContestModeOI, model.ContestModeIOI:
 		// 各题测试点满分：权威来源为 manifest（与 judge 评测用分值一致）
@@ -857,54 +873,55 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------- 滚榜（管理员） ----------
+type liveSubmissionDTO struct {
+	SubmissionID int64     `json:"submission_id"`
+	ProblemID    int64     `json:"problem_id"`
+	DisplayID    string    `json:"display_id"`
+	TeamID       int64     `json:"team_id"`
+	TeamName     string    `json:"team_name"`
+	TeamAvatar   string    `json:"team_avatar"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+}
 
-func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
-	cid, err := idParam(r)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
-		return
+func latestSubmissionDTO(subs []model.Submission, problems []contestProblemDTO,
+	teams map[int64]string, avatars map[int64]string) (liveSubmissionDTO, bool) {
+	displayIDs := make(map[int64]string, len(problems))
+	for _, p := range problems {
+		displayIDs[p.ProblemID] = p.DisplayID
 	}
-	c, err := a.store.GetContest(r.Context(), cid)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "比赛不存在")
-		return
+	for i := len(subs) - 1; i >= 0; i-- {
+		sub := subs[i]
+		teamName, ok := teams[sub.UserID]
+		if !ok {
+			continue
+		}
+		return liveSubmissionDTO{
+			SubmissionID: sub.ID,
+			ProblemID:    sub.ProblemID,
+			DisplayID:    displayIDs[sub.ProblemID],
+			TeamID:       sub.UserID,
+			TeamName:     teamName,
+			TeamAvatar:   avatars[sub.UserID],
+			Status:       sub.Status,
+			CreatedAt:    sub.CreatedAt,
+		}, true
 	}
-	if err != nil {
-		slogError(r, "滚榜", err)
-		writeError(w, http.StatusInternalServerError, "查询失败")
-		return
-	}
-	if c.Mode != model.ContestModeACM {
-		writeError(w, http.StatusBadRequest, "只有 ACM 赛制支持滚榜")
-		return
-	}
-	ctx := r.Context()
-	cctx, problems, avatars, err := a.buildContestContext(ctx, c)
-	if err != nil {
-		slogError(r, "滚榜上下文", err)
-		writeError(w, http.StatusInternalServerError, "查询失败")
-		return
-	}
-	subs, err := a.store.ListContestSubmissions(ctx, cid)
-	if err != nil {
-		slogError(r, "滚榜提交", err)
-		writeError(w, http.StatusInternalServerError, "查询失败")
-		return
-	}
-	base, frozen := contest.BuildACMStandings(cctx, subs, freezeAt(c))
-	events := contest.RollBoard(cctx, base, frozen)
+	return liveSubmissionDTO{}, false
+}
 
-	type rollEventDTO struct {
-		SubmissionID int64            `json:"submission_id"`
-		ProblemID    int64            `json:"problem_id"`
-		TeamID       int64            `json:"team_id"`
-		TeamName     string           `json:"team_name"`
-		TeamAvatar   string           `json:"team_avatar"`
-		RankBefore   int              `json:"rank_before"`
-		RankAfter    int              `json:"rank_after"`
-		Standings    []acmStandingDTO `json:"standings"`
-	}
+type rollEventDTO struct {
+	SubmissionID int64            `json:"submission_id"`
+	ProblemID    int64            `json:"problem_id"`
+	Status       string           `json:"status"`
+	TeamID       int64            `json:"team_id"`
+	TeamName     string           `json:"team_name"`
+	TeamAvatar   string           `json:"team_avatar"`
+	Standings    []acmStandingDTO `json:"standings"`
+}
+
+// rollEventDTOs 将榜单引擎事件转换为统一榜单页面使用的轻量 DTO。
+func rollEventDTOs(events []contest.RollEvent, problems []contestProblemDTO, avatars map[int64]string) []rollEventDTO {
 	dtos := make([]rollEventDTO, 0, len(events))
 	for _, e := range events {
 		sd := acmStandingsDTO(e.Standings, problems, avatars)
@@ -912,21 +929,14 @@ func (a *API) handleContestRollBoard(w http.ResponseWriter, r *http.Request) {
 		dtos = append(dtos, rollEventDTO{
 			SubmissionID: e.Submission.ID,
 			ProblemID:    e.Submission.ProblemID,
+			Status:       e.Submission.Status,
 			TeamID:       e.TeamID,
 			TeamName:     e.TeamName,
 			TeamAvatar:   avatars[e.TeamID],
-			RankBefore:   e.RankBefore,
-			RankAfter:    e.RankAfter,
 			Standings:    sd,
 		})
 	}
-	initial := acmStandingsDTO(base, problems, avatars)
-	markFirstBlood(initial)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"contest": c, "problems": problems,
-		"freeze_at": freezeAt(c), "events": dtos,
-		"initial_standings": initial,
-	})
+	return dtos
 }
 
 // ---------- DTO 转换 ----------

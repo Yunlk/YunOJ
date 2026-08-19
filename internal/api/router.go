@@ -102,7 +102,6 @@ func (a *API) Router() http.Handler {
 		r.Put("/api/contests/{id}/problems/{problem_id}", a.handleUpdateContestProblem)
 		r.Put("/api/contests/{id}/problems/order", a.handleReorderContestProblems)
 		r.Delete("/api/contests/{id}/problems/{problem_id}", a.handleRemoveContestProblem)
-		r.Get("/api/contests/{id}/rollboard", a.handleContestRollBoard)
 	})
 
 	// 未匹配路径：/api 下返回 JSON 404，其余走前端静态资源

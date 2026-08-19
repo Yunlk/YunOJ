@@ -280,23 +280,29 @@ export interface ContestStandings {
   standings: ACMStanding[] | OIStanding[]
   freeze_at?: string
   frozen_submissions?: number
+  latest_submission?: LiveSubmission
+  roll_available?: boolean
+  roll_initial_standings?: ACMStanding[]
+  roll_events?: RollEvent[]
+}
+
+export interface LiveSubmission {
+  submission_id: number
+  problem_id: number
+  display_id: string
+  team_id: number
+  team_name: string
+  team_avatar: string
+  status: string
+  created_at: string
 }
 
 export interface RollEvent {
   submission_id: number
   problem_id: number
+  status: string
   team_id: number
   team_name: string
   team_avatar: string
-  rank_before: number
-  rank_after: number
   standings: ACMStanding[]
-}
-
-export interface RollBoard {
-  contest: Contest
-  problems: ContestProblem[]
-  freeze_at?: string
-  events: RollEvent[]
-  initial_standings: ACMStanding[]
 }

@@ -10,7 +10,6 @@ import type {
   Page,
   ProblemDetail,
   ProblemListItem,
-  RollBoard,
   Sample,
   SubmissionDetail,
   SubmissionListItem,
@@ -403,11 +402,6 @@ export async function submitToContest(
 
 export async function getContestStandings(id: number | string) {
   const res = await api.get<ContestStandings>(`/contests/${id}/standings`)
-  return res.data
-}
-
-export async function getContestRollBoard(id: number | string) {
-  const res = await api.get<RollBoard>(`/contests/${id}/rollboard`)
   return res.data
 }
 

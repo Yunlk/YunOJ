@@ -16,8 +16,6 @@ import ProblemDetail from './pages/ProblemDetail'
 import ProblemForm from './pages/ProblemForm'
 import ProblemList from './pages/ProblemList'
 import Register from './pages/Register'
-import StandaloneBoard from './pages/StandaloneBoard'
-import StandaloneRoll from './pages/StandaloneRoll'
 import Status from './pages/Status'
 import SubmissionDetail from './pages/SubmissionDetail'
 import SubmitFile from './pages/SubmitFile'
@@ -60,12 +58,7 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* 独立展示页：无导航栏，全屏投影模式 */}
-        <Route path="/contest/:id/board" element={<StandaloneBoard />} />
-        <Route path="/contest/:id/roll" element={<StandaloneRoll />} />
-        <Route path="*" element={<AppLayout />} />
-      </Routes>
+      <AppLayout />
     </BrowserRouter>
   )
 }

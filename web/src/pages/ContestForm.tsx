@@ -136,7 +136,7 @@ export default function ContestForm() {
     if (isEdit && Date.now() >= start) {
       const risk = [
         '比赛已经开始，修改计分/罚时/题目或时间会影响已产生的排行榜与提交判定',
-        '已封榜的比赛修改配置可能导致滚榜数据与榜单不一致',
+        '已封榜的比赛修改配置可能导致动态揭晓数据与榜单不一致',
       ].join('\n')
       if (!window.confirm(`${risk}\n\n确定继续保存？`)) {
         setBusy(false)
@@ -281,7 +281,7 @@ export default function ContestForm() {
           </div>
           <p className="field-hint">
             {isACMEngine
-              ? '封榜后（比赛最后 N 分钟）新提交不再更新排行榜，比赛结束后可滚榜解冻揭晓。'
+              ? '封榜后（比赛最后 N 分钟）新提交不再更新排行榜，比赛结束后会在动态排行榜中逐条揭晓。'
               : '封榜仅 ACM 赛制支持（OI/IOI 为按分数排名，无封榜概念）。'}
           </p>
         </div>

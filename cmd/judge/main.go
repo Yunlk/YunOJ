@@ -79,13 +79,17 @@ func runWorker(ctx context.Context, st *store.Store, q *queue.Queue,
 
 	logger := slog.With("worker", workerID)
 
-	// 启动恢复：找回上次崩溃遗留的处理中任务
-	ids, err := q.Recover(ctx, workerID)
+	// 启动恢复：找回上次崩溃遗留的处理中任务。
+	// 顺序关键：先把数据库状态重置为 pending，再把任务放回主队列，
+	// 避免其他 worker 在状态重置前弹出任务后按 running 跳过丢弃。
+	ids, err := q.PeekProcessing(ctx, workerID)
 	if err != nil {
-		logger.Error("恢复队列失败", "err", err)
+		logger.Error("读取处理中列表失败", "err", err)
 	} else if len(ids) > 0 {
 		if err := st.ResetRunningByIDs(ctx, ids); err != nil {
 			logger.Error("重置遗留提交失败", "err", err)
+		} else if err := q.Reclaim(ctx, workerID); err != nil {
+			logger.Error("遗留任务放回队列失败", "err", err)
 		} else {
 			logger.Info("已恢复崩溃遗留任务", "count", len(ids))
 		}

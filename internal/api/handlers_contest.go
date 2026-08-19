@@ -14,7 +14,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yunoj/yunoj/internal/contest"
-	"github.com/yunoj/yunoj/internal/data"
 	"github.com/yunoj/yunoj/internal/model"
 	"github.com/yunoj/yunoj/internal/store"
 )
@@ -450,6 +449,18 @@ func (a *API) handleServeContestAvatar(w http.ResponseWriter, r *http.Request) {
 
 // ---------- 比赛内提交 ----------
 
+// contestSubmitWindowError 比赛提交时间窗校验：有效区间为 [start_time, end_time)，
+// end_time 整点（含）起不再接受提交。返回空串表示在窗口内。
+func contestSubmitWindowError(c model.Contest, now time.Time) string {
+	if now.Before(c.StartTime) {
+		return "比赛尚未开始"
+	}
+	if !now.Before(c.EndTime) {
+		return "比赛已结束"
+	}
+	return ""
+}
+
 func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 	u, _ := userFromCtx(r.Context())
 	cid, err := idParam(r)
@@ -474,14 +485,9 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "请先报名参加该比赛")
 		return
 	}
-	// 2. 时间窗口校验
-	now := time.Now()
-	if now.Before(c.StartTime) {
-		writeError(w, http.StatusBadRequest, "比赛尚未开始")
-		return
-	}
-	if now.After(c.EndTime) {
-		writeError(w, http.StatusBadRequest, "比赛已结束")
+	// 2. 时间窗口校验：[start_time, end_time)，end_time 整点起拒绝
+	if msg := contestSubmitWindowError(c, time.Now()); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 
@@ -495,15 +501,15 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 3. 题目必须属于该比赛
-	inContest := false
+	var cp *model.ContestProblem
 	cps, _ := a.store.ListContestProblems(r.Context(), cid)
-	for _, cp := range cps {
-		if cp.ProblemID == req.ProblemID {
-			inContest = true
+	for i := range cps {
+		if cps[i].ProblemID == req.ProblemID {
+			cp = &cps[i]
 			break
 		}
 	}
-	if !inContest {
+	if cp == nil {
 		writeError(w, http.StatusBadRequest, "该题目不属于本场比赛")
 		return
 	}
@@ -518,10 +524,15 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "该题目已停用，无法提交")
 		return
 	}
-	if problem.SubmissionLimit > 0 {
+	// 5. 提交次数限制：单题覆盖值（NULL=继承比赛默认，0=不限）
+	limit := c.SubmissionLimit
+	if cp.SubmissionLimit != nil {
+		limit = *cp.SubmissionLimit
+	}
+	if limit > 0 {
 		n, err := a.store.CountTeamProblemSubmissions(r.Context(), cid, req.ProblemID, u.ID)
-		if err == nil && n >= int64(problem.SubmissionLimit) {
-			writeError(w, http.StatusForbidden, fmt.Sprintf("该题提交次数已达上限（%d 次）", problem.SubmissionLimit))
+		if err == nil && n >= int64(limit) {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("该题提交次数已达上限（%d 次）", limit))
 			return
 		}
 	}
@@ -641,15 +652,18 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 			resp["frozen_submissions"] = len(frozenSubs)
 		}
 	case model.ContestModeOI, model.ContestModeIOI:
-		// 收集各题满分（未配置时按测试点数量均分）
+		// 各题测试点满分：权威来源为 manifest（与 judge 评测用分值一致）
 		scores := map[int64][]int{}
 		for _, p := range problems {
-			full, err := a.store.GetProblem(ctx, p.ProblemID)
+			tcs, err := a.store.ListTestcases(ctx, p.ProblemID)
 			if err != nil {
 				continue
 			}
-			cases, _ := data.ListTests(a.cfg.DataDir, p.ProblemID)
-			scores[p.ProblemID] = contest.CaseFullScores(full.TestcaseScores, len(cases))
+			vals := make([]int, 0, len(tcs))
+			for _, t := range tcs {
+				vals = append(vals, t.Score)
+			}
+			scores[p.ProblemID] = vals
 		}
 		modeA := c.Mode == model.ContestModeOI
 		standings := contest.BuildOIStandings(cctx, subs, scores, modeA)

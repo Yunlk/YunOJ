@@ -34,7 +34,8 @@ func spjLimits() Limits {
 
 // judgeSPJInBox 执行 SPJ 型题目的评测流水线：
 // 编译选手代码与 SPJ → 逐点运行选手程序 → 运行 SPJ 判定。
-func (r *Runner) judgeSPJInBox(ctx context.Context, sub model.Submission, problem model.Problem, lang langs.Language) (
+func (r *Runner) judgeSPJInBox(ctx context.Context, sub model.Submission, problem model.Problem,
+	lang langs.Language, judgeCases []judgeCase) (
 	verdict, compileError string, results []model.CaseResult, scores []int, timeMs, memoryKb int) {
 
 	boxDir := r.Sandbox.BoxDir(r.BoxID)
@@ -61,20 +62,15 @@ func (r *Runner) judgeSPJInBox(ctx context.Context, sub model.Submission, proble
 		return model.StatusSystemError, "SPJ 编译失败: " + stderr, nil, nil, 0, 0
 	}
 
-	// 3. 读取测试数据
-	cases, err := data.ListTests(r.DataDir, sub.ProblemID)
-	if err != nil {
-		return model.StatusSystemError, "读取测试数据失败", nil, nil, 0, 0
-	}
-	if len(cases) == 0 {
-		return model.StatusSystemError, "该题目没有测试数据，请联系管理员", nil, nil, 0, 0
-	}
-
-	// 4. 逐点运行
+	// 3. 逐点运行
 	verdict = model.StatusAccepted
-	fulls := caseFullScores(problem, len(cases))
-	for i, tc := range cases {
-		cr, score := r.runSPJCase(ctx, boxDir, tc, i+1, problem, lang, fulls[i])
+	for _, jc := range judgeCases {
+		tc := data.TestCase{
+			Name:       strconv.Itoa(jc.Ordinal),
+			InputPath:  jc.InputPath,
+			OutputPath: jc.OutputPath,
+		}
+		cr, score := r.runSPJCase(ctx, boxDir, tc, jc.Ordinal, problem, lang, jc.Score)
 		results = append(results, cr)
 		scores = append(scores, score)
 		if cr.TimeMs > timeMs {

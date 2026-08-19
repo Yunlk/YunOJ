@@ -82,11 +82,9 @@ redis.call('DEL', KEYS[1])
 return n
 `)
 
-// Recover 在 worker 启动时调用，找回上次崩溃遗留的任务。
-// 返回找回的任务 ID 列表。
-func (q *Queue) Recover(ctx context.Context, workerID int) ([]int64, error) {
-	vals, err := recoverScript.Run(ctx, q.rdb,
-		[]string{processingKey(workerID), mainKey}).StringSlice()
+// PeekProcessing 读取 worker 处理中列表（不移动）。
+func (q *Queue) PeekProcessing(ctx context.Context, workerID int) ([]int64, error) {
+	vals, err := q.rdb.LRange(ctx, processingKey(workerID), 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +95,14 @@ func (q *Queue) Recover(ctx context.Context, workerID int) ([]int64, error) {
 		}
 	}
 	return ids, nil
+}
+
+// Reclaim 把处理中列表的全部任务搬回主队列并清空该列表（幂等）。
+// 必须在数据库把任务状态重置为 pending 之后再调用，
+// 否则其他 worker 可能先弹出任务、因状态仍是 running 而丢弃。
+func (q *Queue) Reclaim(ctx context.Context, workerID int) error {
+	return recoverScript.Run(ctx, q.rdb,
+		[]string{processingKey(workerID), mainKey}).Err()
 }
 
 // TryLock 尝试获取一个带 TTL 的互斥标记（用于提交限流等场景）。

@@ -6,7 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yunoj/yunoj/internal/data"
 	"github.com/yunoj/yunoj/internal/langs"
@@ -36,7 +38,8 @@ func interactiveCommand(userCmd, interactorCmd []string) []string {
 }
 
 // judgeInteractiveInBox 执行交互题的评测流水线。
-func (r *Runner) judgeInteractiveInBox(ctx context.Context, sub model.Submission, problem model.Problem, lang langs.Language) (
+func (r *Runner) judgeInteractiveInBox(ctx context.Context, sub model.Submission, problem model.Problem,
+	lang langs.Language, judgeCases []judgeCase) (
 	verdict, compileError string, results []model.CaseResult, scores []int, timeMs, memoryKb int) {
 
 	boxDir := r.Sandbox.BoxDir(r.BoxID)
@@ -76,20 +79,15 @@ func (r *Runner) judgeInteractiveInBox(ctx context.Context, sub model.Submission
 		return model.StatusSystemError, "写入交互器二进制失败", nil, nil, 0, 0
 	}
 
-	// 4. 读取测试数据
-	cases, err := data.ListTests(r.DataDir, sub.ProblemID)
-	if err != nil {
-		return model.StatusSystemError, "读取测试数据失败", nil, nil, 0, 0
-	}
-	if len(cases) == 0 {
-		return model.StatusSystemError, "该题目没有测试数据，请联系管理员", nil, nil, 0, 0
-	}
-
-	// 5. 逐点运行（每个测试点是一次完整的选手-交互器对话）
+	// 4. 逐点运行（每个测试点是一次完整的选手-交互器对话）
 	verdict = model.StatusAccepted
-	fulls := caseFullScores(problem, len(cases))
-	for i, tc := range cases {
-		cr, score := r.runInteractiveCase(ctx, boxDir, interBoxID, tc, i+1, problem, lang, fulls[i])
+	for _, jc := range judgeCases {
+		tc := data.TestCase{
+			Name:       strconv.Itoa(jc.Ordinal),
+			InputPath:  jc.InputPath,
+			OutputPath: jc.OutputPath,
+		}
+		cr, score := r.runInteractiveCase(ctx, boxDir, interBoxID, tc, jc.Ordinal, problem, lang, jc.Score)
 		results = append(results, cr)
 		scores = append(scores, score)
 		if cr.TimeMs > timeMs {
@@ -166,11 +164,23 @@ func (r *Runner) runInteractiveCase(ctx context.Context, boxDir string, interBox
 		StackKb:    scaleInt(problem.MemoryLimitKb, lang.MemoryFactor),
 		Processes:  16,
 	}
+	// 整个交互测试点的硬性时限（墙钟 + 30s 余量）：无论哪一侧挂起，
+	// 超时后强制清理两个沙箱，保证评测 worker 不被卡死。
+	caseCtx, cancelCase := context.WithTimeout(ctx,
+		time.Duration(limits.WallTimeMs)*time.Millisecond+30*time.Second)
+	defer cancelCase()
+	// 测试点结束/超时后强制清理箱内残留进程（isolate 被信号杀死时
+	// 箱内子进程可能存活，必须显式 cleanup）
+	defer func() {
+		_ = r.Sandbox.Cleanup(context.Background(), r.BoxID)
+		_ = r.Sandbox.Cleanup(context.Background(), interBoxID)
+	}()
+
 	type outcome struct {
 		res RunResult
 		err error
 	}
-	userCtx, cancelUser := context.WithCancel(ctx)
+	userCtx, cancelUser := context.WithCancel(caseCtx)
 	defer cancelUser()
 	userCh := make(chan outcome, 1)
 	go func() {
@@ -178,9 +188,11 @@ func (r *Runner) runInteractiveCase(ctx context.Context, boxDir string, interBox
 			"/pipes/f1", "/pipes/f2", "/box/user_err.txt", lang.RunCommand...)
 		userCh <- outcome{res, err}
 	}()
-	interRes, interErr := r.Sandbox.RunAt(ctx, interBoxID, limits, boxDir,
+	interRes, interErr := r.Sandbox.RunAt(caseCtx, interBoxID, limits, boxDir,
 		"/pipes/f2", "/pipes/f1", "/box/inter_err.txt", "./interactor", "case.in")
 	cancelUser() // 交互器结束即终止选手
+	// 立即清理选手沙箱：隔离挂起的箱内子进程，确保下面的通道接收不被阻塞
+	_ = r.Sandbox.Cleanup(context.Background(), r.BoxID)
 	userOutcome := <-userCh
 
 	if interErr != nil || interRes.Status == "SE" {

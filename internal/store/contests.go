@@ -132,6 +132,20 @@ func (s *Store) UpdateContestProblem(ctx context.Context, cp model.ContestProble
 	return nil
 }
 
+// GetContestProblem 查询单道比赛题目（分值/上限覆盖）。
+func (s *Store) GetContestProblem(ctx context.Context, contestID, problemID int64) (model.ContestProblem, error) {
+	var cp model.ContestProblem
+	err := s.pool.QueryRow(ctx,
+		`SELECT contest_id, problem_id, display_id, sort_order, score, submission_limit
+		 FROM contest_problems WHERE contest_id = $1 AND problem_id = $2`,
+		contestID, problemID,
+	).Scan(&cp.ContestID, &cp.ProblemID, &cp.DisplayID, &cp.SortOrder, &cp.Score, &cp.SubmissionLimit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.ContestProblem{}, ErrNotFound
+	}
+	return cp, err
+}
+
 // ListContestProblems 列出比赛题目（按 sort_order）。
 func (s *Store) ListContestProblems(ctx context.Context, contestID int64) ([]model.ContestProblem, error) {
 	rows, err := s.pool.Query(ctx,

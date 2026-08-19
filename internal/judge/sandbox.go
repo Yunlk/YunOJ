@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Limits 单次运行的资源限制。
@@ -45,6 +46,8 @@ type Sandbox interface {
 	// 交互题中两个沙箱需要访问同一个宿主 FIFO 目录时使用。
 	RunAt(ctx context.Context, boxID int, limits Limits, hostDir,
 		stdinFile, stdoutFile, stderrFile string, args ...string) (RunResult, error)
+	// Cleanup 强制清理沙箱：杀掉箱内所有进程（交互题终结挂起进程用）。
+	Cleanup(ctx context.Context, boxID int) error
 	// BoxDir 沙箱可写目录的宿主路径（评测机写源码/读输出用）
 	BoxDir(boxID int) string
 }
@@ -81,11 +84,8 @@ func (s *IsolateSandbox) cgArgs() []string {
 // InitBox 清理旧沙箱并初始化新沙箱。
 func (s *IsolateSandbox) InitBox(ctx context.Context, boxID int) error {
 	id := strconv.Itoa(boxID)
-	// 清理上次残留（不存在时 isolate 会报错，忽略即可）
-	cleanupArgs := append([]string{"--cleanup", "-b", id}, s.cgArgs()...)
-	cleanup := exec.CommandContext(ctx, s.isolatePath, cleanupArgs...)
-	_ = cleanup.Run()
-
+	// 清理上次残留；沙箱不存在时报错属正常，忽略
+	_ = s.Cleanup(ctx, boxID)
 	initArgs := append([]string{"--init", "-b", id}, s.cgArgs()...)
 	init := exec.CommandContext(ctx, s.isolatePath, initArgs...)
 	if out, err := init.CombinedOutput(); err != nil {
@@ -100,6 +100,23 @@ func (s *IsolateSandbox) InitBox(ctx context.Context, boxID int) error {
 	// 其子目录的内容不会出现在 dir 规则的 bind 挂载视图中。
 	if err := os.MkdirAll(filepath.Join(s.baseDir, id, "pipes"), 0o755); err != nil {
 		return fmt.Errorf("创建 pipes 目录: %w", err)
+	}
+	return nil
+}
+
+// Cleanup 强制清理沙箱：杀掉箱内所有进程并销毁沙箱。
+// 用于终结交互题中挂起的选手/交互器进程（isolate 被信号杀死时
+// 箱内子进程可能存活，必须显式清理）。
+func (s *IsolateSandbox) Cleanup(ctx context.Context, boxID int) error {
+	// 清理时使用不受外部取消影响的超时上下文，保证挂起恢复路径也能完成清理
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	args := append([]string{"--cleanup", "-b", strconv.Itoa(boxID)}, s.cgArgs()...)
+	cmd := exec.CommandContext(cleanupCtx, s.isolatePath, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// 沙箱不存在时 isolate 返回非零，属正常情况，忽略
+		return fmt.Errorf("isolate cleanup: %w: %s", err, out)
 	}
 	return nil
 }
@@ -164,13 +181,23 @@ func (s *IsolateSandbox) RunAt(ctx context.Context, boxID int, limits Limits, ho
 	cmd := exec.CommandContext(ctx, s.isolatePath, cmdArgs...)
 	// isolate 的 --stdin/--stdout/--stderr/--meta 相对路径按宿主 cwd 解析
 	cmd.Dir = hostDir
-	out, err := cmd.CombinedOutput()
+	// 输出落盘而非捕获管道：交互题中 isolate 被杀后，箱内子进程若继承了
+	// Go 捕获管道，CombinedOutput 会永久阻塞（实测导致评测 worker 卡死）。
+	logFile, err := os.Create(filepath.Join(hostDir, "isolate-"+id+".log"))
+	if err != nil {
+		return RunResult{Status: "SE"}, fmt.Errorf("创建 isolate 日志文件: %w", err)
+	}
+	defer logFile.Close()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil // 继承空设备，与 CombinedOutput 行为一致
+	err = cmd.Run()
 	// 注意：isolate 的退出码继承 box 内程序的退出码（编译失败、超时、
 	// 被信号杀死等都会非零），这些属于正常评测路径。只有 meta 文件
 	// 未生成（isolate 自身故障：沙箱缺失、参数错误等）才视为系统错误。
 	if err != nil {
 		if _, statErr := os.Stat(metaFile); statErr != nil {
-			return RunResult{Status: "SE"}, fmt.Errorf("isolate run: %w: %s (args: %v)", err, out, cmdArgs)
+			return RunResult{Status: "SE"}, fmt.Errorf("isolate run: %w (args: %v)", err, cmdArgs)
 		}
 	}
 

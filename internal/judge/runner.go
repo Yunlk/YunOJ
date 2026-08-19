@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/yunoj/yunoj/internal/data"
@@ -43,7 +44,8 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 		return err
 	}
 	if sub.Status != model.StatusPending {
-		return nil // 已处理过（重复消费等场景），跳过
+		logger.Warn("跳过非 pending 提交（可能来自恢复竞态或重复消费）", "status", sub.Status)
+		return nil
 	}
 
 	problem, err := r.Store.GetProblem(ctx, sub.ProblemID)
@@ -74,17 +76,29 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 		compileError = "沙箱初始化失败"
 		logger.Error("sandbox init", "err", err)
 	} else {
-		// 调度器：按题目类型分发到对应评测流水线
-		switch problem.Type {
-		case model.ProblemTypeSPJ:
-			verdict, compileError, results, scores, timeMs, memoryKb = r.judgeSPJInBox(ctx, sub, problem, lang)
-		case model.ProblemTypeInteractive:
-			verdict, compileError, results, scores, timeMs, memoryKb = r.judgeInteractiveInBox(ctx, sub, problem, lang)
-		case model.ProblemTypeStandard, "":
-			verdict, compileError, results, timeMs, memoryKb = r.judgeInBox(ctx, sub, problem, lang)
-			scores = computeStandardScores(problem, results)
-		default:
-			compileError = "暂不支持的题目类型: " + problem.Type
+		// 测试点与分值：权威来源为 manifest；比赛单题分值覆盖在此等比例缩放
+		judgeCases, errMsg := r.loadJudgeCases(ctx, problem)
+		if errMsg != "" {
+			compileError = errMsg
+		} else {
+			if sub.ContestID != nil {
+				if cp, err := r.Store.GetContestProblem(ctx, *sub.ContestID, sub.ProblemID); err == nil &&
+					cp.Score != nil && *cp.Score > 0 {
+					judgeCases = scaleJudgeCases(judgeCases, *cp.Score)
+				}
+			}
+			// 调度器：按题目类型分发到对应评测流水线
+			switch problem.Type {
+			case model.ProblemTypeSPJ:
+				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeSPJInBox(ctx, sub, problem, lang, judgeCases)
+			case model.ProblemTypeInteractive:
+				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeInteractiveInBox(ctx, sub, problem, lang, judgeCases)
+			case model.ProblemTypeStandard, "":
+				verdict, compileError, results, timeMs, memoryKb = r.judgeInBox(ctx, sub, problem, lang, judgeCases)
+				scores = computeStandardScores(judgeCases, results)
+			default:
+				compileError = "暂不支持的题目类型: " + problem.Type
+			}
 		}
 	}
 
@@ -122,13 +136,87 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 	return nil
 }
 
+// judgeCase 单个待评测测试点（含分值）。
+type judgeCase struct {
+	Ordinal    int
+	InputPath  string
+	OutputPath string
+	Score      int
+}
+
+// loadJudgeCases 加载评测用测试点：权威来源为 problem_testcases manifest。
+// manifest 为空时回退到文件列表 + 均分（旧数据未回填的兼容路径）。
+func (r *Runner) loadJudgeCases(ctx context.Context, problem model.Problem) ([]judgeCase, string) {
+	tcs, err := r.Store.ListTestcases(ctx, problem.ID)
+	if err != nil {
+		return nil, "读取测试点配置失败"
+	}
+	if len(tcs) == 0 {
+		cases, err := data.ListTests(r.DataDir, problem.ID)
+		if err != nil {
+			return nil, "读取测试数据失败"
+		}
+		if len(cases) == 0 {
+			return nil, "该题目没有测试数据，请联系管理员"
+		}
+		fulls := caseFullScores(problem, len(cases))
+		out := make([]judgeCase, 0, len(cases))
+		for i, c := range cases {
+			ordinal, convErr := strconv.Atoi(c.Name)
+			if convErr != nil {
+				ordinal = i + 1
+			}
+			out = append(out, judgeCase{
+				Ordinal: ordinal, InputPath: c.InputPath, OutputPath: c.OutputPath, Score: fulls[i],
+			})
+		}
+		return out, ""
+	}
+	out := make([]judgeCase, 0, len(tcs))
+	for _, t := range tcs {
+		inPath := store.TestcaseFilePath(r.DataDir, problem.ID, t.Ordinal, "in")
+		outPath := store.TestcaseFilePath(r.DataDir, problem.ID, t.Ordinal, "out")
+		if _, err := os.Stat(inPath); err != nil {
+			return nil, fmt.Sprintf("测试点 %d 数据文件缺失", t.Ordinal)
+		}
+		if _, err := os.Stat(outPath); err != nil {
+			return nil, fmt.Sprintf("测试点 %d 数据文件缺失", t.Ordinal)
+		}
+		out = append(out, judgeCase{
+			Ordinal: t.Ordinal, InputPath: inPath, OutputPath: outPath, Score: t.Score,
+		})
+	}
+	return out, ""
+}
+
+// scaleJudgeCases 按比赛单题分值覆盖等比例缩放各测试点满分。
+// 除不尽的余数补给最后一个测试点，保证总分精确等于 target。
+func scaleJudgeCases(cases []judgeCase, target int) []judgeCase {
+	sum := 0
+	for _, c := range cases {
+		sum += c.Score
+	}
+	if sum <= 0 || sum == target || len(cases) == 0 {
+		return cases
+	}
+	out := make([]judgeCase, len(cases))
+	copy(out, cases)
+	acc := 0
+	for i := 0; i < len(out)-1; i++ {
+		scaled := out[i].Score * target / sum // 向下取整
+		out[i].Score = scaled
+		acc += scaled
+	}
+	out[len(out)-1].Score = target - acc
+	return out
+}
+
 // computeStandardScores 按逐点结果与测试点满分计算普通题目的各点得分。
-func computeStandardScores(problem model.Problem, results []model.CaseResult) []int {
-	fulls := caseFullScores(problem, len(results))
+func computeStandardScores(cases []judgeCase, results []model.CaseResult) []int {
 	scores := make([]int, len(results))
-	for i, r := range results {
-		if i < len(fulls) && r.Status == model.StatusAccepted {
-			scores[i] = fulls[i]
+	for i, res := range results {
+		if i < len(cases) && res.Status == model.StatusAccepted {
+			scores[i] = cases[i].Score
 		}
 	}
 	return scores
@@ -143,7 +231,8 @@ func sumInts(vals []int) int {
 }
 
 // judgeInBox 在沙箱内完成「写源码 → 编译 → 逐点运行比较」全流程。
-func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem model.Problem, lang langs.Language) (
+func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem model.Problem,
+	lang langs.Language, judgeCases []judgeCase) (
 	verdict, compileError string, results []model.CaseResult, timeMs, memoryKb int) {
 
 	boxDir := r.Sandbox.BoxDir(r.BoxID)
@@ -160,19 +249,15 @@ func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem m
 		}
 	}
 
-	// 3. 读取测试数据
-	cases, err := data.ListTests(r.DataDir, sub.ProblemID)
-	if err != nil {
-		return model.StatusSystemError, "读取测试数据失败", nil, 0, 0
-	}
-	if len(cases) == 0 {
-		return model.StatusSystemError, "该题目没有测试数据，请联系管理员", nil, 0, 0
-	}
-
-	// 4. 逐点运行，首个非 AC 即停止（与主流 OJ 一致）
+	// 3. 逐点运行，首个非 AC 即停止（与主流 OJ 一致）
 	verdict = model.StatusAccepted
-	for i, tc := range cases {
-		cr := r.runCase(ctx, boxDir, tc, i+1, problem, lang)
+	for _, jc := range judgeCases {
+		tc := data.TestCase{
+			Name:       strconv.Itoa(jc.Ordinal),
+			InputPath:  jc.InputPath,
+			OutputPath: jc.OutputPath,
+		}
+		cr := r.runCase(ctx, boxDir, tc, jc.Ordinal, problem, lang)
 		results = append(results, cr)
 		if cr.TimeMs > timeMs {
 			timeMs = cr.TimeMs

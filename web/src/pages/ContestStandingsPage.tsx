@@ -5,52 +5,14 @@ import {
   addContestProblem, extractError, getContest, getContestStandings, getProblems,
   removeContestProblem, reorderContestProblems, updateContestProblem,
 } from '../api'
+import { ACMCell, TeamAvatar } from '../components/ContestBoardParts'
 import RollBoardPlayer from '../components/RollBoardPlayer'
 import type {
-  ACMProblemState, ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
+  ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
 } from '../types'
-import { minutesSinceStart, teamAvatarUrl } from '../utils/contest'
 import { formatTime } from '../utils/format'
 
-function TeamAvatar({ contestId, teamId, avatar, size }: {
-  contestId: number; teamId: number; avatar: string; size: 'sm' | 'lg'
-}) {
-  const url = teamAvatarUrl(contestId, teamId, avatar)
-  const cls = size === 'lg' ? 'avatar-lg' : 'avatar-sm'
-  if (!url) return <span className={`${cls} avatar-fallback`}>?</span>
-  return <img src={url} alt="" className={cls} />
-}
-
 // ---------- 排行榜 ----------
-
-// ICPC 风格题目格：未提交无底色；WA 红色（-N）；AC 绿色（✓ 分钟）；
-// 一血深绿底色白字（★ 分钟）。仅在 AC 时改变排名（引擎语义），
-// 未通过尝试以红色负计数显示，不影响排名。
-function ACMCell({ state, startTime }: { state: ACMProblemState | undefined; startTime: string }) {
-  if (!state || (!state.solved && state.failed_attempts === 0)) {
-    return <td className="standings-cell" />
-  }
-  if (state.solved) {
-    const mins = state.solved_at ? minutesSinceStart(state.solved_at, startTime) : null
-    if (state.first_blood) {
-      return (
-        <td className="standings-cell fb-cell" title="一血！全场第一个通过">
-          ★ {mins ?? ''}
-        </td>
-      )
-    }
-    return (
-      <td className="standings-cell ac-cell" title={`通过于第 ${mins ?? '?'} 分钟`}>
-        ✓ {mins ?? ''}
-      </td>
-    )
-  }
-  return (
-    <td className="standings-cell wa-cell" title={`${state.failed_attempts} 次未通过尝试`}>
-      -{state.failed_attempts}
-    </td>
-  )
-}
 
 function ACMTable({ contestId, standings, problems, startTime }: {
   contestId: number
@@ -479,9 +441,29 @@ export default function ContestStandingsPage() {
         <div className="contest-badges">
           <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
           {isAdmin && mode === 'ACM' && (
-            <button type="button" className="button button-primary" onClick={() => setRollboardOpen(true)}>
-              滚榜
-            </button>
+            <>
+              <button type="button" className="button button-primary" onClick={() => setRollboardOpen(true)}>
+                滚榜
+              </button>
+              <a
+                className="button button-secondary"
+                href={`/contest/${contestId}/board`}
+                target="_blank"
+                rel="noreferrer"
+                title="在新标签页打开独立榜单展示页（投影用）"
+              >
+                榜单展示页 ↗
+              </a>
+              <a
+                className="button button-primary"
+                href={`/contest/${contestId}/roll`}
+                target="_blank"
+                rel="noreferrer"
+                title="在新标签页打开独立滚榜展示页（投影用）"
+              >
+                滚榜展示页 ↗
+              </a>
+            </>
           )}
         </div>
       </div>

@@ -7,6 +7,8 @@ import { minutesSinceStart, teamAvatarUrl } from '../utils/contest'
 interface RollBoardPlayerProps {
   contestId: number
   onClose: () => void
+  /** embedded=true 时以整页展示（无遮罩、无关闭按钮），用于独立展示页投影 */
+  embedded?: boolean
 }
 
 const PLAY_INTERVAL_MS = 1500
@@ -18,7 +20,7 @@ function Avatar({ contestId, teamId, avatar, size }: { contestId: number; teamId
   return <img src={url} alt="" className={cls} />
 }
 
-export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerProps) {
+export default function RollBoardPlayer({ contestId, onClose, embedded = false }: RollBoardPlayerProps) {
   const [board, setBoard] = useState<RollBoard | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -90,8 +92,8 @@ export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerP
   }
 
   return (
-    <div className="rollboard-overlay">
-      <div className="rollboard-modal">
+    <div className={embedded ? 'rollboard-embedded' : 'rollboard-overlay'}>
+      <div className="rollboard-modal"> 
         <div className="rollboard-header">
           <div className="rollboard-title">
             <h2>滚榜 · {board.contest.title}</h2>
@@ -131,9 +133,11 @@ export default function RollBoardPlayer({ contestId, onClose }: RollBoardPlayerP
             <button type="button" className="button button-secondary" onClick={() => setStep(total - 1)}>
               终榜 ⏭
             </button>
-            <button type="button" className="button button-secondary" onClick={onClose}>
-              关闭
-            </button>
+            {!embedded && (
+              <button type="button" className="button button-secondary" onClick={onClose}>
+                关闭
+              </button>
+            )}
           </div>
         </div>
 

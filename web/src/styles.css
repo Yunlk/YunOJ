@@ -2484,3 +2484,113 @@ textarea:focus {
     position: static;
   }
 }
+
+/* ---------- 独立展示页（投影模式） ---------- */
+
+.board-standalone {
+  min-height: 100vh;
+  background: var(--surface);
+  padding: 24px 32px 40px;
+  box-sizing: border-box;
+}
+
+.board-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.board-header h1 {
+  font-size: 28px;
+  margin: 0;
+}
+
+.board-meta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 16px;
+}
+
+.board-frozen {
+  color: #b45309;
+  font-weight: 600;
+}
+
+.board-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.board-error {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 18px;
+}
+
+.board-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 18px;
+}
+
+.board-table th,
+.board-table td {
+  padding: 14px 12px;
+  text-align: center;
+  border-bottom: 1px solid var(--bg);
+}
+
+.board-table thead th {
+  background: var(--bg);
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.board-table tbody tr:nth-child(even) {
+  background: #fafbfc;
+}
+
+.board-table td:first-child,
+.board-table th:first-child,
+.board-table td:nth-child(2),
+.board-table th:nth-child(2) {
+  text-align: left;
+}
+
+.board-rank {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 展示页格子加粗加大 */
+.board-table td.ac-cell,
+.board-table td.wa-cell,
+.board-table td.fb-cell {
+  font-size: 16px;
+}
+
+/* 滚榜独立展示页 */
+.roll-standalone {
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.rollboard-embedded .rollboard-modal {
+  max-width: 1400px;
+  margin: 0 auto;
+  min-height: calc(100vh - 32px);
+}
+
+.rollboard-embedded .rollboard-modal .rollboard-table-wrap {
+  flex: 1;
+}

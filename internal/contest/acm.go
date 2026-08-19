@@ -151,13 +151,62 @@ type RollEvent struct {
 	Standings  []ACMStanding
 }
 
+// CloneACMStandings 深拷贝榜单及各题状态。事件快照不能与后续步骤
+// 继续修改的工作副本共享 map 或状态指针。
+func CloneACMStandings(in []ACMStanding) []ACMStanding {
+	out := make([]ACMStanding, len(in))
+	for i, standing := range in {
+		out[i] = standing
+		out[i].Problems = make(map[int64]*ACMProblemState, len(standing.Problems))
+		for problemID, state := range standing.Problems {
+			if state == nil {
+				out[i].Problems[problemID] = nil
+				continue
+			}
+			cloned := *state
+			out[i].Problems[problemID] = &cloned
+		}
+	}
+	return out
+}
+
+// ReplayACMSubmissionSnapshots 按提交顺序重放公开提交，为每条终态提交生成
+// 处理后的榜单快照。实时榜单用这些快照逐条播放并发评测结果。
+func ReplayACMSubmissionSnapshots(ctx ContestContext, submissions []model.Submission) map[int64][]ACMStanding {
+	standings := make([]ACMStanding, 0, len(ctx.Teams))
+	for teamID, teamName := range ctx.Teams {
+		standings = append(standings, *newACMStanding(teamID, teamName, ctx.Problems))
+	}
+	SortACM(standings)
+
+	snapshots := make(map[int64][]ACMStanding)
+	for _, sub := range submissions {
+		if !model.IsFinal(sub.Status) {
+			continue
+		}
+		index := -1
+		for i := range standings {
+			if standings[i].TeamID == sub.UserID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			continue
+		}
+		ProcessACM(&standings[index], sub, ctx.StartTime, ctx.PenaltyMinutes)
+		SortACM(standings)
+		snapshots[sub.ID] = CloneACMStandings(standings)
+	}
+	return snapshots
+}
+
 // RollBoard 滚榜算法。
 // 从当前排行榜排名最后的队伍开始，逐个解冻其编号最小的冻结提交；
 // 每解冻一条立即重算排名并输出该步的排名变化（用于直播展示）。
 func RollBoard(ctx ContestContext, base []ACMStanding, frozen []model.Submission) []RollEvent {
 	// 工作副本
-	standings := make([]ACMStanding, len(base))
-	copy(standings, base)
+	standings := CloneACMStandings(base)
 	index := make(map[int64]int, len(standings))
 	for i, st := range standings {
 		index[st.TeamID] = i
@@ -202,7 +251,7 @@ func RollBoard(ctx ContestContext, base []ACMStanding, frozen []model.Submission
 				TeamName:   standings[index[tid]].TeamName,
 				RankBefore: rankBefore,
 				RankAfter:  standings[index[tid]].Rank,
-				Standings:  append([]ACMStanding(nil), standings...),
+				Standings:  CloneACMStandings(standings),
 			})
 		}
 	}

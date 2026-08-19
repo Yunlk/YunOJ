@@ -17,7 +17,7 @@ import (
 // SPJ 运行协议（special judge）：
 //   - SPJ 源码在沙箱内编译为 ./spj
 //   - 每个测试点运行一次：./spj <输入文件> <用户输出文件> <答案文件>
-//   - 通过退出码给出结论：0 = AC，1 = WA，2 = PE（按 WA 处理），其他 = SE
+//   - 通过退出码给出结论：0 = AC，1 = WA，2 = PE，其他 = SE
 //   - 可选：stdout 第一行输出 0~100 的分数（部分分）；不输出时 AC 得满分
 
 // spjLimits SPJ 自身运行的资源限制（应远快于选手程序）。
@@ -64,7 +64,7 @@ func (r *Runner) judgeSPJInBox(ctx context.Context, sub model.Submission, proble
 
 	// 3. 逐点运行
 	verdict = model.StatusAccepted
-	for _, jc := range judgeCases {
+	for i, jc := range judgeCases {
 		tc := data.TestCase{
 			Name:       strconv.Itoa(jc.Ordinal),
 			InputPath:  jc.InputPath,
@@ -79,8 +79,11 @@ func (r *Runner) judgeSPJInBox(ctx context.Context, sub model.Submission, proble
 		if cr.MemoryKb > memoryKb {
 			memoryKb = cr.MemoryKb
 		}
-		if cr.Status != model.StatusAccepted {
-			verdict = cr.Status
+		var stop bool
+		verdict, stop = applyCaseVerdict(verdict, cr.Status)
+		if stop {
+			results = appendNotRunResults(results, judgeCases[i+1:])
+			scores = append(scores, make([]int, len(judgeCases)-i-1)...)
 			break
 		}
 	}
@@ -163,7 +166,7 @@ func (r *Runner) runSPJCase(ctx context.Context, boxDir string, tc data.TestCase
 }
 
 // parseSPJOutput 解析 SPJ 的退出码与可选分数输出。
-// 协议：0=AC 1=WA 2=PE(按 WA) 其他=SE；stdout 首行可为 0~100 的分数。
+// 协议：0=AC 1=WA 2=PE 其他=SE；stdout 首行可为 0~100 的分数。
 func parseSPJOutput(stdout string, exitCode, full int) (string, int) {
 	switch exitCode {
 	case 0:
@@ -177,8 +180,7 @@ func parseSPJOutput(stdout string, exitCode, full int) (string, int) {
 	case 1:
 		return model.StatusWrongAnswer, 0
 	case 2:
-		// 格式错误按 WA 处理
-		return model.StatusWrongAnswer, 0
+		return model.StatusPresentationError, 0
 	default:
 		return model.StatusSystemError, 0
 	}

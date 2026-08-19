@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && echo 'isolate:100000:65536' >> /etc/subgid
 COPY --from=isolate-builder /usr/local/bin/isolate /usr/local/bin/isolate
 COPY --from=backend /out/judge /usr/local/bin/judge
+WORKDIR /app
+COPY config ./config
 # isolate 2.x 启动时必须读取配置文件；cg_root 直接指向容器内 cgroup2 挂载点，
 # 避免依赖 systemd/cg-keeper 守护进程（容器内不跑 systemd）
 RUN printf '%s\n' \
@@ -47,6 +49,7 @@ RUN printf '%s\n' \
         'subid_user = isolate' \
         > /usr/local/etc/isolate
 ENV DATA_DIR=/data \
+    LANGUAGE_CONFIG=/app/config/languages.json \
     ISOLATE_PATH=/usr/local/bin/isolate \
     ISOLATE_DIR=/var/local/lib/isolate
 # 评测机必须以 root 运行：isolate 需要创建 namespace 进行隔离。

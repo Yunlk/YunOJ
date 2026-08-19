@@ -22,6 +22,7 @@ var knownStatuses = map[string]bool{
 	model.StatusRunning:             true,
 	model.StatusAccepted:            true,
 	model.StatusWrongAnswer:         true,
+	model.StatusPresentationError:   true,
 	model.StatusTimeLimitExceeded:   true,
 	model.StatusMemoryLimitExceeded: true,
 	model.StatusOutputLimitExceeded: true,
@@ -150,7 +151,8 @@ func (a *API) handleListSubmissions(w http.ResponseWriter, r *http.Request) {
 	page := clamp(queryInt(r, "page", 1), 1, 1<<20)
 	size := clamp(queryInt(r, "size", defaultPageSize), 1, maxPageSize)
 
-	f := store.SubmissionFilter{Page: page, Size: size}
+	// 比赛提交只能从比赛专用接口读取，避免封榜/盲评结果从公开状态页泄漏。
+	f := store.SubmissionFilter{Page: page, Size: size, ExcludeContest: true}
 	if v := int64(queryInt(r, "problem_id", 0)); v > 0 {
 		f.ProblemID = &v
 	}
@@ -202,22 +204,65 @@ func (a *API) handleGetSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u, loggedIn := userFromCtx(r.Context())
+	isAdmin := loggedIn && u.Role == model.RoleAdmin
+	blindActive := false
+	if s.ContestID != nil {
+		c, contestErr := a.store.GetContest(r.Context(), *s.ContestID)
+		if contestErr != nil {
+			slogError(r, "提交所属比赛", contestErr)
+			writeError(w, http.StatusInternalServerError, "查询失败")
+			return
+		}
+		blindActive = blindResultsActive(c, isAdmin, time.Now())
+	}
 	detail := submissionDetail{
 		ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 		UserID: s.UserID, Username: s.Username, Language: s.Language,
 		Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
 		Score: s.Score, CreatedAt: s.CreatedAt,
 	}
-	if loggedIn && (u.ID == s.UserID || u.Role == model.RoleAdmin) {
-		code, compileError := s.Code, s.CompileError
-		cases := s.CaseResults
-		scores := s.CaseScores
-		detail.Code = &code
-		detail.CompileError = &compileError
-		detail.CaseResults = &cases
-		detail.CaseScores = &scores
+	if blindActive && model.IsFinal(s.Status) {
+		redactBlindSubmissionDetail(&detail)
+	}
+	if loggedIn && (u.ID == s.UserID || isAdmin) {
+		if r.URL.Query().Get("compact") != "1" {
+			code := s.Code
+			detail.Code = &code
+		}
+		if !blindActive || !model.IsFinal(s.Status) {
+			compileError := s.CompileError
+			cases := s.CaseResults
+			scores := s.CaseScores
+			detail.CompileError = &compileError
+			detail.CaseResults = &cases
+			detail.CaseScores = &scores
+		}
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func blindResultsActive(c model.Contest, isAdmin bool, now time.Time) bool {
+	return c.Feedback == model.FeedbackBlind && now.Before(c.EndTime) && !isAdmin
+}
+
+func redactBlindSubmissionListItem(item *submissionListItem) {
+	if !model.IsFinal(item.Status) {
+		return
+	}
+	item.Status = "hidden"
+	item.TimeMs = 0
+	item.MemoryKb = 0
+	item.Score = 0
+}
+
+func redactBlindSubmissionDetail(detail *submissionDetail) {
+	detail.Status = "hidden"
+	detail.TimeMs = 0
+	detail.MemoryKb = 0
+	detail.Score = 0
+	detail.CompileError = nil
+	detail.CaseResults = nil
+	detail.CaseScores = nil
 }
 
 // handleRejudge 重测（管理员）：重置状态并重新入队。
@@ -246,5 +291,5 @@ func (a *API) handleRejudge(w http.ResponseWriter, r *http.Request) {
 
 // handleLanguages 支持的语言列表。
 func (a *API) handleLanguages(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"items": langs.All()})
+	writeJSON(w, http.StatusOK, map[string]any{"items": langs.PublicAll()})
 }

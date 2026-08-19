@@ -22,7 +22,7 @@ func TestParseSPJOutput(t *testing.T) {
 		{"AC 分数行后有多余输出", "100\nxxx", 0, 100, model.StatusAccepted, 100},
 		{"AC 非法分数行回退满分", "not-a-number\n", 0, 100, model.StatusAccepted, 100},
 		{"WA", "", 1, 100, model.StatusWrongAnswer, 0},
-		{"PE 按 WA", "", 2, 100, model.StatusWrongAnswer, 0},
+		{"PE", "", 2, 100, model.StatusPresentationError, 0},
 		{"SE", "", 3, 100, model.StatusSystemError, 0},
 	}
 	for _, tc := range cases {

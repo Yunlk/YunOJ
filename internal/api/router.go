@@ -67,6 +67,7 @@ func (a *API) Router() http.Handler {
 		r.Post("/api/submissions", a.handleSubmit)
 		r.Post("/api/problems/{id}/test", a.handleRunTest)
 		r.Post("/api/problems/{id}/test-samples", a.handleRunSamples)
+		r.Post("/api/contests/{id}/problems/{problem_id}/test", a.handleContestRunTest)
 		r.Post("/api/contests/{id}/register", a.handleRegisterContest)
 		r.Post("/api/contests/{id}/avatar", a.handleUploadContestAvatar)
 		r.Post("/api/contests/{id}/submit", a.handleContestSubmit)

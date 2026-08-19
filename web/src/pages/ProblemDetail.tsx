@@ -1,26 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   createSubmission,
   extractError,
   getLanguages,
   getProblem,
+  getSubmissions,
   runTest,
   uploadTests,
 } from '../api'
-import type { RunTestResult } from '../api'
-import CodeEditor from '../components/CodeEditor'
-import type { CursorPosition } from '../components/CodeEditor'
-import Markdown from '../components/Markdown'
-import StatusBadge from '../components/StatusBadge'
+import ProblemStatement from '../components/ProblemStatement'
+import ProblemWorkbench from '../components/ProblemWorkbench'
+import SubmissionPanel from '../components/SubmissionPanel'
 import { useAuth } from '../context/AuthContext'
+import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
 import type { Language, ProblemDetail as ProblemDetailType, Sample } from '../types'
-import { copyText, tokenCompare } from '../utils/clipboard'
-import { formatMemory, formatRunTime, formatTimeLimit } from '../utils/format'
+import { copyText } from '../utils/clipboard'
+import { formatMemory, formatTimeLimit } from '../utils/format'
 
-type ViewMode = 'normal' | 'ide'
-
-const FONT_SIZES = [12, 13, 14, 16, 18]
+type ViewMode = 'normal' | 'ide' | 'submissions'
 
 function difficultyInfo(d: number): { label: string; className: string } {
   if (d <= 3) return { label: '简单', className: 'diff-easy' }
@@ -37,26 +35,17 @@ export default function ProblemDetail() {
   const [error, setError] = useState('')
 
   const [languages, setLanguages] = useState<Language[]>([])
+  const draftScope = `problem:${id}:user:${user?.id ?? 'guest'}`
   const [language, setLanguage] = useState('')
-  const [code, setCode] = useState('')
+  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language)
   const [optimize, setOptimize] = useState(true)
-  const [fontSize, setFontSize] = useState(14)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [submittedId, setSubmittedId] = useState<number | null>(null)
+  const [submissionRefreshKey, setSubmissionRefreshKey] = useState(0)
 
-  // 视图与 IDE 状态
   const [mode, setMode] = useState<ViewMode>('normal')
-  const [consoleOpen, setConsoleOpen] = useState(true)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 })
-
-  // 运行控制台（输入/运行/输出）
-  const [testInput, setTestInput] = useState('')
-  const [expectedForRun, setExpectedForRun] = useState<string | null>(null)
-  const [testing, setTesting] = useState(false)
-  const [testError, setTestError] = useState('')
-  const [testResult, setTestResult] = useState<RunTestResult | null>(null)
+  const [pendingSample, setPendingSample] = useState<Sample | null>(null)
 
   // 复制 Markdown 按钮的绿色反馈
   const [mdCopied, setMdCopied] = useState(false)
@@ -92,13 +81,21 @@ export default function ProblemDetail() {
       .then((ls) => {
         if (cancelled) return
         setLanguages(ls)
-        if (ls.length > 0) setLanguage((prev) => prev || ls[0].key)
+        const preferred = preferredDraftLanguage(draftScope)
+        const next = ls.some((item) => item.key === preferred) ? preferred : (ls[0]?.key ?? '')
+        setLanguage(next)
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [draftScope])
+
+  const changeLanguage = (next: string) => {
+    flushDraft()
+    rememberDraftLanguage(draftScope, next)
+    setLanguage(next)
+  }
 
   useEffect(() => {
     return () => {
@@ -123,9 +120,11 @@ export default function ProblemDetail() {
     setSubmitError('')
     setSubmittedId(null)
     try {
+      flushDraft()
       const res = await createSubmission(Number(id), language, code, optimize)
-      setCode('')
       setSubmittedId(res.id)
+      setSubmissionRefreshKey((key) => key + 1)
+      setMode('submissions')
     } catch (err) {
       setSubmitError(extractError(err))
     } finally {
@@ -133,32 +132,14 @@ export default function ProblemDetail() {
     }
   }
 
-  // 用指定输入运行（样例的「运行」按钮也会走到这里）
-  const runWithInput = async (input: string) => {
-    if (!language) return
-    if (!code.trim()) {
-      setTestError('代码不能为空')
-      return
-    }
-    setMode('ide')
-    setConsoleOpen(true)
-    setTestInput(input)
-    setTesting(true)
-    setTestError('')
-    setTestResult(null)
-    try {
-      setTestResult(await runTest(Number(id), language, code, input, optimize))
-    } catch (err) {
-      setTestError(extractError(err))
-    } finally {
-      setTesting(false)
-    }
-  }
+  const runProblemTest = useCallback(
+    (input: string) => runTest(Number(id), language, code, input, optimize),
+    [code, id, language, optimize],
+  )
 
-  // 样例面板的「运行」：载入该样例输入并运行，同时记录期望输出用于比对
-  const runSample = (sample: Sample) => {
-    setExpectedForRun(sample.output)
-    void runWithInput(sample.input)
+  const runSampleFromDetail = (sample: Sample) => {
+    setPendingSample(sample)
+    setMode('ide')
   }
 
   const copyMarkdown = async () => {
@@ -198,6 +179,17 @@ export default function ProblemDetail() {
     }
   }
 
+  const loadProblemSubmissions = useCallback(
+    ({ page, size, problemId, userId }: { page: number; size: number; problemId: number; userId: number }) =>
+      getSubmissions({
+        page,
+        size,
+        problem_id: String(problemId),
+        user_id: String(userId),
+      }),
+    [],
+  )
+
   if (loading) {
     return <div className="page-loading">加载中…</div>
   }
@@ -215,319 +207,90 @@ export default function ProblemDetail() {
   }
 
   const isAdmin = user?.role === 'admin'
-  const languageName = languages.find((l) => l.key === language)?.name ?? ''
   const diff = difficultyInfo(problem.difficulty)
 
-  // 样例运行结果的前端即时比对（token 比较，与后端一致）
-  const samplePassed =
-    testResult && expectedForRun !== null && testResult.status === 'accepted'
-      ? tokenCompare(expectedForRun, testResult.stdout)
-      : null
-
-  /* ---------- 样例面板（左右并排，各带 运行/复制） ---------- */
-  const samplePanels = (samples: Sample[]) => (
-    <div className="samples-grid">
-      {samples.map((s, i) => (
-        <div key={i} className="sample-panel-group">
-          <div className="sample-panel">
-            <div className="sample-panel-head">
-              <span className="sample-panel-title">输入 #{i + 1}</span>
-              <span className="sample-panel-actions">
-                <button type="button" className="mini-btn" onClick={() => runSample(s)}>
-                  运行
-                </button>
-                <button
-                  type="button"
-                  className="mini-btn"
-                  onClick={() => void copyText(s.input)}
-                >
-                  复制
-                </button>
-              </span>
+  /* ---------- IDE 工作台视图 ---------- */
+  if (mode === 'ide' || mode === 'submissions') {
+    return (
+      <div className="problem-page problem-workspace-page">
+        <ProblemWorkbench
+          problem={problem}
+          title={`P${problem.id} ${problem.title}`}
+          languages={languages}
+          language={language}
+          onLanguageChange={changeLanguage}
+          code={code}
+          onCodeChange={setCode}
+          optimize={optimize}
+          onOptimizeChange={setOptimize}
+          submitting={submitting}
+          submitError={submitError}
+          submittedId={submittedId}
+          onSubmit={() => void submit()}
+          onRun={runProblemTest}
+          showSubmissions={mode === 'submissions'}
+          initialSample={pendingSample}
+          onInitialSampleConsumed={() => setPendingSample(null)}
+          statementMeta={(
+            <div className="workbench-meta-line">
+              <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
+              <span>内存限制 {formatMemory(problem.memory_limit_kb)}</span>
+              <span>提交 {problem.submission_count}</span>
+              <span>通过 {problem.accepted_count}</span>
             </div>
-            <pre className="sample-panel-content">{s.input}</pre>
-          </div>
-          <div className="sample-panel">
-            <div className="sample-panel-head">
-              <span className="sample-panel-title">输出 #{i + 1}</span>
-              <span className="sample-panel-actions">
-                <button type="button" className="mini-btn" onClick={() => runSample(s)}>
-                  运行
-                </button>
-                <button
-                  type="button"
-                  className="mini-btn"
-                  onClick={() => void copyText(s.output)}
-                >
-                  复制
-                </button>
-              </span>
-            </div>
-            <pre className="sample-panel-content">{s.output}</pre>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-
-  /* ---------- 题面正文（两种视图共用） ---------- */
-  const statementBody = (
-    <>
-      {problem.statement && (
-        <section className="section">
-          <h2 className="section-title">题目描述</h2>
-          <Markdown>{problem.statement}</Markdown>
-        </section>
-      )}
-      {problem.input_format && (
-        <section className="section">
-          <h2 className="section-title">输入格式</h2>
-          <Markdown>{problem.input_format}</Markdown>
-        </section>
-      )}
-      {problem.output_format && (
-        <section className="section">
-          <h2 className="section-title">输出格式</h2>
-          <Markdown>{problem.output_format}</Markdown>
-        </section>
-      )}
-      {problem.samples.length > 0 && (
-        <section className="section">
-          <h2 className="section-title">输入输出样例</h2>
-          {samplePanels(problem.samples)}
-        </section>
-      )}
-      {problem.hint && (
-        <section className="section">
-          <h2 className="section-title">说明 / 提示</h2>
-          <Markdown>{problem.hint}</Markdown>
-        </section>
-      )}
-    </>
-  )
-
-  /* ---------- 运行控制台（IDE 底部：输入 | 输出） ---------- */
-  const runConsole = (
-    <div className="run-console">
-      <div className="run-console-bar">
-        <span className="console-label">输入</span>
-        <button
-          type="button"
-          className="console-run-button"
-          onClick={() => void runWithInput(testInput)}
-          disabled={testing}
-        >
-          {testing ? '运行中…' : '▶ 运行'}
-        </button>
-        <span className="console-label">输出</span>
-        {samplePassed !== null && (
-          <span className={samplePassed ? 'console-badge passed' : 'console-badge failed'}>
-            {samplePassed ? '样例通过' : '样例未通过'}
-          </span>
-        )}
-      </div>
-      <div className="run-console-body">
-        <textarea
-          className="console-input"
-          value={testInput}
-          onChange={(e) => {
-            setTestInput(e.target.value)
-            setExpectedForRun(null)
-          }}
-          placeholder="输入测试数据…"
-          spellCheck={false}
-        />
-        <div className="console-divider" />
-        <div className="console-output">
-          {testError && <div className="error-message">{testError}</div>}
-          {testResult?.compile_error && (
-            <pre className="code-block compile-error">{testResult.compile_error}</pre>
           )}
-          {testResult && !testResult.compile_error && (
+          headerActions={(
             <>
-              <div className="test-result-meta">
-                <StatusBadge status={testResult.status} />
-                <span className="run-meta">
-                  {formatRunTime(testResult.time_ms)} · {formatMemory(testResult.memory_kb)}
-                </span>
-              </div>
-              <pre className="io-output">{testResult.stdout || '（无输出）'}</pre>
-              {testResult.stderr && (
-                <>
-                  <div className="io-label">标准错误</div>
-                  <pre className="io-output">{testResult.stderr}</pre>
-                </>
+              <button
+                type="button"
+                className={mdCopied ? 'mini-btn copied' : 'mini-btn'}
+                onClick={() => void copyMarkdown()}
+              >
+                复制 Markdown
+              </button>
+              {isAdmin && (
+                <Link to={`/problem/${problem.id}/edit`} className="mini-btn">编辑</Link>
               )}
+              <button type="button" className="mini-btn" onClick={() => setMode('normal')}>
+                退出 IDE 模式
+              </button>
             </>
           )}
-          {!testError && !testResult && (
-            <div className="console-empty">运行后在此显示输出</div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-
-  /* ---------- IDE 工作台视图 ---------- */
-  if (mode === 'ide') {
-    return (
-      <div className="problem-page">
-        <div className="workbench">
-          {/* 左：题面（独立纵向滚动） */}
-          <div className="workbench-problem">
-            <div className="workbench-problem-head">
-              <h1 className="workbench-title">
-                P{problem.id} {problem.title}
-              </h1>
-              <div className="workbench-problem-actions">
+          statementFooter={isAdmin ? (
+            <section className="section">
+              <h2 className="section-title">上传测试数据</h2>
+              <div className="upload-area">
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
+                />
                 <button
                   type="button"
-                  className={mdCopied ? 'mini-btn copied' : 'mini-btn'}
-                  onClick={() => void copyMarkdown()}
+                  className="button button-secondary"
+                  onClick={onUpload}
+                  disabled={uploading}
                 >
-                  复制 Markdown
+                  {uploading ? '上传中…' : '上传 zip'}
                 </button>
-                {isAdmin && (
-                  <Link to={`/problem/${problem.id}/edit`} className="mini-btn">
-                    编辑
-                  </Link>
-                )}
-                <button type="button" className="mini-btn" onClick={() => setMode('normal')}>
-                  退出 IDE 模式
-                </button>
+                {uploadMsg && <span className="muted">{uploadMsg}</span>}
               </div>
-            </div>
-            <div className="workbench-problem-body">
-              {statementBody}
-              {isAdmin && (
-                <section className="section">
-                  <h2 className="section-title">上传测试数据</h2>
-                  <div className="upload-area">
-                    <input
-                      type="file"
-                      accept=".zip"
-                      onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-                    />
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={onUpload}
-                      disabled={uploading}
-                    >
-                      {uploading ? '上传中…' : '上传 zip'}
-                    </button>
-                    {uploadMsg && <span className="muted">{uploadMsg}</span>}
-                  </div>
-                </section>
-              )}
-            </div>
-          </div>
-
-          {/* 右：IDE */}
-          <div className="workbench-ide">
-            <div className="ide-toolbar">
-              <span className="ide-code-label">代码</span>
-              <div className="ide-toolbar-right">
-                <button
-                  type="button"
-                  className={consoleOpen ? 'toolbar-button active' : 'toolbar-button'}
-                  onClick={() => setConsoleOpen((v) => !v)}
-                >
-                  自测
-                </button>
-                <div className="settings-wrap">
-                  <button
-                    type="button"
-                    className="toolbar-button"
-                    onClick={() => setSettingsOpen((v) => !v)}
-                  >
-                    设置
-                  </button>
-                  {settingsOpen && (
-                    <>
-                      <div className="settings-backdrop" onClick={() => setSettingsOpen(false)} />
-                      <div className="settings-pop">
-                        <div className="settings-pop-title">字号</div>
-                        {FONT_SIZES.map((sz) => (
-                          <button
-                            key={sz}
-                            type="button"
-                            className={fontSize === sz ? 'font-size-opt active' : 'font-size-opt'}
-                            onClick={() => {
-                              setFontSize(sz)
-                              setSettingsOpen(false)
-                            }}
-                          >
-                            {sz}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-                <select
-                  className="select-input"
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  aria-label="语言"
-                >
-                  {languages.length === 0 && <option value="">加载语言中…</option>}
-                  {languages.map((l) => (
-                    <option key={l.key} value={l.key}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-                <label className="o2-check">
-                  <input
-                    type="checkbox"
-                    checked={optimize}
-                    onChange={(e) => setOptimize(e.target.checked)}
-                  />
-                  O2 优化
-                </label>
-                <button
-                  type="button"
-                  className="button button-primary ide-submit-button"
-                  onClick={submit}
-                  disabled={submitting}
-                >
-                  {submitting ? '提交中…' : '提交'}
-                </button>
-              </div>
-            </div>
-
-            <div className="ide-editor-body">
-              <CodeEditor
-                language={language}
-                value={code}
-                onChange={setCode}
-                onCtrlEnter={submit}
-                onCursorChange={setCursor}
-                fontSize={fontSize}
+            </section>
+          ) : undefined}
+          submissionPanel={(
+              <SubmissionPanel
+                title={`P${problem.id} · 我的提交`}
+                problemId={problem.id}
+                userId={user?.id ?? null}
+                refreshKey={submissionRefreshKey}
+                focusSubmissionId={submittedId}
+                timeLimitMs={problem.time_limit_ms}
+                memoryLimitKb={problem.memory_limit_kb}
+                onBack={() => setMode('ide')}
+                load={loadProblemSubmissions}
               />
-            </div>
-
-            {consoleOpen && runConsole}
-
-            <div className="ide-statusbar">
-              <span>
-                Ln {cursor.line}, Col {cursor.column}
-              </span>
-              <span>{languageName}</span>
-              <span>{optimize ? 'O2' : '无优化'}</span>
-              <span>字号 {fontSize}</span>
-              <span className="ide-status-right">Ctrl+Enter 提交</span>
-            </div>
-
-            {submitError && <div className="ide-message error-message">{submitError}</div>}
-            {submittedId !== null && (
-              <div className="ide-submitted">
-                已提交 <Link to={`/submission/${submittedId}`}>#{submittedId}</Link>
-              </div>
-            )}
-          </div>
-        </div>
+          )}
+        />
       </div>
     )
   }
@@ -598,7 +361,9 @@ export default function ProblemDetail() {
               )}
             </div>
           </div>
-          <div className="statement-content">{statementBody}</div>
+          <div className="statement-content">
+            <ProblemStatement problem={problem} onRunSample={runSampleFromDetail} />
+          </div>
         </div>
 
         <div className="sidebar">

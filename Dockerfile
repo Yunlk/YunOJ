@@ -27,7 +27,9 @@ RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 1000 yunoj
 WORKDIR /app
 COPY --from=backend /out/server ./server
-ENV DATA_DIR=/data
+COPY config ./config
+ENV DATA_DIR=/data \
+    LANGUAGE_CONFIG=/app/config/languages.json
 EXPOSE 8080
 USER yunoj
 ENTRYPOINT ["./server"]

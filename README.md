@@ -18,7 +18,9 @@
 - 测试点管理：manifest 权威分值（编号稳定、删除不重排）、单点增删改、拖拽排序、
   ZIP 上传前预览后确认导入（成对/分值/总分 100 校验）
 - 测试数据上传：zip 包（`N.in` / `N.out` 成对文件），带路径穿越与 zip 炸弹防护
-- 提交评测：C / C++ / Python 3，判定 `AC / WA / TLE / MLE / OLE / RE / CE / SE`
+- 提交评测：C / C++ / Python 3，判定 `AC / WA / PE / TLE / MLE / OLE / RE / CE / SE`
+- 语言扩展接口：默认只开放 C / C++ / Python；管理员可通过受信任的
+  `config/languages.json` 注册自有工具链，无需修改提交 API 与判题主流程
 - 提交记录：全局/按题目/按用户/按状态过滤，逐测试点详情（仅本人与管理员可见）
 - 重测（rejudge）、提交限流（每用户 10 秒 1 次）、评测机崩溃自动恢复
 - 在线 IDE：Monaco 编辑器，自测（自定义输入）与样例测试，不落库即时反馈
@@ -160,6 +162,7 @@ cd web && npm run build
 | `REDIS_ADDR` | `localhost:6379` | Redis 地址 |
 | `JWT_SECRET` | `dev-secret-change-me` | **生产必改**，JWT 签名密钥 |
 | `DATA_DIR` | `./data` | 题目测试数据目录（web/judge 共享） |
+| `LANGUAGE_CONFIG` | `./config/languages.json` | 受信任的自有编译器注册表；web 与 judge 必须读取同一文件 |
 | `JUDGE_WORKERS` | `2` | 评测 worker 数，建议 = CPU 核数 |
 | `ISOLATE_PATH` | `isolate` | isolate 可执行文件路径 |
 | `ISOLATE_DIR` | `/var/local/lib/isolate` | 沙箱根目录 |
@@ -210,8 +213,9 @@ cd web && npm run build
 | GET | `/contests/{id}/standings` | 排行榜（盲评进行中对非管理员隐藏） |
 | GET | `/health` | 健康检查（含 server_time 供前端时钟校正） |
 
-判题状态：`pending`、`running`、`accepted`、`wrong_answer`、`time_limit_exceeded`、
-`memory_limit_exceeded`、`output_limit_exceeded`、`runtime_error`、`compile_error`、`system_error`。
+判题状态：`pending`、`running`、`accepted`、`wrong_answer`、`presentation_error`、
+`time_limit_exceeded`、`memory_limit_exceeded`、`output_limit_exceeded`、`runtime_error`、
+`compile_error`、`system_error`、`not_run`。
 
 ## 目录结构
 

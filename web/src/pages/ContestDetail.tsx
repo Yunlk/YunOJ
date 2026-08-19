@@ -242,12 +242,14 @@ function ContestOverviewContent({ contestId, isAdmin }: { contestId: number; isA
 
       <div className="contest-nav">
         <span className="contest-nav-item active">总览</span>
-        <Link className="contest-nav-item" to={`/contest/${contestId}/submissions`}>我的提交</Link>
+        <Link className="contest-nav-item" to={`/contest/${contestId}/submissions`}>
+          {isAdmin ? '全部提交' : '我的提交'}
+        </Link>
         <Link className="contest-nav-item" to={`/contest/${contestId}/standings`}>排行榜</Link>
         {isAdmin && (
           <>
             <Link className="contest-nav-item" to={`/contest/${contestId}/edit`}>比赛设置</Link>
-            <Link className="contest-nav-item" to={`/contest/${contestId}/standings`}>题目管理</Link>
+            <Link className="contest-nav-item" to={`/contest/${contestId}/problems`}>题目管理</Link>
           </>
         )}
       </div>

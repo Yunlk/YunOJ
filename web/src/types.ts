@@ -87,6 +87,7 @@ export const SUBMISSION_STATUSES = [
   'running',
   'accepted',
   'wrong_answer',
+  'presentation_error',
   'time_limit_exceeded',
   'memory_limit_exceeded',
   'output_limit_exceeded',
@@ -122,12 +123,15 @@ export interface SubmissionDetail extends SubmissionListItem {
   code: string | null
   compile_error: string | null
   case_results: CaseResult[] | null
+  case_scores: number[] | null
 }
 
 export interface Language {
   key: string
   name: string
   version: string
+  monaco: string
+  supports_optimize: boolean
 }
 
 // ---- 比赛 ----
@@ -161,6 +165,7 @@ export interface ContestProblem {
   sort_order: number
   title: string
   score?: number | null
+  total_score?: number
   submission_limit?: number | null
 }
 
@@ -280,6 +285,7 @@ export interface ContestStandings {
   standings: ACMStanding[] | OIStanding[]
   freeze_at?: string
   frozen_submissions?: number
+  live_submissions?: LiveSubmission[]
   latest_submission?: LiveSubmission
   roll_available?: boolean
   roll_initial_standings?: ACMStanding[]
@@ -295,6 +301,7 @@ export interface LiveSubmission {
   team_avatar: string
   status: string
   created_at: string
+  standings_after?: ACMStanding[]
 }
 
 export interface RollEvent {

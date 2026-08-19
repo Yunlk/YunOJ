@@ -205,6 +205,8 @@ type contestProblemDTO struct {
 	Title     string `json:"title"`
 	// Score 单题分值覆盖（NULL = 用题目 manifest 总分）
 	Score *int `json:"score"`
+	// TotalScore 题目 manifest 的有效总分（用于 ACM 榜单显示，不改变 Score 覆盖语义）。
+	TotalScore int `json:"total_score"`
 	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
 	SubmissionLimit *int `json:"submission_limit"`
 }
@@ -222,6 +224,11 @@ func (a *API) contestProblemsDTO(ctx context.Context, contestID int64) ([]contes
 		}
 		if p, err := a.store.GetProblem(ctx, cp.ProblemID); err == nil {
 			dto.Title = p.Title
+		}
+		if tcs, err := a.store.ListTestcases(ctx, cp.ProblemID); err == nil {
+			for _, tc := range tcs {
+				dto.TotalScore += tc.Score
+			}
 		}
 		dtos = append(dtos, dto)
 	}
@@ -835,9 +842,12 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		resp["standings"] = dtos
 		// 封榜前公开最近提交的生命周期，供统一榜单聚焦 pending/running/终态。
 		// 进入封榜后立即停止返回，避免泄露冻结提交与判定。
-		if !frozenActive && !now.Before(c.StartTime) && now.Before(c.EndTime) {
-			if latest, ok := latestSubmissionDTO(subs, problems, cctx.Teams, avatars); ok {
-				resp["latest_submission"] = latest
+		if !frozenActive && !now.Before(c.StartTime) {
+			snapshots := contest.ReplayACMSubmissionSnapshots(cctx, subs)
+			live := liveSubmissionDTOs(subs, problems, cctx.Teams, avatars, snapshots)
+			resp["live_submissions"] = live
+			if len(live) > 0 {
+				resp["latest_submission"] = live[len(live)-1]
 			}
 		}
 		if frozenActive {
@@ -845,7 +855,14 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 			resp["frozen_submissions"] = len(frozenSubs)
 			// 比赛结束后把封榜提交作为同一榜单页面上的揭晓事件返回。
 			// 比赛进行中不返回事件，避免提前泄露冻结结果。
-			if now.After(c.EndTime) && len(frozenSubs) > 0 {
+			allJudged := true
+			for _, sub := range frozenSubs {
+				if !model.IsFinal(sub.Status) {
+					allJudged = false
+					break
+				}
+			}
+			if now.After(c.EndTime) && len(frozenSubs) > 0 && allJudged {
 				events := contest.RollBoard(cctx, standings, frozenSubs)
 				resp["roll_events"] = rollEventDTOs(events, problems, avatars)
 				resp["roll_initial_standings"] = dtos
@@ -874,29 +891,30 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 }
 
 type liveSubmissionDTO struct {
-	SubmissionID int64     `json:"submission_id"`
-	ProblemID    int64     `json:"problem_id"`
-	DisplayID    string    `json:"display_id"`
-	TeamID       int64     `json:"team_id"`
-	TeamName     string    `json:"team_name"`
-	TeamAvatar   string    `json:"team_avatar"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
+	SubmissionID int64            `json:"submission_id"`
+	ProblemID    int64            `json:"problem_id"`
+	DisplayID    string           `json:"display_id"`
+	TeamID       int64            `json:"team_id"`
+	TeamName     string           `json:"team_name"`
+	TeamAvatar   string           `json:"team_avatar"`
+	Status       string           `json:"status"`
+	CreatedAt    time.Time        `json:"created_at"`
+	Standings    []acmStandingDTO `json:"standings_after,omitempty"`
 }
 
-func latestSubmissionDTO(subs []model.Submission, problems []contestProblemDTO,
-	teams map[int64]string, avatars map[int64]string) (liveSubmissionDTO, bool) {
+func liveSubmissionDTOs(subs []model.Submission, problems []contestProblemDTO,
+	teams map[int64]string, avatars map[int64]string, snapshots map[int64][]contest.ACMStanding) []liveSubmissionDTO {
 	displayIDs := make(map[int64]string, len(problems))
 	for _, p := range problems {
 		displayIDs[p.ProblemID] = p.DisplayID
 	}
-	for i := len(subs) - 1; i >= 0; i-- {
-		sub := subs[i]
+	dtos := make([]liveSubmissionDTO, 0, len(subs))
+	for _, sub := range subs {
 		teamName, ok := teams[sub.UserID]
 		if !ok {
 			continue
 		}
-		return liveSubmissionDTO{
+		dto := liveSubmissionDTO{
 			SubmissionID: sub.ID,
 			ProblemID:    sub.ProblemID,
 			DisplayID:    displayIDs[sub.ProblemID],
@@ -905,9 +923,14 @@ func latestSubmissionDTO(subs []model.Submission, problems []contestProblemDTO,
 			TeamAvatar:   avatars[sub.UserID],
 			Status:       sub.Status,
 			CreatedAt:    sub.CreatedAt,
-		}, true
+		}
+		if snapshot, ok := snapshots[sub.ID]; ok {
+			dto.Standings = acmStandingsDTO(snapshot, problems, avatars)
+			markFirstBlood(dto.Standings)
+		}
+		dtos = append(dtos, dto)
 	}
-	return liveSubmissionDTO{}, false
+	return dtos
 }
 
 type rollEventDTO struct {

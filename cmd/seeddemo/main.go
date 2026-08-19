@@ -105,10 +105,10 @@ func main() {
 	}
 	fmt.Printf("已创建并发布 %d 道演示题: %v\n", problemCount, problems)
 
-	// 2. 比赛：进行中，封榜窗口 = 最后 60 分钟（已有约半小时冻结提交）
+	// 2. 比赛：默认已结束，打开动态榜单即可完整播放封榜揭晓。
 	now := time.Now()
-	start := now.Add(-2 * time.Hour)
-	end := now.Add(30 * time.Minute)
+	end := now.Add(-5 * time.Minute)
+	start := end.Add(-150 * time.Minute)
 	freeze := end.Add(-60 * time.Minute)
 	c := &model.Contest{
 		Title: demoContestTitle, Mode: model.ContestModeACM,
@@ -167,6 +167,15 @@ func main() {
 	rng := rand.New(rand.NewSource(20260820))
 	inserted := 0
 	frozenCount := 0
+	// 这些队伍/题目由下方的确定性剧本接管，用来验证 WA 不变名次、
+	// WA 后 AC 才上升，以及近同时 AC 依次播放。key 为 [题目下标, 队伍下标]。
+	scriptedPairs := map[[2]int]bool{
+		{7, 17}: true, // 队伍 18 / H：连续 WA，不 AC
+		{6, 18}: true, // 队伍 19 / G：WA，不 AC
+		{5, 19}: true, // 队伍 20 / F：WA 后 AC
+		{3, 15}: true, // 队伍 16 / D：近同时 AC
+		{4, 16}: true, // 队伍 17 / E：近同时 AC
+	}
 	// 每队的基础速度（分钟）：强队早过题，弱队晚
 	for p := 0; p < problemCount; p++ {
 		nSolve := solvePlan[p]
@@ -178,6 +187,9 @@ func main() {
 		}
 		baseMinute := 4 + p*9 // A 最早 ~4 分钟，H ~67 分钟起步
 		for ti := 0; ti < teamCount; ti++ {
+			if scriptedPairs[[2]int{p, ti}] {
+				continue
+			}
 			teamID := teamIDs[ti]
 			if solvers[ti] {
 				wa := rng.Intn(4) // 0-3 次未通过尝试
@@ -238,6 +250,32 @@ func main() {
 			}
 		}
 	}
+
+	// 5. 封榜期确定性剧本。事件按时间与提交 ID 播放。
+	scripted := []struct {
+		problem int
+		team    int
+		status  string
+		minute  int
+		second  int
+	}{
+		{7, 17, model.StatusWrongAnswer, 4, 0},
+		{6, 18, model.StatusWrongAnswer, 6, 0},
+		{5, 19, model.StatusWrongAnswer, 8, 0},
+		{7, 17, model.StatusWrongAnswer, 10, 0},
+		{5, 19, model.StatusAccepted, 16, 0},
+		{3, 15, model.StatusAccepted, 20, 0},
+		{4, 16, model.StatusAccepted, 20, 5},
+	}
+	for _, item := range scripted {
+		at := freeze.Add(time.Duration(item.minute)*time.Minute + time.Duration(item.second)*time.Second)
+		if err := insertSubmission(ctx, st, c.ID, problems[item.problem], teamIDs[item.team], item.status, at, freeze); err != nil {
+			slog.Error("插入滚榜剧本提交失败", "err", err)
+			os.Exit(1)
+		}
+		inserted++
+		frozenCount++
+	}
 	fmt.Printf("已生成 %d 条提交（其中 %d 条冻结，滚榜可揭晓）\n", inserted, frozenCount)
 	printSummary(ctx, st, c)
 }
@@ -282,8 +320,8 @@ func insertSubmission(ctx context.Context, st *store.Store, contestID, problemID
 func printSummary(ctx context.Context, st *store.Store, c *model.Contest) {
 	fmt.Printf("\n演示赛信息:\n")
 	fmt.Printf("  比赛 ID: %d  《%s》\n", c.ID, c.Title)
-	fmt.Printf("  榜单展示页:  http://localhost:5173/contest/%d/board\n", c.ID)
-	fmt.Printf("  滚榜展示页:  http://localhost:5173/contest/%d/roll\n", c.ID)
+	fmt.Printf("  榜单展示页:  http://localhost:5173/contest/%d/standings\n", c.ID)
+	fmt.Printf("  滚榜展示页:  http://localhost:5173/contest/%d/standings/dynamic\n", c.ID)
 	fmt.Printf("  总览页:      http://localhost:5173/contest/%d\n", c.ID)
 	fmt.Printf("  队伍: %d 支（demo01..demo20，密码 %s）\n", teamCount, demoPassword)
 	freezeAt := c.EndTime.Add(-time.Duration(c.FreezeDurationMinutes) * time.Minute)

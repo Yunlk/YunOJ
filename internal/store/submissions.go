@@ -13,12 +13,13 @@ import (
 
 // SubmissionFilter 提交列表过滤条件，字段为 nil/空表示不过滤。
 type SubmissionFilter struct {
-	ProblemID *int64
-	UserID    *int64
-	ContestID *int64
-	Status    string
-	Page      int
-	Size      int
+	ProblemID      *int64
+	UserID         *int64
+	ContestID      *int64
+	ExcludeContest bool
+	Status         string
+	Page           int
+	Size           int
 }
 
 const submissionListColumns = `s.id, s.problem_id, p.title, s.user_id, u.username,
@@ -63,6 +64,9 @@ func (s *Store) ListSubmissions(ctx context.Context, f SubmissionFilter) ([]mode
 	if f.ContestID != nil {
 		args = append(args, *f.ContestID)
 		conds = append(conds, fmt.Sprintf("s.contest_id = $%d", len(args)))
+	}
+	if f.ExcludeContest {
+		conds = append(conds, "s.contest_id IS NULL")
 	}
 	if f.Status != "" {
 		args = append(args, f.Status)

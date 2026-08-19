@@ -29,9 +29,10 @@ type RunResult struct {
 	Status     string // OK / RE / SG / TO / XX（isolate 语义）
 	ExitCode   int
 	Signal     int
-	TimeMs     int // CPU 时间
-	WallTimeMs int // 墙钟时间
-	MemoryKb   int // 峰值内存
+	TimeMs     int  // CPU 时间
+	WallTimeMs int  // 墙钟时间
+	MemoryKb   int  // 峰值内存
+	OOMKilled  bool // cgroup OOM killer 是否因超出内存限制终止进程
 }
 
 // Sandbox 沙箱抽象。定义接口是为了便于替换实现与单元测试；
@@ -125,7 +126,7 @@ func (s *IsolateSandbox) Cleanup(ctx context.Context, boxID int) error {
 // isolate 默认的沙箱几乎为空（只有 /box、/dev 等），必须显式挂载
 // 编译工具链（/usr 下的 gcc/g++/python3 及头文件）与动态链接器
 // （/lib、/lib64、/etc 的 ld.so 缓存）才能编译与运行程序。
-var sandboxDirs = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"}
+var sandboxDirs = []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt"}
 
 // Run 在沙箱内执行命令并解析 meta 结果。
 func (s *IsolateSandbox) Run(ctx context.Context, boxID int, limits Limits,
@@ -137,11 +138,10 @@ func (s *IsolateSandbox) Run(ctx context.Context, boxID int, limits Limits,
 func (s *IsolateSandbox) RunAt(ctx context.Context, boxID int, limits Limits, hostDir,
 	stdinFile, stdoutFile, stderrFile string, args ...string) (RunResult, error) {
 
-	// 无 cgroup 时 isolate 用 RLIMIT_AS（虚拟内存）实现 --mem，虚存通常
-	// 远高于实际占用，放宽一倍防止误杀；MLE 判定仍按原限制用 max-rss 计量。
-	if !s.useCG {
-		limits.MemoryKb *= 2
-	}
+	// --mem 限制虚拟地址空间，统一放宽一倍防止动态链接库/解释器被误杀。
+	// cgroup 可用时，另用 --cg-mem 按题目限制约束实际总内存并提供 OOM 标记；
+	// 不可用时只能依靠 max-rss 与题目原限制做 MLE 兜底判断。
+	addressSpaceKb := limits.MemoryKb * 2
 
 	id := strconv.Itoa(boxID)
 	// meta 文件名带沙箱编号：交互题中两个沙箱并发运行时互不覆盖
@@ -156,7 +156,7 @@ func (s *IsolateSandbox) RunAt(ctx context.Context, boxID int, limits Limits, ho
 		"--run", "-b", id,
 		"--time=" + fmt.Sprintf("%.3f", float64(limits.TimeMs)/1000),
 		"--wall-time=" + fmt.Sprintf("%.3f", float64(limits.WallTimeMs)/1000),
-		"--mem=" + strconv.Itoa(limits.MemoryKb),
+		"--mem=" + strconv.Itoa(addressSpaceKb),
 		"--stack=" + strconv.Itoa(limits.StackKb),
 		"--fsize=" + strconv.Itoa(limits.FileSizeKb),
 		"--processes=" + strconv.Itoa(limits.Processes),
@@ -164,6 +164,9 @@ func (s *IsolateSandbox) RunAt(ctx context.Context, boxID int, limits Limits, ho
 		"--stdout=" + stdoutFile,
 		"--stderr=" + stderrFile,
 		"--meta=" + metaName,
+	}
+	if s.useCG {
+		cmdArgs = append(cmdArgs, "--cg-mem="+strconv.Itoa(limits.MemoryKb))
 	}
 	for _, d := range sandboxDirs {
 		cmdArgs = append(cmdArgs, "--dir="+d)
@@ -241,6 +244,9 @@ func parseMeta(path string) (RunResult, error) {
 			}
 		case "cg-mem":
 			res.MemoryKb, _ = strconv.Atoi(value)
+		case "cg-oom-killed":
+			// isolate 仅在 cgroup OOM killer 终止程序时写出该字段。
+			res.OOMKilled = value != "" && value != "0"
 		case "max-rss":
 			if res.MemoryKb == 0 {
 				res.MemoryKb, _ = strconv.Atoi(value)

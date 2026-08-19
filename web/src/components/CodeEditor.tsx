@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import Editor, { loader } from '@monaco-editor/react'
 import { monaco } from '../monacoSetup'
 
@@ -10,8 +11,9 @@ export interface CursorPosition {
 }
 
 interface CodeEditorProps {
-  /** OJ 语言 key：cpp / c / python */
+  /** OJ 语言 key，用于内置兼容映射。 */
   language: string
+  monacoLanguage?: string
   value: string
   onChange: (value: string) => void
   onCtrlEnter?: () => void
@@ -31,27 +33,36 @@ const monacoLanguage: Record<string, string> = {
 // 括号自动补全、括号匹配高亮、查找替换等。
 export default function CodeEditor({
   language,
+  monacoLanguage: configuredMonacoLanguage,
   value,
   onChange,
   onCtrlEnter,
   onCursorChange,
   fontSize = 14,
 }: CodeEditorProps) {
+  const onCtrlEnterRef = useRef(onCtrlEnter)
+  const onCursorChangeRef = useRef(onCursorChange)
+
+  useEffect(() => {
+    onCtrlEnterRef.current = onCtrlEnter
+    onCursorChangeRef.current = onCursorChange
+  }, [onCtrlEnter, onCursorChange])
+
   return (
     <div className="code-editor-wrap">
       <Editor
         height="100%"
         width="100%"
-        language={monacoLanguage[language] ?? 'plaintext'}
+        language={configuredMonacoLanguage || monacoLanguage[language] || 'plaintext'}
         value={value}
         theme="yunoj-calm"
         onChange={(v) => onChange(v ?? '')}
         onMount={(editor, m) => {
           // Ctrl/Cmd + Enter 快速提交
-          editor.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.Enter, () => onCtrlEnter?.())
+          editor.addCommand(m.KeyMod.CtrlCmd | m.KeyCode.Enter, () => onCtrlEnterRef.current?.())
           // 光标位置上报（状态栏 Ln/Col）
           editor.onDidChangeCursorPosition((e) => {
-            onCursorChange?.({ line: e.position.lineNumber, column: e.position.column })
+            onCursorChangeRef.current?.({ line: e.position.lineNumber, column: e.position.column })
           })
         }}
         options={{

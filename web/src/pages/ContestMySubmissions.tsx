@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { extractError, getContestMySubmissions } from '../api'
 import Pagination from '../components/Pagination'
 import StatusBadge from '../components/StatusBadge'
+import { useAuth } from '../context/AuthContext'
 import type { SubmissionListItem } from '../types'
 import { formatTime } from '../utils/format'
 
@@ -10,7 +11,9 @@ const PAGE_SIZE = 20
 
 export default function ContestMySubmissions() {
   const { id } = useParams()
+  const { user } = useAuth()
   const contestId = Number(id)
+  const isAdmin = user?.role === 'admin'
   const [searchParams, setSearchParams] = useSearchParams()
   const page = Math.max(1, Number(searchParams.get('page') ?? '1') || 1)
   const status = searchParams.get('status') ?? ''
@@ -54,7 +57,7 @@ export default function ContestMySubmissions() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">我的比赛提交</h1>
+        <h1 className="page-title">{isAdmin ? '比赛全部提交' : '我的比赛提交'}</h1>
         <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
       </div>
       <div className="search-form">
@@ -62,10 +65,13 @@ export default function ContestMySubmissions() {
           <option value="">全部状态</option>
           <option value="accepted">已通过</option>
           <option value="wrong_answer">答案错误</option>
+          <option value="presentation_error">格式错误</option>
           <option value="time_limit_exceeded">超时</option>
           <option value="memory_limit_exceeded">超内存</option>
+          <option value="output_limit_exceeded">输出超限</option>
           <option value="runtime_error">运行错误</option>
           <option value="compile_error">编译错误</option>
+          <option value="system_error">系统错误</option>
         </select>
       </div>
       {error && <div className="error-message">{error}</div>}
@@ -73,6 +79,7 @@ export default function ContestMySubmissions() {
         <thead>
           <tr>
             <th style={{ width: 80 }}>#</th>
+            {isAdmin && <th style={{ width: 120 }}>用户</th>}
             <th>题目</th>
             <th style={{ width: 90 }}>语言</th>
             <th style={{ width: 110 }}>状态</th>
@@ -83,15 +90,16 @@ export default function ContestMySubmissions() {
         </thead>
         <tbody>
           {loading ? (
-            <tr><td colSpan={7} className="table-empty">加载中…</td></tr>
+            <tr><td colSpan={isAdmin ? 8 : 7} className="table-empty">加载中…</td></tr>
           ) : items.length === 0 ? (
-            <tr><td colSpan={7} className="table-empty">暂无提交</td></tr>
+            <tr><td colSpan={isAdmin ? 8 : 7} className="table-empty">暂无提交</td></tr>
           ) : (
             items.map((s) => (
               <tr key={s.id}>
                 <td className="mono">
                   <Link to={`/submission/${s.id}`} className="problem-link">{s.id}</Link>
                 </td>
+                {isAdmin && <td>{s.username}</td>}
                 <td>{s.problem_title}</td>
                 <td className="mono">{s.language}</td>
                 <td><StatusBadge status={s.status} /></td>

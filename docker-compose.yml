@@ -40,9 +40,11 @@ services:
       REDIS_ADDR: redis:6379
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       DATA_DIR: /data
+      LANGUAGE_CONFIG: /config/languages.json
     volumes:
       # 与 judge 共享题目测试数据
       - ./data:/data
+      - ./config:/config:ro
     ports:
       - "8080:8080"
     depends_on:
@@ -69,6 +71,7 @@ services:
       DATABASE_URL: postgres://yunoj:${POSTGRES_PASSWORD:-yunoj}@postgres:5432/yunoj?sslmode=disable
       REDIS_ADDR: redis:6379
       DATA_DIR: /data
+      LANGUAGE_CONFIG: /config/languages.json
       JUDGE_WORKERS: ${JUDGE_WORKERS:-2}
       ISOLATE_PATH: /usr/local/bin/isolate
       ISOLATE_DIR: /var/local/lib/isolate
@@ -76,6 +79,9 @@ services:
       ISOLATE_CG: ${ISOLATE_CG:-false}
     volumes:
       - ./data:/data
+      - ./config:/config:ro
+      # 自有编译器放在 toolchains/ 中，配置文件使用 /opt/toolchains/... 路径。
+      - ./toolchains:/opt/toolchains:ro
     depends_on:
       postgres:
         condition: service_healthy

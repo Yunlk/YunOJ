@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/yunoj/yunoj/internal/judge"
 	"github.com/yunoj/yunoj/internal/langs"
 	"github.com/yunoj/yunoj/internal/model"
@@ -75,11 +77,65 @@ func (a *API) handleRunTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
+	a.handleSingleTest(w, r, id, u.ID)
+}
+
+// handleContestRunTest 为比赛题提供与普通题一致的自测能力。
+// 比赛题不要求公开发布，但必须通过比赛可见性、报名、开赛时间和题目归属校验。
+func (a *API) handleContestRunTest(w http.ResponseWriter, r *http.Request) {
+	u, _ := userFromCtx(r.Context())
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	pid, err := strconv.ParseInt(chi.URLParam(r, "problem_id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的题目 ID")
+		return
+	}
+	c, err := a.store.GetContest(r.Context(), cid)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "比赛不存在")
+		return
+	}
+	if err != nil {
+		slogError(r, "比赛自测", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	if visible, msg := a.contestVisibleTo(r, c); !visible {
+		writeError(w, http.StatusNotFound, msg)
+		return
+	}
+	if u.Role != model.RoleAdmin {
+		registered, err := a.store.IsContestTeam(r.Context(), cid, u.ID)
+		if err != nil || !registered {
+			writeError(w, http.StatusForbidden, "请先报名参加该比赛")
+			return
+		}
+		if time.Now().Before(c.StartTime) {
+			writeError(w, http.StatusForbidden, "比赛尚未开始，无法自测")
+			return
+		}
+	}
+	if _, err := a.store.GetContestProblem(r.Context(), cid, pid); err != nil {
+		writeError(w, http.StatusNotFound, "该题目不属于本场比赛")
+		return
+	}
+	if _, err := a.store.GetProblem(r.Context(), pid); err != nil {
+		writeError(w, http.StatusNotFound, "题目不存在")
+		return
+	}
+	a.handleSingleTest(w, r, pid, u.ID)
+}
+
+func (a *API) handleSingleTest(w http.ResponseWriter, r *http.Request, problemID, userID int64) {
 	var req testRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if msg := a.validateTestRequest(r, &req, u.ID); msg != "" {
+	if msg := a.validateTestRequest(r, &req, userID); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -90,7 +146,7 @@ func (a *API) handleRunTest(w http.ResponseWriter, r *http.Request) {
 
 	task := judge.TestTask{
 		RunID:     randomRunID(),
-		ProblemID: id,
+		ProblemID: problemID,
 		Language:  req.Language,
 		Code:      req.Code,
 		Optimize:  optimizeOrDefault(req.Optimize),

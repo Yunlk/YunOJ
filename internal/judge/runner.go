@@ -22,6 +22,7 @@ const (
 	defaultOutputLimitKb   = 16 * 1024 // 单次运行输出文件上限 16MB
 	compileExtraWallTimeMs = 10_000
 	maxCompileErrorBytes   = 16 * 1024
+	linuxSignalXFSZ        = 25 // Linux SIGXFSZ：输出文件超过 --fsize 限制
 )
 
 // Runner 评测单个提交。每个评测 worker 独占一个 Runner 与沙箱编号，
@@ -230,6 +231,24 @@ func sumInts(vals []int) int {
 	return total
 }
 
+func appendNotRunResults(results []model.CaseResult, cases []judgeCase) []model.CaseResult {
+	for _, jc := range cases {
+		results = append(results, model.CaseResult{CaseID: jc.Ordinal, Status: model.StatusNotRun})
+	}
+	return results
+}
+
+// applyCaseVerdict 保留首个选手侧错误；SE 表示评测环境不可信，覆盖已有结果并停止。
+func applyCaseVerdict(verdict, caseStatus string) (next string, stop bool) {
+	if caseStatus == model.StatusSystemError {
+		return model.StatusSystemError, true
+	}
+	if verdict == model.StatusAccepted && caseStatus != model.StatusAccepted {
+		return caseStatus, false
+	}
+	return verdict, false
+}
+
 // judgeInBox 在沙箱内完成「写源码 → 编译 → 逐点运行比较」全流程。
 func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem model.Problem,
 	lang langs.Language, judgeCases []judgeCase) (
@@ -249,9 +268,9 @@ func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem m
 		}
 	}
 
-	// 3. 逐点运行，首个非 AC 即停止（与主流 OJ 一致）
+	// 3. 逐点运行。选手侧错误不影响后续点；系统错误中止并标记剩余点未运行。
 	verdict = model.StatusAccepted
-	for _, jc := range judgeCases {
+	for i, jc := range judgeCases {
 		tc := data.TestCase{
 			Name:       strconv.Itoa(jc.Ordinal),
 			InputPath:  jc.InputPath,
@@ -265,8 +284,10 @@ func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem m
 		if cr.MemoryKb > memoryKb {
 			memoryKb = cr.MemoryKb
 		}
-		if cr.Status != model.StatusAccepted {
-			verdict = cr.Status
+		var stop bool
+		verdict, stop = applyCaseVerdict(verdict, cr.Status)
+		if stop {
+			results = appendNotRunResults(results, judgeCases[i+1:])
 			break
 		}
 	}
@@ -280,17 +301,17 @@ func (r *Runner) compile(ctx context.Context, lang langs.Language, optimize bool
 }
 
 // compileFile 在沙箱内编译任意源码文件（SPJ/交互器也走这里）。
-// 假定语言编译命令的末尾两个参数依次为「输出文件名」「源文件名」。
+// 编译命令使用 {source}/{output} 占位符，因此同时支持 GCC 的 -o
+// 模式和 javac 这类不显式指定输出文件的编译器。
 func (r *Runner) compileFile(ctx context.Context, lang langs.Language, sourceFileName, outputName string, optimize bool) (string, bool) {
 	cc := lang.Compile
 	command := cc.Command
 	if !optimize && cc.CommandNoO2 != nil {
 		command = cc.CommandNoO2
 	}
-	cmd := append([]string(nil), command...)
-	if len(cmd) >= 2 {
-		cmd[len(cmd)-1] = sourceFileName
-		cmd[len(cmd)-2] = outputName
+	cmd, err := langs.ExpandCompileCommand(command, sourceFileName, outputName)
+	if err != nil {
+		return err.Error(), false
 	}
 	limits := Limits{
 		TimeMs:     cc.TimeMs,
@@ -298,7 +319,7 @@ func (r *Runner) compileFile(ctx context.Context, lang langs.Language, sourceFil
 		MemoryKb:   cc.MemoryKb,
 		FileSizeKb: 64 * 1024,
 		StackKb:    256 * 1024,
-		Processes:  64,
+		Processes:  max(64, lang.Processes),
 	}
 	if err := prepareRunFiles(r.Sandbox.BoxDir(r.BoxID), nil); err != nil {
 		return "沙箱文件准备失败", false
@@ -331,7 +352,7 @@ func (r *Runner) runCase(ctx context.Context, boxDir string, tc data.TestCase, c
 		MemoryKb:   scaleInt(problem.MemoryLimitKb, lang.MemoryFactor),
 		FileSizeKb: defaultOutputLimitKb,
 		StackKb:    scaleInt(problem.MemoryLimitKb, lang.MemoryFactor),
-		Processes:  16,
+		Processes:  max(1, lang.Processes),
 	}
 
 	inData, err := os.ReadFile(tc.InputPath)
@@ -379,18 +400,24 @@ func (r *Runner) runCase(ctx context.Context, boxDir string, tc data.TestCase, c
 // verdictFromRun 把 isolate 运行结果映射为判题状态。
 // 返回 verdictOK 表示运行正常，可继续比较输出。
 func verdictFromRun(res RunResult, limits Limits) string {
+	// cgroup OOM 是区分 MLE 与普通 SIGSEGV/RE 的权威信号。
+	if res.OOMKilled {
+		return model.StatusMemoryLimitExceeded
+	}
+	// 无 cgroup 时 max-rss 是可用的最强信号。若时间和内存同时超限，
+	// 先报告 MLE，避免死循环把已经发生的内存超限覆盖为 TLE。
+	if res.MemoryKb > limits.MemoryKb {
+		return model.StatusMemoryLimitExceeded
+	}
+	if res.Signal == linuxSignalXFSZ {
+		return model.StatusOutputLimitExceeded
+	}
 	switch res.Status {
 	case "TO":
 		return model.StatusTimeLimitExceeded
 	case "XX":
 		return model.StatusOutputLimitExceeded
 	case "SG":
-		if res.Signal != 0 {
-			return model.StatusRuntimeError
-		}
-		if res.MemoryKb > limits.MemoryKb {
-			return model.StatusMemoryLimitExceeded
-		}
 		return model.StatusRuntimeError
 	case "RE":
 		return model.StatusRuntimeError
@@ -401,9 +428,6 @@ func verdictFromRun(res RunResult, limits Limits) string {
 	// 兜底：isolate 偶有边界取整，留 5% 余量再自行判断
 	if res.TimeMs > int(float64(limits.TimeMs)*1.05) {
 		return model.StatusTimeLimitExceeded
-	}
-	if res.MemoryKb > limits.MemoryKb {
-		return model.StatusMemoryLimitExceeded
 	}
 	return verdictOK
 }

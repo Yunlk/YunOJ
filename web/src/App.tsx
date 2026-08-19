@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom'
 import AdminRoute from './components/AdminRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import Navbar from './components/Navbar'
@@ -8,6 +8,7 @@ import ContestForm from './pages/ContestForm'
 import ContestList from './pages/ContestList'
 import ContestMySubmissions from './pages/ContestMySubmissions'
 import ContestProblemPage from './pages/ContestProblemPage'
+import ContestProblemManagerPage from './pages/ContestProblemManagerPage'
 import ContestStandingsPage from './pages/ContestStandingsPage'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
@@ -23,10 +24,13 @@ import TestcaseAdmin from './pages/TestcaseAdmin'
 
 /** 常规布局：导航栏 + 内容容器。 */
 function AppLayout() {
+  const location = useLocation()
+  const dynamicStandings = location.pathname.endsWith('/standings/dynamic')
+
   return (
     <>
-      <Navbar />
-      <main className="container">
+      {!dynamicStandings && <Navbar />}
+      <main className={dynamicStandings ? 'dynamic-standings-page' : 'container'}>
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<ProblemList />} />
@@ -38,8 +42,10 @@ function AppLayout() {
             <Route path="/contest/:id" element={<ContestDetail />} />
             <Route path="/contest/:id/edit" element={<AdminRoute><ContestForm /></AdminRoute>} />
             <Route path="/contest/:id/problem/:pid" element={<ProtectedRoute><ContestProblemPage /></ProtectedRoute>} />
+            <Route path="/contest/:id/problems" element={<AdminRoute><ContestProblemManagerPage /></AdminRoute>} />
             <Route path="/contest/:id/submissions" element={<ProtectedRoute><ContestMySubmissions /></ProtectedRoute>} />
             <Route path="/contest/:id/standings" element={<ContestStandingsPage />} />
+            <Route path="/contest/:id/standings/dynamic" element={<ContestStandingsPage />} />
             <Route path="/admin/problems" element={<AdminRoute><ProblemAdmin /></AdminRoute>} />
             <Route path="/admin/problems/:id/tests" element={<AdminRoute><TestcaseAdmin /></AdminRoute>} />
             <Route path="/problem/new" element={<AdminRoute><ProblemForm /></AdminRoute>} />

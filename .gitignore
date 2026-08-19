@@ -6,6 +6,8 @@ data/
 
 # 本地工具链
 .tools/
+toolchains/*
+!toolchains/README.md
 
 # Node
 node_modules/

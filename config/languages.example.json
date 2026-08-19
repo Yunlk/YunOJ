@@ -1,0 +1,22 @@
+{
+  "languages": [
+    {
+      "key": "rust_custom",
+      "name": "Rust",
+      "version": "rustc 1.85",
+      "monaco": "rust",
+      "source_file": "main.rs",
+      "run_command": ["./main"],
+      "compile": {
+        "command": ["/opt/toolchains/rust/bin/rustc", "-O", "-o", "{output}", "{source}"],
+        "command_no_o2": ["/opt/toolchains/rust/bin/rustc", "-C", "opt-level=0", "-o", "{output}", "{source}"],
+        "time_ms": 30000,
+        "memory_kb": 1048576
+      },
+      "time_factor": 1,
+      "memory_factor": 1,
+      "processes": 16,
+      "supports_optimize": true
+    }
+  ]
+}

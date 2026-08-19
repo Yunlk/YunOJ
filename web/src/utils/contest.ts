@@ -56,11 +56,30 @@ export function fromLocalInput(s: string): string {
   return d.toISOString()
 }
 
-/** 距离比赛开始的分钟数（动态排行榜里的 solved_at） */
+/** 距离比赛开始的分钟数（用于 ACM 榜单单元格）。 */
 export function minutesSinceStart(solvedAt: string, startTime: string): number {
   const t = new Date(solvedAt).getTime() - new Date(startTime).getTime()
   if (Number.isNaN(t)) return 0
   return Math.max(0, Math.round(t / 60000))
+}
+
+/** 以 ICPC 榜单常用的紧凑格式显示通过时长。 */
+export function formatContestDuration(solvedAt: string, startTime: string): string {
+  const t = new Date(solvedAt).getTime() - new Date(startTime).getTime()
+  if (Number.isNaN(t)) return '0min'
+  const minutes = Math.max(0, t / 60000)
+  const value = minutes >= 60 ? minutes / 60 : minutes
+  const unit = minutes >= 60 ? 'h' : 'min'
+  const text = value.toFixed(2).replace(/\.?(0+)$/, '')
+  return `${text}${unit}`
+}
+
+/** 将 ACM 累计罚时（分钟）格式化为榜单中的总时长。 */
+export function formatContestMinutes(minutes: number): string {
+  const value = minutes >= 60 ? minutes / 60 : Math.max(0, minutes)
+  const unit = minutes >= 60 ? 'h' : 'min'
+  const text = value.toFixed(2).replace(/\.?(0+)$/, '')
+  return `${text}${unit}`
 }
 
 /** 队伍头像 URL；无头像返回 null（前端渲染首字母占位） */

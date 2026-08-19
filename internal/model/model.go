@@ -9,12 +9,14 @@ const (
 	StatusRunning             = "running"               // 评测中
 	StatusAccepted            = "accepted"              // 通过
 	StatusWrongAnswer         = "wrong_answer"          // 答案错误
+	StatusPresentationError   = "presentation_error"    // 输出格式错误
 	StatusTimeLimitExceeded   = "time_limit_exceeded"   // 超时
 	StatusMemoryLimitExceeded = "memory_limit_exceeded" // 内存超限
 	StatusOutputLimitExceeded = "output_limit_exceeded" // 输出超限
 	StatusRuntimeError        = "runtime_error"         // 运行时错误
 	StatusCompileError        = "compile_error"         // 编译错误
 	StatusSystemError         = "system_error"          // 系统错误（沙箱/评测器故障）
+	StatusNotRun              = "not_run"               // 系统错误导致后续测试点未运行
 )
 
 // 用户角色。

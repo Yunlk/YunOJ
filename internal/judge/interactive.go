@@ -81,7 +81,7 @@ func (r *Runner) judgeInteractiveInBox(ctx context.Context, sub model.Submission
 
 	// 4. 逐点运行（每个测试点是一次完整的选手-交互器对话）
 	verdict = model.StatusAccepted
-	for _, jc := range judgeCases {
+	for i, jc := range judgeCases {
 		tc := data.TestCase{
 			Name:       strconv.Itoa(jc.Ordinal),
 			InputPath:  jc.InputPath,
@@ -96,8 +96,11 @@ func (r *Runner) judgeInteractiveInBox(ctx context.Context, sub model.Submission
 		if cr.MemoryKb > memoryKb {
 			memoryKb = cr.MemoryKb
 		}
-		if cr.Status != model.StatusAccepted {
-			verdict = cr.Status
+		var stop bool
+		verdict, stop = applyCaseVerdict(verdict, cr.Status)
+		if stop {
+			results = appendNotRunResults(results, judgeCases[i+1:])
+			scores = append(scores, make([]int, len(judgeCases)-i-1)...)
 			break
 		}
 	}

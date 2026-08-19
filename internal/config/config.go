@@ -19,6 +19,8 @@ type Config struct {
 	JWTSecret string
 	// DataDir 题目测试数据等共享数据目录（DATA_DIR），web 与 judge 挂载同一目录
 	DataDir string
+	// LanguageConfigPath 自定义语言配置（LANGUAGE_CONFIG），web 与 judge 必须读取同一份。
+	LanguageConfigPath string
 	// JudgeWorkers 评测 worker 数量（JUDGE_WORKERS），每个 worker 独占一个沙箱
 	JudgeWorkers int
 	// IsolatePath isolate 可执行文件路径（ISOLATE_PATH）
@@ -37,16 +39,17 @@ type Config struct {
 // Load 读取环境变量并返回配置。
 func Load() Config {
 	return Config{
-		Addr:         getEnv("SERVER_ADDR", ":8080"),
-		DatabaseURL:  getEnv("DATABASE_URL", "postgres://yunoj:yunoj@localhost:5432/yunoj?sslmode=disable"),
-		RedisAddr:    getEnv("REDIS_ADDR", "localhost:6379"),
-		JWTSecret:    getEnv("JWT_SECRET", "dev-secret-change-me"),
-		DataDir:      getEnv("DATA_DIR", "./data"),
-		JudgeWorkers: getEnvInt("JUDGE_WORKERS", 2),
-		IsolatePath:  getEnv("ISOLATE_PATH", "isolate"),
-		IsolateDir:   getEnv("ISOLATE_DIR", "/var/local/lib/isolate"),
-		IsolateCG:    getEnvBool("ISOLATE_CG", false),
-		TokenTTL:     7 * 24 * time.Hour,
+		Addr:               getEnv("SERVER_ADDR", ":8080"),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://yunoj:yunoj@localhost:5432/yunoj?sslmode=disable"),
+		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		JWTSecret:          getEnv("JWT_SECRET", "dev-secret-change-me"),
+		DataDir:            getEnv("DATA_DIR", "./data"),
+		LanguageConfigPath: getEnv("LANGUAGE_CONFIG", "./config/languages.json"),
+		JudgeWorkers:       getEnvInt("JUDGE_WORKERS", 2),
+		IsolatePath:        getEnv("ISOLATE_PATH", "isolate"),
+		IsolateDir:         getEnv("ISOLATE_DIR", "/var/local/lib/isolate"),
+		IsolateCG:          getEnvBool("ISOLATE_CG", false),
+		TokenTTL:           7 * 24 * time.Hour,
 	}
 }
 

@@ -134,3 +134,25 @@ func TestBuildACMFreezeAndRollBoard(t *testing.T) {
 		t.Fatal("滚榜过程中队伍 A 的排名应发生变化")
 	}
 }
+
+func TestReplayACMSubmissionSnapshotsAreIndependent(t *testing.T) {
+	ctx := acmCtx()
+	subs := []model.Submission{
+		sub(1, 10, 1, model.StatusWrongAnswer, ctx.StartTime.Add(5*time.Minute)),
+		sub(2, 10, 1, model.StatusAccepted, ctx.StartTime.Add(10*time.Minute)),
+		sub(3, 11, 2, model.StatusAccepted, ctx.StartTime.Add(12*time.Minute)),
+	}
+	snapshots := ReplayACMSubmissionSnapshots(ctx, subs)
+	if snapshots[1] == nil || snapshots[2] == nil || snapshots[3] == nil {
+		t.Fatalf("每条终态提交都应有快照，得到 %#v", snapshots)
+	}
+	var first *ACMStanding
+	for i := range snapshots[1] {
+		if snapshots[1][i].TeamID == 10 {
+			first = &snapshots[1][i]
+		}
+	}
+	if first == nil || first.Problems[1].Solved || first.Problems[1].FailedAttempts != 1 {
+		t.Fatalf("第一个 WA 快照不应被后续 AC 污染，得到 %#v", first)
+	}
+}

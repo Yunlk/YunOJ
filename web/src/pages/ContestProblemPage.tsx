@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  extractError, getContest, getContestProblem, getLanguages, submitToContest,
+  extractError,
+  getContest,
+  getContestMySubmissions,
+  getContestProblem,
+  getLanguages,
+  runContestTest,
+  submitToContest,
 } from '../api'
-import CodeEditor from '../components/CodeEditor'
-import Markdown from '../components/Markdown'
-import SampleBlock from '../components/SampleBlock'
+import ProblemWorkbench from '../components/ProblemWorkbench'
+import SubmissionPanel from '../components/SubmissionPanel'
+import { useAuth } from '../context/AuthContext'
+import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
 import type { Contest, ContestProblemView, Language } from '../types'
 import { formatRemaining, useClock } from '../utils/clock'
 import { formatMemory, formatTimeLimit } from '../utils/format'
@@ -19,6 +26,7 @@ const MY_STATUS_LABELS: Record<string, string> = {
 
 export default function ContestProblemPage() {
   const { id, pid } = useParams()
+  const { user } = useAuth()
   const contestId = Number(id)
   const problemId = Number(pid)
   const now = useClock(1000)
@@ -26,66 +34,156 @@ export default function ContestProblemPage() {
   const [contest, setContest] = useState<Contest | null>(null)
   const [view, setView] = useState<ContestProblemView | null>(null)
   const [languages, setLanguages] = useState<Language[]>([])
-  const [language, setLanguage] = useState('cpp')
-  const [code, setCode] = useState('')
+  const draftScope = `contest:${contestId}:problem:${problemId}:user:${user?.id ?? 'guest'}`
+  const [language, setLanguage] = useState('')
+  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language)
   const [optimize, setOptimize] = useState(true)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const [submittedId, setSubmittedId] = useState<number | null>(null)
+  const [panel, setPanel] = useState<'editor' | 'submissions'>('editor')
+  const [submissionRefreshKey, setSubmissionRefreshKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
-    setError('')
+    setLoadError('')
     Promise.all([getContest(contestId), getContestProblem(contestId, problemId), getLanguages()])
-      .then(([c, v, ls]) => {
+      .then(([contestResponse, problemView, items]) => {
         if (cancelled) return
-        setContest(c.contest)
-        setView(v)
-        setLanguages(ls)
+        setContest(contestResponse.contest)
+        setView(problemView)
+        setLanguages(items)
+        const preferred = preferredDraftLanguage(draftScope)
+        setLanguage(items.some((item) => item.key === preferred) ? preferred : (items[0]?.key ?? ''))
       })
       .catch((err) => {
-        if (!cancelled) setError(extractError(err))
+        if (!cancelled) setLoadError(extractError(err))
       })
     return () => {
       cancelled = true
     }
-  }, [contestId, problemId])
+  }, [contestId, draftScope, problemId])
+
+  const changeLanguage = (next: string) => {
+    flushDraft()
+    rememberDraftLanguage(draftScope, next)
+    setLanguage(next)
+  }
 
   const submit = async () => {
+    if (!contest) return
+    const current = Date.now()
+    if (current < new Date(contest.start_time).getTime()) {
+      setSubmitError('比赛尚未开始，无法提交')
+      return
+    }
+    if (current >= new Date(contest.end_time).getTime()) {
+      setSubmitError('比赛已经结束，无法提交')
+      return
+    }
+    if (!language) {
+      setSubmitError('请选择语言')
+      return
+    }
     if (!code.trim()) {
-      setError('代码不能为空')
+      setSubmitError('代码不能为空')
       return
     }
     setBusy(true)
-    setError('')
+    setSubmitError('')
     setSubmittedId(null)
     try {
-      const res = await submitToContest(contestId, problemId, language, code, optimize)
-      setSubmittedId(res.id)
+      flushDraft()
+      const result = await submitToContest(contestId, problemId, language, code, optimize)
+      setSubmittedId(result.id)
+      setSubmissionRefreshKey((key) => key + 1)
+      setPanel('submissions')
     } catch (err) {
-      setError(extractError(err))
+      setSubmitError(extractError(err))
     } finally {
       setBusy(false)
     }
   }
 
-  if (error) return <div className="error-message">{error}</div>
+  const runContestCode = useCallback(
+    (input: string) => runContestTest(contestId, problemId, language, code, input, optimize),
+    [code, contestId, language, optimize, problemId],
+  )
+
+  const loadContestSubmissions = useCallback(
+    ({ page, size, problemId: filteredProblemId }: {
+      page: number
+      size: number
+      problemId: number
+      userId: number
+      contestId?: number
+    }) => getContestMySubmissions({
+      id: contestId,
+      page,
+      size,
+      problem_id: filteredProblemId,
+    }),
+    [contestId],
+  )
+
+  if (loadError) return <div className="error-message">{loadError}</div>
   if (!contest || !view) return <div className="page-loading">加载中…</div>
 
-  const { problem, contest_problem: cp } = view
+  const { problem, contest_problem: contestProblem } = view
   const startMs = new Date(contest.start_time).getTime()
   const endMs = new Date(contest.end_time).getTime()
   const progress = Math.min(100, Math.max(0, ((now - startMs) / Math.max(1, endMs - startMs)) * 100))
   const running = now >= startMs && now < endMs
   const upcoming = now < startMs
   const my = view.my
+  const submitLabel = running ? '提交' : upcoming ? '未开始' : '已结束'
+  const submitDisabledReason = running
+    ? undefined
+    : upcoming
+      ? '比赛尚未开始，当前只能查看题面。'
+      : '比赛已结束，不再接受提交；仍可使用自测。'
+
+  const statementMeta = (
+    <div className="workbench-meta-line">
+      <span>题号 {contestProblem.display_id}</span>
+      <span>满分 {contestProblem.score}</span>
+      <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
+      <span>内存限制 {formatMemory(problem.memory_limit_kb)}</span>
+      <span>
+        提交 {my?.submissions ?? 0}
+        {my?.remaining !== undefined ? ` / 剩余 ${my.remaining}` : ''} 次
+      </span>
+      {my && my.status !== 'untried' && (
+        <span>
+          最近：{MY_STATUS_LABELS[my.status] ?? my.status}
+          {my.score > 0 ? `（${my.score} 分）` : ''}
+        </span>
+      )}
+    </div>
+  )
+
+  const problemNavigation = (
+    <div className="contest-problem-nav">
+      {view.prev_problem_id ? (
+        <Link className="button button-secondary" to={`/contest/${contestId}/problem/${view.prev_problem_id}`}>
+          ← 上一题
+        </Link>
+      ) : <span />}
+      {view.next_problem_id ? (
+        <Link className="button button-secondary" to={`/contest/${contestId}/problem/${view.next_problem_id}`}>
+          下一题 →
+        </Link>
+      ) : <span />}
+    </div>
+  )
 
   return (
     <div className="contest-problem-page">
       <div className="contest-topbar">
         <div className="contest-topbar-title">
-          <Link to={`/contest/${contestId}`} className="problem-link">← 总览</Link>
-          <span className="contest-topbar-pid">{cp.display_id}</span>
+          <Link to={`/contest/${contestId}`} className="problem-link">← {contest.title}</Link>
+          <span className="contest-topbar-pid">{contestProblem.display_id}</span>
           <span>{problem.title}</span>
         </div>
         <div className="contest-topbar-time">
@@ -102,109 +200,45 @@ export default function ContestProblemPage() {
         </div>
       </div>
 
-      <div className="contest-problem-layout">
-        <div className="problem-statement-card">
-          <div className="problem-limits">
-            <span className="tag-chip">题号 {cp.display_id}</span>
-            <span className="tag-chip">满分 {cp.score}</span>
-            <span className="tag-chip">{formatTimeLimit(problem.time_limit_ms)}</span>
-            <span className="tag-chip">{formatMemory(problem.memory_limit_kb)}</span>
-            <span className="tag-chip">
-              提交 {my?.submissions ?? 0}
-              {my?.remaining !== undefined ? ` / 剩余 ${my.remaining}` : ''} 次
-            </span>
-            {my && my.status !== 'untried' && (
-              <span className="tag-chip">
-                最近：{MY_STATUS_LABELS[my.status] ?? my.status}
-                {my.score > 0 ? `（${my.score} 分）` : ''}
-              </span>
-            )}
-          </div>
-          <div className="problem-statement">
-            <Markdown>{problem.statement}</Markdown>
-          </div>
-          {problem.input_format && (
-            <>
-              <h3 className="statement-h">输入格式</h3>
-              <Markdown>{problem.input_format}</Markdown>
-            </>
-          )}
-          {problem.output_format && (
-            <>
-              <h3 className="statement-h">输出格式</h3>
-              <Markdown>{problem.output_format}</Markdown>
-            </>
-          )}
-          {problem.samples.length > 0 && (
-            <>
-              <h3 className="statement-h">样例</h3>
-              {problem.samples.map((s, i) => (
-                <div key={i} className="sample-group">
-                  {s.note && <Markdown>{s.note}</Markdown>}
-                  <SampleBlock title={`输入 #${i + 1}`} content={s.input} />
-                  <SampleBlock title={`输出 #${i + 1}`} content={s.output} />
-                </div>
-              ))}
-            </>
-          )}
-          {problem.hint && (
-            <>
-              <h3 className="statement-h">提示</h3>
-              <Markdown>{problem.hint}</Markdown>
-            </>
-          )}
-        </div>
-
-        <div className="contest-editor-panel">
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="cp-lang">语言</label>
-              <select id="cp-lang" value={language} onChange={(e) => setLanguage(e.target.value)}>
-                {languages.map((l) => (
-                  <option key={l.key} value={l.key}>{l.name} ({l.version})</option>
-                ))}
-              </select>
-            </div>
-            <label className="checkbox-label">
-              <input type="checkbox" checked={optimize} onChange={(e) => setOptimize(e.target.checked)} />
-              -O2
-            </label>
-          </div>
-          <div className="contest-editor">
-            <CodeEditor language={language} value={code} onChange={setCode} onCtrlEnter={submit} />
-          </div>
-          {running ? (
-            <div className="contest-submit-row">
-              <button type="button" className="button button-primary" disabled={busy} onClick={submit}>
-                {busy ? '提交中…' : '提交'}
-              </button>
-              <span className="muted">Ctrl/Cmd + Enter 快速提交</span>
-            </div>
-          ) : (
-            <div className="notice-card">
-              {upcoming ? '比赛尚未开始，无法提交。' : '比赛已结束，不再接受提交。'}
-            </div>
-          )}
-          {error && <div className="error-message">{error}</div>}
-          {submittedId !== null && (
-            <div className="success-message">
-              提交成功，<Link to={`/submission/${submittedId}`}>查看提交 #{submittedId}</Link>
-            </div>
-          )}
-          <div className="contest-problem-nav">
-            {view.prev_problem_id ? (
-              <Link className="button button-secondary" to={`/contest/${contestId}/problem/${view.prev_problem_id}`}>
-                ← 上一题
-              </Link>
-            ) : <span />}
-            {view.next_problem_id ? (
-              <Link className="button button-secondary" to={`/contest/${contestId}/problem/${view.next_problem_id}`}>
-                下一题 →
-              </Link>
-            ) : <span />}
-          </div>
-        </div>
-      </div>
+      <ProblemWorkbench
+        className="contest-workbench"
+        problem={problem}
+        title={`${contestProblem.display_id} ${problem.title}`}
+        languages={languages}
+        language={language}
+        onLanguageChange={changeLanguage}
+        code={code}
+        onCodeChange={setCode}
+        optimize={optimize}
+        onOptimizeChange={setOptimize}
+        submitting={busy}
+        submitError={submitError}
+        submittedId={submittedId}
+        onSubmit={() => void submit()}
+        onRun={runContestCode}
+        showSubmissions={panel === 'submissions'}
+        canSubmit={running}
+        submitLabel={submitLabel}
+        submitDisabledReason={submitDisabledReason}
+        headerActions={<Link to={`/contest/${contestId}`} className="mini-btn">返回比赛</Link>}
+        statementMeta={statementMeta}
+        editorFooter={problemNavigation}
+        submissionPanel={(
+          <SubmissionPanel
+            title={`${contest.title} · ${contestProblem.display_id} · ${user?.role === 'admin' ? '全部提交' : '我的提交'}`}
+            problemId={problemId}
+            userId={user?.id ?? null}
+            contestId={contestId}
+            refreshKey={submissionRefreshKey}
+            focusSubmissionId={submittedId}
+            showScore
+            timeLimitMs={problem.time_limit_ms}
+            memoryLimitKb={problem.memory_limit_kb}
+            onBack={() => setPanel('editor')}
+            load={loadContestSubmissions}
+          />
+        )}
+      />
     </div>
   )
 }

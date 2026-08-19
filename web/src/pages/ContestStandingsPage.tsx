@@ -1,19 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import {
-  addContestProblem, extractError, getContest, getContestStandings, getProblems,
-  removeContestProblem, reorderContestProblems, updateContestProblem,
+  extractError, getContest, getContestStandings,
 } from '../api'
 import { ACMCell, TeamAvatar } from '../components/ContestBoardParts'
 import type {
-  ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding, ProblemListItem,
+  ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding,
 } from '../types'
 import { formatTime } from '../utils/format'
+import { formatContestMinutes } from '../utils/contest'
+import { getStatusInfo, isPendingStatus } from '../utils/status'
 
 // ---------- 排行榜 ----------
 
-function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus }: {
+function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus, activeAnimationKey }: {
   contestId: number
   standings: ACMStanding[]
   problems: ContestProblem[]
@@ -21,41 +21,87 @@ function ACMTable({ contestId, standings, problems, startTime, activeTeamId, act
   activeTeamId?: number
   activeProblemId?: number
   activeStatus?: string
+  activeAnimationKey?: string
 }) {
+  const previousTops = useRef(new Map<number, number>())
+
+  // FLIP：保留队伍行节点，通过位移过渡让排名变化连续移动，而不是瞬间跳位。
+  useLayoutEffect(() => {
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('.standings-table tbody tr[data-team-id]'))
+    const nextTops = new Map<number, number>()
+    rows.forEach((row) => {
+      const teamId = Number(row.dataset.teamId)
+      const top = row.getBoundingClientRect().top
+      nextTops.set(teamId, top)
+      const previousTop = previousTops.current.get(teamId)
+      const delta = previousTop === undefined ? 0 : previousTop - top
+      if (Math.abs(delta) > 1) {
+        row.style.transition = 'none'
+        row.style.transform = `translateY(${delta}px)`
+        window.requestAnimationFrame(() => {
+          row.style.transition = 'transform 720ms cubic-bezier(0.22, 1, 0.36, 1)'
+          row.style.transform = 'translateY(0)'
+        })
+      }
+    })
+    previousTops.current = nextTops
+  }, [standings, activeAnimationKey, activeTeamId])
+
+  const activeColor = activeStatus ? getStatusInfo(activeStatus).color : ''
+
   return (
     <div className="standings-wrap">
       <table className="data-table standings-table">
         <thead>
           <tr>
-            <th style={{ width: 56 }}>#</th>
-            <th>队伍</th>
-            <th style={{ width: 70 }}>通过</th>
-            <th style={{ width: 70 }}>罚时</th>
+            <th className="rank-column">#</th>
+            <th className="team-column">队伍</th>
+            <th className="total-column">总分</th>
             {problems.map((p) => (
-              <th key={p.problem_id} title={p.title} style={{ width: 78 }}>{p.display_id}</th>
+              <th key={p.problem_id} title={p.title} className="problem-column">
+                <span className="standings-problem-id">{p.display_id}</span>
+                <span className="standings-problem-title">{p.title}</span>
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {standings.length === 0 ? (
-            <tr><td colSpan={4 + problems.length} className="table-empty">暂无队伍</td></tr>
+            <tr><td colSpan={3 + problems.length} className="table-empty">暂无队伍</td></tr>
           ) : (
-            standings.map((s) => (
-              <tr key={`${s.team_id}-${s.rank}`} data-team-id={s.team_id} className={activeTeamId === s.team_id ? 'standings-active-row' : ''}>
-                <td className="mono">{s.rank}</td>
-                <td>
+              standings.map((s) => (
+              <tr
+                key={s.team_id}
+                data-team-id={s.team_id}
+                className={activeTeamId === s.team_id ? `standings-active-row standings-row-${activeColor}` : ''}
+              >
+                <td className="mono rank-column">{s.rank}</td>
+                <td className="team-column">
                   <span className="standings-team">
                     <TeamAvatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
                     <span>{s.team_name}</span>
                   </span>
                 </td>
-                <td className="mono">{s.solved}</td>
-                <td className="mono">{s.penalty}</td>
-                {problems.map((p) => (
-                  activeTeamId === s.team_id && activeProblemId === p.problem_id && (activeStatus === 'pending' || activeStatus === 'running')
-                    ? <td key={p.problem_id} className="standings-cell judging-cell">评测中</td>
-                    : <ACMCell key={p.problem_id} state={s.problems[p.display_id]} startTime={startTime} />
-                ))}
+                <td className="mono standings-total-cell total-column">
+                  <span className="cell-score">{problems.reduce((sum, p) => {
+                    const state = s.problems[p.display_id]
+                    return sum + (state?.solved ? (p.score ?? p.total_score ?? 100) : 0)
+                  }, 0)}</span>
+                  <span className="cell-time">({formatContestMinutes(s.penalty)})</span>
+                </td>
+                {problems.map((p) => {
+                  const activeCell = activeTeamId === s.team_id && activeProblemId === p.problem_id
+                  if (activeCell && (activeStatus === 'pending' || activeStatus === 'running')) {
+                    return <td key={p.problem_id} className={`standings-cell judging-cell active-evaluation-cell standings-cell-${activeColor}`}>评测中</td>
+                  }
+                  return <ACMCell
+                    key={p.problem_id}
+                    state={s.problems[p.display_id]}
+                    startTime={startTime}
+                    score={p.score ?? p.total_score ?? 100}
+                    className={activeCell ? `active-evaluation-cell standings-cell-${activeColor}` : ''}
+                  />
+                })}
               </tr>
             ))
           )}
@@ -70,6 +116,7 @@ function submissionStatusLabel(status?: string): string {
   if (status === 'running') return '评测中'
   if (status === 'accepted') return 'AC'
   if (status === 'wrong_answer') return 'WA'
+  if (status === 'presentation_error') return 'PE'
   if (status === 'compile_error') return 'CE'
   if (status === 'time_limit_exceeded') return 'TLE'
   if (status === 'memory_limit_exceeded') return 'MLE'
@@ -89,11 +136,14 @@ function OITable({ contestId, standings, problems }: {
       <table className="data-table standings-table">
         <thead>
           <tr>
-            <th style={{ width: 56 }}>#</th>
-            <th>队伍</th>
-            <th style={{ width: 90 }}>总分</th>
+            <th className="rank-column">#</th>
+            <th className="team-column">队伍</th>
+            <th className="total-column">总分</th>
             {problems.map((p) => (
-              <th key={p.problem_id} title={p.title} style={{ width: 90 }}>{p.display_id}</th>
+              <th key={p.problem_id} title={p.title} className="problem-column">
+                <span className="standings-problem-id">{p.display_id}</span>
+                <span className="standings-problem-title">{p.title}</span>
+              </th>
             ))}
           </tr>
         </thead>
@@ -103,14 +153,14 @@ function OITable({ contestId, standings, problems }: {
           ) : (
             standings.map((s) => (
               <tr key={s.team_id}>
-                <td className="mono">{s.rank}</td>
-                <td>
+                <td className="mono rank-column">{s.rank}</td>
+                <td className="team-column">
                   <span className="standings-team">
                     <TeamAvatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
                     <span>{s.team_name}</span>
                   </span>
                 </td>
-                <td className="mono standings-total">{s.total_score}</td>
+                <td className="mono standings-total total-column">{s.total_score}</td>
                 {problems.map((p) => {
                   const score = s.problem_scores[p.display_id]
                   const subs = s.problem_submissions[p.display_id]
@@ -131,13 +181,18 @@ function OITable({ contestId, standings, problems }: {
   )
 }
 
-function StandingsPanel({ contestId }: { contestId: number }) {
+function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number; dynamicOnly?: boolean }) {
   const [standings, setStandings] = useState<ContestStandings | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [live, setLive] = useState(false)
-  const [liveActivity, setLiveActivity] = useState<ContestStandings['latest_submission']>()
-  const seenLiveKey = useRef<string | null>(null)
+  const [liveItems, setLiveItems] = useState<Record<number, NonNullable<ContestStandings['latest_submission']>>>({})
+  const [liveQueue, setLiveQueue] = useState<number[]>([])
+  const [liveEventId, setLiveEventId] = useState<number | null>(null)
+  const [livePhase, setLivePhase] = useState<'focus' | 'judging' | 'result' | 'settled' | 'done'>('done')
+  const liveKnownStatuses = useRef(new Map<number, string>())
+  const liveEnqueued = useRef(new Set<number>())
+  const liveInitialized = useRef(false)
   const rollStarted = useRef(false)
   const [rollStep, setRollStep] = useState(-1)
   const [rollPhase, setRollPhase] = useState<'focus' | 'judging' | 'result' | 'settled' | 'done'>('done')
@@ -148,7 +203,6 @@ function StandingsPanel({ contestId }: { contestId: number }) {
     setError('')
     getContestStandings(contestId)
       .then((s) => {
-        setStandings(s)
         // 比赛进行中且未封榜：保持 3 秒轮询，随提交实时更新
         const now = Date.now()
         const start = new Date(s.contest.start_time).getTime()
@@ -156,22 +210,55 @@ function StandingsPanel({ contestId }: { contestId: number }) {
         const running = now >= start && now < end
         const frozen = Boolean(s.freeze_at)
         // 封榜期间仍保持轮询，比赛结束后自动拉取揭晓事件。
-        setLive(running || (frozen && !rollStarted.current))
-        const latest = s.latest_submission
-        if (latest) {
-          const key = `${latest.submission_id}:${latest.status}`
-          if (seenLiveKey.current === null) {
-            seenLiveKey.current = key
-            if (latest.status === 'pending' || latest.status === 'running') {
-              setLiveActivity(latest)
+        const pendingReveal = dynamicOnly && frozen && !rollStarted.current
+          && (now < end || (!s.roll_available && (s.frozen_submissions ?? 0) > 0))
+        const incoming = s.live_submissions ?? (s.latest_submission ? [s.latest_submission] : [])
+        const waitingForJudge = incoming.some((item) => isPendingStatus(item.status))
+        setLive(running || pendingReveal || waitingForJudge)
+
+        // 轮询到的最新总榜不能直接覆盖当前画面。每条提交在显示终态后
+        // 再应用 standings_after，否则 AC 会在“评测中”阶段提前改变名次。
+        const preserveAnimatedBoard = liveInitialized.current && s.mode === 'ACM'
+          && !s.roll_available && !frozen
+        setStandings((current) => preserveAnimatedBoard && current
+          ? { ...s, standings: current.standings }
+          : s)
+
+        const mergedItems: Record<number, NonNullable<ContestStandings['latest_submission']>> = {}
+        incoming.forEach((item) => { mergedItems[item.submission_id] = item })
+        setLiveItems((current) => ({ ...current, ...mergedItems }))
+
+        if (!liveInitialized.current) {
+          const pendingIds: number[] = []
+          incoming.forEach((item) => {
+            liveKnownStatuses.current.set(item.submission_id, item.status)
+            if (isPendingStatus(item.status)) {
+              pendingIds.push(item.submission_id)
+              liveEnqueued.current.add(item.submission_id)
+            } else {
+              // 初次打开榜单不回放全部历史提交。
+              liveEnqueued.current.add(item.submission_id)
             }
-          } else if (seenLiveKey.current !== key) {
-            seenLiveKey.current = key
-            setLiveActivity(latest)
-          }
+          })
+          liveInitialized.current = true
+          if (pendingIds.length > 0) setLiveQueue(pendingIds)
+        } else {
+          const newIds: number[] = []
+          incoming.forEach((item) => {
+            liveKnownStatuses.current.set(item.submission_id, item.status)
+            if (!liveEnqueued.current.has(item.submission_id)) {
+              liveEnqueued.current.add(item.submission_id)
+              newIds.push(item.submission_id)
+            }
+          })
+          if (newIds.length > 0) setLiveQueue((queue) => [...queue, ...newIds])
         }
-        if (s.roll_available && s.roll_events && s.roll_events.length > 0 && !rollStarted.current) {
+        if (dynamicOnly && s.roll_available && s.roll_events && s.roll_events.length > 0 && !rollStarted.current) {
           rollStarted.current = true
+          setLive(false)
+          setLiveQueue([])
+          setLiveEventId(null)
+          setLivePhase('done')
           setRollStep(0)
           setRollPhase('focus')
           setRolling(true)
@@ -181,7 +268,7 @@ function StandingsPanel({ contestId }: { contestId: number }) {
       .finally(() => {
         if (!silent) setLoading(false)
       })
-  }, [contestId])
+  }, [contestId, dynamicOnly])
 
   useEffect(() => {
     load()
@@ -195,10 +282,36 @@ function StandingsPanel({ contestId }: { contestId: number }) {
   }, [live, load])
 
   useEffect(() => {
-    if (!liveActivity) return
-    const timer = window.setTimeout(() => setLiveActivity(undefined), 2600)
+    if (liveEventId !== null || liveQueue.length === 0) return
+    setLiveEventId(liveQueue[0])
+    setLiveQueue((queue) => queue.slice(1))
+    setLivePhase('focus')
+  }, [liveEventId, liveQueue])
+
+  const liveEvent = liveEventId === null ? undefined : liveItems[liveEventId]
+
+  useEffect(() => {
+    if (!liveEvent) return
+    if (livePhase === 'judging' && (isPendingStatus(liveEvent.status) || !liveEvent.standings_after)) {
+      return
+    }
+    const duration = livePhase === 'focus' ? 480 : livePhase === 'judging' ? 320 : livePhase === 'result' ? 900 : 700
+    const timer = window.setTimeout(() => {
+      if (livePhase === 'focus') setLivePhase('judging')
+      else if (livePhase === 'judging') setLivePhase('result')
+      else if (livePhase === 'result') {
+        setStandings((current) => current && liveEvent.standings_after
+          ? { ...current, standings: liveEvent.standings_after }
+          : current)
+        setLivePhase('settled')
+      }
+      else if (livePhase === 'settled') {
+        setLiveEventId(null)
+        setLivePhase('done')
+      }
+    }, duration)
     return () => window.clearTimeout(timer)
-  }, [liveActivity])
+  }, [liveEvent, livePhase])
 
   useEffect(() => {
     if (!rolling || !standings?.roll_events || rollStep < 0) return
@@ -237,12 +350,12 @@ function StandingsPanel({ contestId }: { contestId: number }) {
 
   useEffect(() => {
     const event = rolling && standings?.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : null
-    const liveSubmission = !rolling ? liveActivity : null
+    const liveSubmission = !rolling ? liveEvent : null
     const teamID = event?.team_id ?? liveSubmission?.team_id
     if (teamID === undefined) return
     const row = document.querySelector(`[data-team-id="${teamID}"]`)
     row?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }, [rolling, rollStep, rollPhase, standings, liveActivity])
+  }, [rolling, rollStep, rollPhase, standings, liveEvent, livePhase])
 
   if (loading) return <div className="page-loading">排行榜加载中…</div>
   if (error && !standings) {
@@ -258,26 +371,40 @@ function StandingsPanel({ contestId }: { contestId: number }) {
   const isACM = standings.mode === 'ACM'
   const frozen = Boolean(standings.freeze_at)
   const rollEvent = rolling && standings.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : undefined
-  const liveSubmission = !rolling ? liveActivity : undefined
+  const liveSubmission = !rolling ? liveEvent : undefined
+  const liveDisplayStatus = liveEvent
+    ? (livePhase === 'focus' ? 'pending' : livePhase === 'judging' ? 'running' : liveEvent.status)
+    : undefined
   const activeTeamId = rollEvent?.team_id ?? liveSubmission?.team_id
   const activeProblemId = rollEvent?.problem_id ?? liveSubmission?.problem_id
-  const activeStatus = rollEvent ? (rollPhase === 'focus' ? 'pending' : rollPhase === 'judging' ? 'running' : rollEvent.status) : liveSubmission?.status
+  const activeStatus = rollEvent
+    ? (rollPhase === 'focus' ? 'pending' : rollPhase === 'judging' ? 'running' : rollEvent.status)
+    : liveDisplayStatus
+  const activeAnimationKey = rollEvent
+    ? `roll-${rollEvent.submission_id}-${rollPhase}`
+    : liveSubmission
+      ? `live-${liveSubmission.submission_id}-${livePhase}`
+      : undefined
+  const activeColor = activeStatus ? getStatusInfo(activeStatus).color : 'gray'
   let visibleACM = standings.standings as ACMStanding[]
   if (rolling && rollEvent && rollStep >= 0 && rollPhase !== 'settled') {
     visibleACM = rollStep === 0 ? (standings.roll_initial_standings ?? visibleACM) : standings.roll_events![rollStep - 1].standings
   } else if (rolling && rollEvent && rollPhase === 'settled') {
     visibleACM = rollEvent.standings
   }
+  if (!dynamicOnly && standings.roll_available && standings.roll_events && standings.roll_events.length > 0) {
+    visibleACM = standings.roll_events[standings.roll_events.length - 1].standings
+  }
 
   return (
     <div>
-      <div className="standings-toolbar">
-        {live && !frozen && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
-        {frozen && !live && !rolling && <span className="muted">榜单已冻结</span>}
-        {rolling && <span className="live-indicator"><span className="live-dot" />动态揭晓</span>}
-        <button type="button" className="link-button" onClick={() => load(true)}>刷新</button>
-      </div>
-      {isACM && frozen && (
+      {!dynamicOnly && <div className="standings-toolbar">
+        {!dynamicOnly && live && !frozen && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
+        {!dynamicOnly && frozen && !live && !rolling && <span className="muted">榜单已冻结</span>}
+        {!dynamicOnly && rolling && <span className="live-indicator"><span className="live-dot" />动态揭晓</span>}
+        {!dynamicOnly && <button type="button" className="link-button" onClick={() => load(true)}>刷新</button>}
+      </div>}
+      {!dynamicOnly && isACM && frozen && (
         <div className="notice-card freeze-notice">
           已封榜（{formatTime(standings.freeze_at!)}）
           {standings.frozen_submissions !== undefined && standings.frozen_submissions > 0
@@ -287,8 +414,8 @@ function StandingsPanel({ contestId }: { contestId: number }) {
       )}
       {isACM ? (
         <>
-          {(rollEvent || liveSubmission) && (
-            <div className={`standings-focus ${rolling ? 'standings-focus-roll' : ''}`}>
+          {!dynamicOnly && (rollEvent || liveSubmission) && (
+            <div className={`standings-focus standings-focus-${activeColor}${rolling ? ' standings-focus-roll' : ''}`}>
               <TeamAvatar contestId={contestId} teamId={activeTeamId!} avatar={rollEvent?.team_avatar ?? liveSubmission?.team_avatar ?? ''} size="sm" />
               <strong>{rollEvent?.team_name ?? liveSubmission?.team_name}</strong>
               <span className="muted">{rollEvent ? `提交 #${rollEvent.submission_id}` : `提交 #${liveSubmission?.submission_id}`}</span>
@@ -296,13 +423,14 @@ function StandingsPanel({ contestId }: { contestId: number }) {
             </div>
           )}
           <ACMTable
-          contestId={contestId}
-          standings={visibleACM}
-          problems={standings.problems}
-          startTime={standings.contest.start_time}
-          activeTeamId={activeTeamId}
-          activeProblemId={activeProblemId}
-          activeStatus={activeStatus}
+            contestId={contestId}
+            standings={visibleACM}
+            problems={standings.problems}
+            startTime={standings.contest.start_time}
+            activeTeamId={activeTeamId}
+            activeProblemId={activeProblemId}
+            activeStatus={activeStatus}
+            activeAnimationKey={activeAnimationKey}
           />
         </>
       ) : (
@@ -316,222 +444,11 @@ function StandingsPanel({ contestId }: { contestId: number }) {
   )
 }
 
-// ---------- 管理员题目管理（搜索选择器 + 拖拽排序 + 题号/分值/上限） ----------
-
-function AdminProblemManager({ contestId, problems, onChanged }: {
-  contestId: number
-  problems: ContestProblem[]
-  onChanged: () => void
-}) {
-  const [keyword, setKeyword] = useState('')
-  const [candidates, setCandidates] = useState<ProblemListItem[]>([])
-  const [searching, setSearching] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [dragIdx, setDragIdx] = useState<number | null>(null)
-
-  const search = useCallback(() => {
-    setSearching(true)
-    getProblems({ page: 1, size: 12, keyword: keyword || undefined })
-      .then((data) => setCandidates(data.items))
-      .catch(() => {})
-      .finally(() => setSearching(false))
-  }, [keyword])
-
-  const add = async (pid: number) => {
-    setBusy(true)
-    setError('')
-    try {
-      const maxOrder = problems.reduce((m, p) => Math.max(m, p.sort_order), 0)
-      await addContestProblem(contestId, {
-        problem_id: pid,
-        display_id: String.fromCharCode(65 + problems.length), // A, B, C...
-        sort_order: maxOrder + 1,
-      })
-      setCandidates((cs) => cs.filter((c) => c.id !== pid))
-      onChanged()
-    } catch (err) {
-      setError(extractError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (pid: number) => {
-    if (!window.confirm('移除该题目？')) return
-    setBusy(true)
-    try {
-      await removeContestProblem(contestId, pid)
-      onChanged()
-    } catch (err) {
-      setError(extractError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const update = async (pid: number, patch: { display_id?: string; score?: number | null; submission_limit?: number | null }) => {
-    setBusy(true)
-    setError('')
-    try {
-      const p = problems.find((x) => x.problem_id === pid)
-      if (!p) return
-      await updateContestProblem(contestId, pid, {
-        display_id: patch.display_id ?? p.display_id,
-        score: patch.score !== undefined ? patch.score : (p.score ?? null),
-        submission_limit: patch.submission_limit !== undefined ? patch.submission_limit : (p.submission_limit ?? null),
-      })
-      onChanged()
-    } catch (err) {
-      setError(extractError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const reorder = (from: number, to: number) => {
-    if (from === to) return
-    const ids = problems.map((p) => p.problem_id)
-    const [moved] = ids.splice(from, 1)
-    ids.splice(to, 0, moved)
-    setBusy(true)
-    setError('')
-    reorderContestProblems(contestId, ids)
-      .then(onChanged)
-      .catch((err) => setError(extractError(err)))
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <section className="contest-section">
-      <div className="section-header">
-        <h2>题目管理</h2>
-        <span className="muted">仅管理员可见</span>
-      </div>
-      <div className="card">
-        <form
-          className="form-row admin-problem-form"
-          onSubmit={(e: FormEvent<HTMLFormElement>) => {
-            e.preventDefault()
-            search()
-          }}
-        >
-          <div className="form-group" style={{ flex: 1 }}>
-            <label htmlFor="cp-search">搜索题库添加题目</label>
-            <input
-              id="cp-search"
-              type="text"
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              placeholder="按标题搜索…"
-            />
-          </div>
-          <button type="submit" className="button button-secondary" disabled={searching}>
-            {searching ? '搜索中…' : '搜索'}
-          </button>
-        </form>
-        {candidates.length > 0 && (
-          <div className="candidate-list">
-            {candidates.map((p) => (
-              <div key={p.id} className="candidate-item">
-                <span className="mono">#{p.id}</span>
-                <span className="candidate-title">{p.title}</span>
-                <button type="button" className="link-button" disabled={busy} onClick={() => add(p.id)}>
-                  添加
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-        {error && <div className="error-message">{error}</div>}
-
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th style={{ width: 50 }}>顺序</th>
-              <th style={{ width: 90 }}>题号</th>
-              <th>标题</th>
-              <th style={{ width: 110 }}>单题分值（空=默认）</th>
-              <th style={{ width: 130 }}>单题上限（空=继承，0=不限）</th>
-              <th style={{ width: 80 }}>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {problems.length === 0 ? (
-              <tr><td colSpan={6} className="table-empty">暂无题目，用上方搜索添加</td></tr>
-            ) : (
-              problems.map((p, i) => (
-                <tr
-                  key={p.problem_id}
-                  draggable
-                  onDragStart={() => setDragIdx(i)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (dragIdx !== null) reorder(dragIdx, i)
-                    setDragIdx(null)
-                  }}
-                  style={{ cursor: 'grab' }}
-                  title="拖拽排序"
-                >
-                  <td className="mono">{p.sort_order}</td>
-                  <td>
-                    <input
-                      type="text"
-                      defaultValue={p.display_id}
-                      disabled={busy}
-                      style={{ width: 70 }}
-                      onBlur={(e) => {
-                        const v = e.target.value.trim()
-                        if (v && v !== p.display_id) update(p.problem_id, { display_id: v })
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <Link to={`/problem/${p.problem_id}`} className="problem-link">{p.title}</Link>
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={p.score ?? ''}
-                      disabled={busy}
-                      style={{ width: 80 }}
-                      placeholder="默认"
-                      onChange={(e) => update(p.problem_id, { score: e.target.value === '' ? null : Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1000}
-                      value={p.submission_limit ?? ''}
-                      disabled={busy}
-                      style={{ width: 80 }}
-                      placeholder="继承"
-                      onChange={(e) => update(p.problem_id, { submission_limit: e.target.value === '' ? null : Number(e.target.value) })}
-                    />
-                  </td>
-                  <td>
-                    <button type="button" className="link-button danger" disabled={busy} onClick={() => remove(p.problem_id)}>
-                      移除
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
 // ---------- 页面 ----------
 
 export default function ContestStandingsPage() {
   const { id } = useParams()
+  const location = useLocation()
   const contestId = Number(id)
   const [data, setData] = useState<ContestDetailData | null>(null)
   const [error, setError] = useState('')
@@ -549,32 +466,29 @@ export default function ContestStandingsPage() {
   if (error) return <div className="error-message">{error}</div>
   if (!data) return <div className="page-loading">加载中…</div>
 
-  const isAdmin = data.is_admin ?? false
   const mode = data.contest.mode
+  const dynamicOnly = location.pathname.endsWith('/dynamic')
 
   return (
     <div>
-      <div className="page-header">
+      {!dynamicOnly && <div className="page-header">
         <h1 className="page-title">排行榜 · {data.contest.title}</h1>
         <div className="contest-badges">
           <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
-          {isAdmin && mode === 'ACM' && (
-            <a
+          {mode === 'ACM' && (
+            <Link
               className="button button-secondary"
-              href={`/contest/${contestId}/standings`}
+              to={`/contest/${contestId}/standings/dynamic`}
               target="_blank"
               rel="noreferrer"
-              title="在新标签页打开统一动态榜单展示页"
+              title="在新标签页打开只显示榜单的动态揭晓页"
             >
               动态榜单 ↗
-            </a>
+            </Link>
           )}
         </div>
-      </div>
-      <StandingsPanel contestId={contestId} />
-      {isAdmin && (
-        <AdminProblemManager contestId={contestId} problems={data.problems} onChanged={reload} />
-      )}
+      </div>}
+      <StandingsPanel contestId={contestId} dynamicOnly={dynamicOnly} />
     </div>
   )
 }

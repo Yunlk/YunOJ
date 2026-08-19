@@ -265,6 +265,13 @@ export async function getSubmission(id: number | string) {
   return res.data
 }
 
+export async function getSubmissionResult(id: number | string) {
+  const res = await api.get<SubmissionDetail>(`/submissions/${id}`, {
+    params: { compact: 1 },
+  })
+  return res.data
+}
+
 export async function rejudgeSubmission(id: number | string) {
   const res = await api.post<{ id: number }>(`/submissions/${id}/rejudge`)
   return res.data
@@ -315,6 +322,21 @@ export async function runTest(
     input,
     optimize,
   })
+  return res.data
+}
+
+export async function runContestTest(
+  contestId: number,
+  problemId: number,
+  language: string,
+  code: string,
+  input: string,
+  optimize = true,
+) {
+  const res = await api.post<RunTestResult>(
+    `/contests/${contestId}/problems/${problemId}/test`,
+    { language, code, input, optimize },
+  )
   return res.data
 }
 

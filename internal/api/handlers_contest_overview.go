@@ -230,6 +230,9 @@ func (a *API) effectiveProblemScore(ctx context.Context, cp contestProblemDTO) i
 	if cp.Score != nil && *cp.Score > 0 {
 		return *cp.Score
 	}
+	if cp.TotalScore > 0 {
+		return cp.TotalScore
+	}
 	tcs, err := a.store.ListTestcases(ctx, cp.ProblemID)
 	if err == nil && len(tcs) > 0 {
 		total := 0
@@ -418,6 +421,7 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 	}
 	u, loggedIn := userFromCtx(r.Context())
 	isAdmin := loggedIn && u.Role == model.RoleAdmin
+	blindActive := blindResultsActive(c, isAdmin, time.Now())
 	if !isAdmin {
 		if !loggedIn {
 			writeError(w, http.StatusUnauthorized, "未登录")
@@ -437,6 +441,10 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 		f.ProblemID = &v
 	}
 	if s := r.URL.Query().Get("status"); s != "" {
+		if blindActive {
+			writeError(w, http.StatusBadRequest, "盲评期间不可按判题状态筛选")
+			return
+		}
 		if !knownStatuses[s] {
 			writeError(w, http.StatusBadRequest, "无效的状态过滤条件")
 			return
@@ -450,7 +458,6 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	blindActive := c.Feedback == model.FeedbackBlind && time.Now().Before(c.EndTime) && !isAdmin
 	list := make([]submissionListItem, 0, len(items))
 	for _, s := range items {
 		item := submissionListItem{
@@ -459,8 +466,8 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 			Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
 			Score: s.Score, CreatedAt: s.CreatedAt,
 		}
-		if blindActive && model.IsFinal(s.Status) {
-			item.Status = "hidden"
+		if blindActive {
+			redactBlindSubmissionListItem(&item)
 		}
 		list = append(list, item)
 	}

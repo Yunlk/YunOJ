@@ -1,267 +1,298 @@
 # YunOJ
 
-一个从零实现的轻量在线评测系统（Online Judge），支持题库、在线评测和 ACM/OI/IOI 比赛，Docker 一键部署。
+YunOJ 是一个面向教学和校内比赛的在线评测系统，提供题库、在线 IDE、异步评测、比赛管理、ACM 封榜和动态榜单。
 
 项目地址：[github.com/Yunlk/YunOJ](https://github.com/Yunlk/YunOJ)
 
-- **后端**：Go（web/API 服务 + 评测守护进程两个二进制），性能优先、单文件部署
-- **评测沙箱**：IOI 官方 [isolate](https://github.com/ioi/isolate)（namespace + seccomp 隔离）
-- **前端**：React + TypeScript + Vite，题面支持 Markdown / KaTeX 数学公式
-- **基础设施**：PostgreSQL（数据）+ Redis（评测队列），Docker Compose 一键部署
+## 项目定位
+
+YunOJ 适合课堂练习、作业和阶段性测试，也适合学校或社团组织 ACM/OI/IOI 比赛。系统将业务服务和评测机分离：网页/API 服务负责用户、题目、比赛和提交记录；评测机从 Redis 队列取任务，在 isolate 沙箱中编译和运行用户代码。
 
 ## 功能
 
-- 注册 / 登录（JWT），首个注册用户自动成为管理员
-- 题目管理后台：列表搜索/难度/标签/题型/状态筛选、草稿-发布-停用状态机、
-  复制、批量操作、删除前比赛引用阻断
-- 题目类型：标准比较、Special Judge（含 0-100 部分分）、交互题（双沙箱管道通信）、输出题
-- 测试点管理：manifest 权威分值（编号稳定、删除不重排）、单点增删改、拖拽排序、
-  ZIP 上传前预览后确认导入（成对/分值/总分 100 校验）
-- 测试数据上传：zip 包（`N.in` / `N.out` 成对文件），带路径穿越与 zip 炸弹防护
-- 提交评测：C / C++ / Python 3，判定 `AC / WA / PE / TLE / MLE / OLE / RE / CE / SE`
-- 语言扩展接口：默认只开放 C / C++ / Python；管理员可通过受信任的
-  `config/languages.json` 注册自有工具链，无需修改提交 API 与判题主流程
-- 提交记录：全局/按题目/按用户/按状态过滤，逐测试点详情（仅本人与管理员可见）
-- 重测（rejudge）、提交限流（每用户 10 秒 1 次）、评测机崩溃自动恢复
-- 在线 IDE：Monaco 编辑器，自测（自定义输入）与样例测试，不落库即时反馈
-- 比赛工作台：报名（队伍名 + 头像）、总览（公告/倒计时/进度条/单题状态/通过率/
-  我的成绩）、比赛内作答页（常驻剩余时间、上一题/下一题）、我的提交、排行榜
-- 比赛系统：ACM（罚时 + 封榜动态揭晓）/ OI / IOI 三种赛制模板 + 自定义引擎组合、
-  盲评、报名时间窗、可见性（公开/私有）、提交次数上限（比赛默认 + 单题覆盖）、
-  比赛题目管理（题库搜索选择器、拖拽排序、题号/单题分值/上限）
+### 题库与评测
 
-ACM 比赛的榜单与动态揭晓使用同一个排行榜页面：封榜前实时显示最新评测状态；比赛结束后，系统按提交时间逐条展示封榜期间的评测结果，最终停留在正式排名，不展示名次变化文案。
+- 题目创建、编辑、发布、停用、复制和批量管理
+- 标准比较、Special Judge、交互题和输出题
+- 测试点单独管理，支持分值、排序、增删改和 ZIP 导入预览
+- 题目可配置时间限制和内存限制
+- 逐测试点记录状态、时间、内存和得分
+- 支持 `AC`、`WA`、`PE`、`TLE`、`MLE`、`OLE`、`RE`、`CE`、`SE` 等状态
+- 提交记录支持按题目、用户和状态筛选；代码和详细评测结果仅对本人及管理员开放
+- 管理员可发起重测，系统避免重复累计题目提交数和通过数
 
-## 架构
+### 在线 IDE
 
+- Monaco 编辑器，普通题目和比赛题目共用工作台
+- 自定义输入自测和样例测试不写入正式提交记录
+- 提交后返回最近一次代码继续修改
+- 自测入口支持收纳为悬浮面板，移动端使用底部抽屉
+
+### 比赛
+
+- ACM、OI、IOI 三种比赛模式
+- 实时反馈和盲评反馈
+- 个人报名、团队报名、团队成员和队伍头像
+- 报名时间窗、比赛可见性、队伍人数限制和提交次数限制
+- 比赛题目管理：题号、排序、单题分值、单题提交上限和题目主题色
+- 比赛总览：公告、答疑、倒计时、进度、题目状态和个人成绩
+- 管理员可以查看参赛者、全部提交，导出排行榜和比赛数据包
+
+### ACM 封榜与动态榜
+
+1. 封榜前，榜单实时更新，提交状态会经历等待评测、评测中和终态。
+2. 进入封榜后，榜单进入暗色封榜状态，冻结提交不再公开到实时榜。
+3. 比赛结束后，动态榜先显示黑色选择界面：
+   - **动态榜单**：从表格底部向上预览提交和通过情况，再按提交顺序逐条揭晓。
+   - **快速榜单**：直接显示最终排名，停留片刻后从底部向上滚动预览。
+4. 动态榜不显示“上升 N 名”或“第 X 名 → 第 Y 名”等文案，排名变化通过表格行平滑移动体现。
+
+## 技术结构
+
+```text
+浏览器
+   │
+   ▼
+Go Web/API (:8080) ───── PostgreSQL
+   │
+   └──── Redis 评测队列 ───── Go Judge
+                                  │
+                                  ▼
+                           isolate 沙箱
 ```
-用户 → web (Go, :8080) ── 题目/提交/文件上传 ──> PostgreSQL
-              │                                     ↑
-              │ 提交入队 (Redis list)               │ 判定结果写回
-              ▼                                     │
-   Redis 评测队列 ──BRPOPLPUSH──> judge (Go 守护进程) ─┘
-                                    │
-                              isolate 沙箱（每 worker 一个）
-                              —— 编译 → 逐测试点运行 → 输出比较
-```
 
-关键设计：
+- 后端：Go、Chi、PostgreSQL、Redis
+- 前端：React、TypeScript、Vite、Monaco Editor
+- 评测隔离：isolate namespace/seccomp 沙箱
+- 题面渲染：Markdown、GFM、KaTeX
+- 认证：JWT；第一个注册用户自动成为管理员
 
-- **web 与 judge 完全解耦**：提交只是往 Redis 队列入队，评测异步进行；judge 可水平扩展到多台机器
-- **可靠队列**：任务经 `BRPOPLPUSH` 原子转移到各 worker 的处理中列表，评测机崩溃后重启时自动找回并重测
-- **资源计量双模式**：`ISOLATE_CG=true` 时走 cgroup 精确计量（裸 Linux 服务器推荐）；
-  默认关闭时 isolate 用 rlimit 限制 + `max-rss` 计量（兼容 Docker Desktop/WSL2 等
-  无法委派 memory 控制器的环境）
-- **比较器**：按空白切 token 比较，忽略行末空格/文末换行，避免 Windows 换行误判
-- **计数一致性**：题目通过/提交数仅在首次评测时更新，重测不重复计数
-- **比赛引擎为纯函数**：ACM 罚时 / OI·IOI 计分 / 封榜 / 动态揭晓均为内存纯计算，
-  结果可复现、可单元测试，判定落库时仅多写一条冻结标记
+## 快速开始
 
-## 快速开始（Docker）
+### Docker 部署
 
-前置：Docker + Docker Compose。
+前置要求：Docker 和 Docker Compose。
 
 ```bash
-git clone https://github.com/Yunlk/YunOJ.git && cd YunOJ
-cp .env.example .env          # 按需修改，生产环境务必更换 JWT_SECRET
-mkdir -p data
-# Linux 主机注意：web 容器以 uid 1000 写入 ./data，需放开权限
-sudo chown -R 1000:1000 data  # 或 chmod 777 data
+git clone https://github.com/Yunlk/YunOJ.git
+cd YunOJ
+cp .env.example .env
 docker compose up -d --build
 ```
 
-启动完成后访问 **http://localhost:8080**。
+访问 <http://localhost:8080>。首次注册的账号会自动获得管理员权限。
 
-- 第一次构建会编译 isolate 沙箱，`judge` 镜像耗时较长属正常
-- **第一个注册的账号自动成为管理员**（请立即注册并保管好该账号）
-- 使用流程：注册 → 管理员在「新建题目」创建题目 → 「上传测试数据」上传 zip → 任意用户提交代码
-- 测试数据 zip 格式：成对的 `1.in/1.out`、`2.in/2.out`…（可带子目录，按文件名排序）
+Linux 主机使用挂载的 `data` 目录时，需要确保容器用户可以写入：
 
-### 国内网络说明
+```bash
+sudo chown -R 1000:1000 data
+```
 
-项目已针对国内网络做了开箱即用配置：
+### 本地开发
 
-- **Docker Hub 镜像**：默认通过 `REGISTRY_PREFIX=docker.1ms.run/` 拉取（见 `.env`）。
-  海外环境或服务器上把它设为空即可；该镜像源不可用时也可换成其他加速站
-- **Go 模块代理**：镜像内默认 `GOPROXY=https://goproxy.cn,direct`（见 Dockerfile），
-  海外环境可删除对应行
-- **isolate 源码已固化**在 `third_party/isolate`（构建时不访问 GitHub，版本锁定见
-  `third_party/ISOLATE_VERSION`）
-
-## 本地开发（开发优先：后端/前端原生运行，Docker 只跑基础设施）
-
-日常开发**不需要构建任何 Docker 镜像**：数据库和 Redis 用容器跑，
-后端与前端都在本机原生运行，改代码即时生效。
-
-### 1. 基础设施（PostgreSQL + Redis）
+推荐本地运行 Go 服务和 Vite，Docker 只运行 PostgreSQL、Redis。
 
 ```bash
 docker compose up -d postgres redis
+pwsh -File scripts/dev-server.ps1
 ```
 
-### 2. 后端（Windows/macOS/Linux 均可）
+后端默认监听 `http://localhost:8080`。
 
-```bash
-pwsh -File scripts/dev-server.ps1     # 等价于: go run ./cmd/server（自动设置 GOPROXY）
-```
-
-后端默认连接 `localhost:5432` / `localhost:6379`，直接可用。
-
-### 3. 前端（热更新）
+另开终端启动前端：
 
 ```bash
 cd web
 npm install
-npm run dev        # http://localhost:5173，/api 自动代理到 localhost:8080
+npm run dev
 ```
 
-### 4. 评测机（需要判题功能时再启动）
+前端默认运行在 <http://localhost:5173>，`/api` 自动代理到 8080。
 
-评测需要 Linux 环境的 isolate 沙箱，两种方式任选：
+需要实际评测时再启动 judge：
 
 ```bash
-# 方式 A：Docker 运行（与部署一致，Windows 也可用）
-docker compose build judge && docker compose up -d judge
-
-# 方式 B：Linux 原生运行
-sudo apt install isolate        # Debian 12+ 自带；或编译 third_party/isolate
-pwsh -File scripts/dev-judge.ps1
+docker compose build judge
+docker compose up -d judge
 ```
 
-> 未启动评测机时提交会停留在 `pending`，web/API/前端开发不受影响。
+未启动 judge 时，提交会停留在 `pending`，题库和比赛页面仍可正常开发。
 
-### 打包上线
+## 演示数据
 
-开发完成后用 Docker 打包（镜像内完成前端构建与后端编译）：
+生成覆盖各类比赛和生命周期的公开演示比赛：
 
 ```bash
-docker compose build
-docker compose push  # 或 docker save 后上传到服务器
+go run ./cmd/seedcontests
 ```
 
-### 前端构建产物
+需要重建时：
 
 ```bash
-cd web
-npm run build    # 产物输出到 web/dist，被后端 go:embed 嵌入
+go run ./cmd/seedcontests -reset
 ```
 
-### 常用校验命令
+演示账号为 `flow01` 至 `flow12`、`burst01` 至 `burst50`，密码均为 `demo123`。
+
+创建一场在指定时间封榜的实时演示赛：
+
+```bash
+go run ./cmd/seedcontests -live-freeze-at 17:15
+```
+
+## 外部控制脚本
+
+提交联动脚本通过真实登录、报名、提交和榜单接口工作，不直接写数据库：
+
+```bash
+python scripts/contest_control.py
+python scripts/contest_control.py --mode wa-then-ac
+python scripts/contest_control.py --user-prefix burst --count 50 --poll-seconds 90
+```
+
+管理员可以在网页外切换比赛阶段：
+
+```bash
+python scripts/contest_phase_control.py --admin-user admin --admin-password '你的密码' --create-demo --phase running
+python scripts/contest_phase_control.py --admin-user admin --admin-password '你的密码' --contest-id 114 --phase freeze
+python scripts/contest_phase_control.py --admin-user admin --admin-password '你的密码' --contest-id 114 --phase ended
+python scripts/contest_phase_control.py --admin-user admin --admin-password '你的密码' --contest-id 114 --phase show
+```
+
+阶段值为 `upcoming`、`running`、`freeze`、`ended`。脚本只更新比赛时间配置，不伪造提交的评测状态；动态揭晓需要比赛中存在已经完成的冻结提交。也可以使用 `YUNOJ_ADMIN_USER`、`YUNOJ_ADMIN_PASSWORD` 或 `YUNOJ_ADMIN_TOKEN` 环境变量传入认证信息。
+
+## 语言扩展
+
+内置语言：
+
+- C：GCC 12，C11
+- C++：GCC 12，C++17
+- Python：CPython 3.11
+
+额外语言通过受信任的 `config/languages.json` 注册。web 和 judge 必须读取同一份配置，语言会进入统一的编译、运行、超时、内存和沙箱流程。
+
+示例：
+
+```json
+{
+  "languages": [
+    {
+      "key": "custom_cpp",
+      "name": "C++",
+      "version": "GCC 12 (C++23)",
+      "monaco": "cpp",
+      "source_file": "main.cpp",
+      "compile": {
+        "command": ["/usr/bin/g++", "-std=c++23", "-O2", "-o", "{output}", "{source}"],
+        "time_ms": 20000,
+        "memory_kb": 1048576
+      },
+      "run_command": ["./main"]
+    }
+  ]
+}
+```
+
+自定义编译器属于服务器配置，必须预先安装在评测机中，不能由普通用户在提交时动态指定。
+
+## 关键 API
+
+API 前缀统一为 `/api`，认证使用 `Authorization: Bearer <JWT>`。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/api/health` | 健康检查和服务器时间 |
+| `POST` | `/api/auth/register` | 注册并登录 |
+| `POST` | `/api/auth/login` | 登录 |
+| `GET` | `/api/problems` | 题目列表 |
+| `GET` | `/api/problems/{id}` | 题目详情 |
+| `POST` | `/api/submissions` | 普通题目提交 |
+| `GET` | `/api/submissions/{id}` | 提交详情和测试点结果 |
+| `POST` | `/api/problems/{id}/test` | 自定义输入自测 |
+| `GET` | `/api/contests` | 比赛列表 |
+| `GET` | `/api/contests/{id}` | 比赛详情 |
+| `POST` | `/api/contests/{id}/register` | 比赛报名 |
+| `POST` | `/api/contests/{id}/submit` | 比赛提交 |
+| `GET` | `/api/contests/{id}/standings` | 实时榜、封榜榜和动态揭晓数据 |
+| `GET` | `/api/contests/{id}/submissions` | 比赛提交记录 |
+| `GET` | `/api/contests/{id}/standings/export` | 导出排行榜 |
+| `GET` | `/api/contests/{id}/data-package` | 导出比赛数据包 |
+| `GET` | `/api/rankings` | 全站训练排名 |
+| `GET` | `/api/profile` | 当前用户个人中心 |
+
+## 评测状态
+
+| 状态 | 含义 |
+| --- | --- |
+| `pending` | 等待评测队列 |
+| `running` | 正在评测 |
+| `accepted` | 通过 |
+| `wrong_answer` | 答案错误 |
+| `presentation_error` | 格式错误 |
+| `time_limit_exceeded` | 超出时间限制 |
+| `memory_limit_exceeded` | 超出内存限制 |
+| `output_limit_exceeded` | 输出超限 |
+| `runtime_error` | 运行时错误 |
+| `compile_error` | 编译错误 |
+| `system_error` | 评测系统错误 |
+| `not_run` | 未运行的测试点 |
+
+评测会继续运行后续测试点，最终状态由题目类型和评测规则汇总。评测结果、时间和内存数据会保存在提交详情中。
+
+## 目录结构
+
+```text
+cmd/server/              Go Web/API 服务
+cmd/judge/               Go 评测守护进程
+cmd/seedcontests/        比赛演示数据生成器
+internal/api/             HTTP 路由与处理器
+internal/auth/            JWT 和密码哈希
+internal/config/          环境变量配置
+internal/data/            测试数据与 ZIP 安全处理
+internal/judge/           isolate 沙箱、编译、运行和比较器
+internal/langs/           内置语言和自定义语言加载
+internal/model/           数据模型与数据库迁移
+internal/queue/           Redis 可靠评测队列
+internal/store/           PostgreSQL 数据访问层
+web/                      React + TypeScript 前端
+config/languages.json     自定义语言配置
+data/                     题目测试数据
+scripts/                  本地开发和比赛控制脚本
+third_party/isolate/      isolate 源码
+```
+
+## 配置项
+
+| 环境变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SERVER_ADDR` | `:8080` | Web/API 监听地址 |
+| `DATABASE_URL` | `postgres://yunoj:yunoj@localhost:5432/yunoj?sslmode=disable` | PostgreSQL 连接串 |
+| `REDIS_ADDR` | `localhost:6379` | Redis 地址 |
+| `JWT_SECRET` | `dev-secret-change-me` | 生产环境必须修改 |
+| `DATA_DIR` | `./data` | 题目测试数据目录 |
+| `LANGUAGE_CONFIG` | `./config/languages.json` | 自定义语言配置路径 |
+| `JUDGE_WORKERS` | `2` | 评测 worker 数量 |
+| `ISOLATE_PATH` | `isolate` | isolate 可执行文件路径 |
+| `ISOLATE_DIR` | `/var/local/lib/isolate` | isolate 沙箱目录 |
+| `ISOLATE_CG` | `false` | 是否启用 cgroup 精确内存计量 |
+
+## 常用检查
 
 ```bash
 go test ./...
 cd web && npm run build
 ```
 
-## 配置项
+## 安全边界
 
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `SERVER_ADDR` | `:8080` | web 监听地址 |
-| `DATABASE_URL` | `postgres://yunoj:yunoj@localhost:5432/yunoj?sslmode=disable` | PostgreSQL 连接串 |
-| `REDIS_ADDR` | `localhost:6379` | Redis 地址 |
-| `JWT_SECRET` | `dev-secret-change-me` | **生产必改**，JWT 签名密钥 |
-| `DATA_DIR` | `./data` | 题目测试数据目录（web/judge 共享） |
-| `LANGUAGE_CONFIG` | `./config/languages.json` | 受信任的自有编译器注册表；web 与 judge 必须读取同一文件 |
-| `JUDGE_WORKERS` | `2` | 评测 worker 数，建议 = CPU 核数 |
-| `ISOLATE_PATH` | `isolate` | isolate 可执行文件路径 |
-| `ISOLATE_DIR` | `/var/local/lib/isolate` | 沙箱根目录 |
-| `ISOLATE_CG` | `false` | 是否启用 cgroup 精确内存计量（见架构一节） |
+- 用户代码在 isolate 沙箱中运行，限制网络、进程、时间、内存和输出。
+- judge 容器需要较高系统权限来创建沙箱，生产环境应与业务服务隔离。
+- 测试数据上传会校验 ZIP 路径和解压规模，避免路径穿越和解压炸弹。
+- 自定义编译器是服务器级配置，只允许管理员维护。
+- 不要把 `.env`、JWT 密钥、数据库密码或私有测试数据提交到仓库。
 
-## API 摘要
+## 当前边界
 
-统一前缀 `/api`，错误响应 `{"error": "..."}`，分页响应 `{"items": [...], "total": n}`。
-认证方式：`Authorization: Bearer <token>`。
+YunOJ 当前优先服务于校内教学和中小型比赛。多评测机动态调度、代码查重、长期归档和更复杂的教学分析仍属于后续扩展方向。
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| POST | `/auth/register` | 注册（即登录），返回 `{token, user}` |
-| POST | `/auth/login` | 登录 |
-| GET | `/auth/me` | 当前用户（登录） |
-| GET | `/problems?page=&size=&keyword=` | 题目列表 |
-| GET | `/problems/{id}` | 题目详情 |
-| POST/PUT/DELETE | `/problems[/{id}]` | 创建/更新/删除题目（管理员） |
-| POST | `/problems/{id}/tests` | 上传测试数据 zip，multipart 字段 `file`（管理员） |
-| POST | `/submissions` | 提交代码 `{problem_id, language, code}`（登录，限流） |
-| GET | `/submissions?page=&problem_id=&user_id=&status=` | 提交列表 |
-| GET | `/submissions/{id}` | 提交详情（匿名仅可见概要；本人/管理员可见代码与逐点结果） |
-| POST | `/submissions/{id}/rejudge` | 重测（管理员） |
-| GET | `/languages` | 支持的语言列表 |
-| POST | `/problems/{id}/test` | 自测（登录，自定义输入，不落库） |
-| POST | `/problems/{id}/test-samples` | 样例测试（登录，不落库） |
-| POST | `/problems/{id}/copy` | 复制题目（管理员，含测试数据与分值，草稿态） |
-| PATCH | `/problems/{id}/status` | 草稿/发布/停用（管理员，发布校验总分 100） |
-| POST | `/problems/batch` | 批量发布/停用/删除（管理员） |
-| GET | `/problems/{id}/usage` | 删除影响范围：引用比赛与提交数（管理员） |
-| GET | `/problems/{id}/testcases` | 测试点列表（管理员，含总分与完整性） |
-| POST | `/problems/{id}/testcases/preview` | ZIP 解析预览（管理员，不落盘） |
-| POST | `/problems/{id}/testcases/import` | ZIP 确认导入 replace/append（管理员） |
-| POST/PUT/DELETE | `/problems/{id}/testcases[/{ordinal}]` | 单点增改删（管理员） |
-| PUT | `/problems/{id}/testcases/order` | 测试点重排（管理员，分值随编号移动） |
-| GET | `/contests?page=&size=` | 比赛列表（private 对非管理员隐藏） |
-| GET | `/contests/{id}` | 比赛详情（题目列表、是否已报名） |
-| POST/PUT/DELETE | `/contests[/{id}]` | 创建/更新/删除比赛（管理员，含说明/可见性/报名窗/默认上限） |
-| POST | `/contests/{id}/problems` | 添加比赛题目（管理员，含分值/上限覆盖） |
-| PUT | `/contests/{id}/problems/{pid}` | 改题号/单题分值/单题上限（管理员） |
-| PUT | `/contests/{id}/problems/order` | 比赛题目拖拽排序（管理员） |
-| POST | `/contests/{id}/register` | 报名（登录，受报名时间窗约束） |
-| POST | `/contests/{id}/avatar` | 上传队伍头像（登录，已报名） |
-| POST | `/contests/{id}/submit` | 比赛内提交（登录，时间窗 `[start, end)` + 上限校验） |
-| GET | `/contests/{id}/overview` | 比赛总览（登录+报名，公告/统计/我的状态/我的成绩） |
-| GET | `/contests/{id}/problems/{pid}` | 比赛题面上下文（赛前非管理员 403） |
-| GET | `/contests/{id}/submissions` | 我的比赛提交（盲评中脱敏为 hidden） |
-| GET | `/contests/{id}/standings` | 排行榜（盲评进行中对非管理员隐藏） |
-| GET | `/health` | 健康检查（含 server_time 供前端时钟校正） |
-
-判题状态：`pending`、`running`、`accepted`、`wrong_answer`、`presentation_error`、
-`time_limit_exceeded`、`memory_limit_exceeded`、`output_limit_exceeded`、`runtime_error`、
-`compile_error`、`system_error`、`not_run`。
-
-## 目录结构
-
-```
-cmd/server/           web/API 服务入口
-cmd/judge/            评测守护进程入口
-internal/api/         HTTP 路由与处理器
-internal/auth/        bcrypt 密码哈希 + JWT
-internal/config/      环境变量配置
-internal/data/        测试数据文件管理与 zip 安全解压
-internal/judge/       isolate 沙箱封装、编译、运行、判定、比较器
-internal/langs/       语言定义（编译/运行命令、限制倍率）
-internal/model/       数据模型、判题状态、SQL 迁移
-internal/queue/       Redis 可靠评测队列
-internal/store/       PostgreSQL 数据访问层
-web/                  React 前端（embed.go 嵌入其构建产物）
-third_party/isolate/  isolate 源码（随仓库分发，构建镜像时本地编译）
-Dockerfile            web 镜像（前端构建 + 后端构建 + 运行）
-Dockerfile.judge      评测机镜像（isolate 编译 + 工具链 + judge）
-```
-
-## 安全说明
-
-- 用户代码在 isolate 沙箱内运行：无网络、进程数受限、seccomp 系统调用白名单、
-  只读根文件系统、独立 tmpfs 工作目录；时间/内存/输出大小均有硬限制
-- `judge` 容器需以 `privileged` 运行（isolate 需创建 namespace）。它不暴露
-  端口、不提供任何网络服务，建议部署在专用评测节点，与业务容器网络隔离
-- 测试数据上传做了 zip 路径穿越、解压炸弹、单文件/总量限制
-- 代码与编译错误仅本人与管理员可见；所有用户输入（题面/昵称等）渲染前需由前端消毒
-- `JWT_SECRET`、数据库密码等敏感配置通过 `.env` 注入，不要提交到仓库
-
-## 已知边界与 Roadmap
-
-- [x] 比赛模块（ACM 罚时 / OI 计分、封榜动态揭晓）
-- [x] Special Judge、部分分、交互题
-- [ ] 多评测机动态调度与心跳监控
-- [ ] 代码查重（SIM/MOSS 类）
-- [ ] 讨论区、题解
-- [ ] 提交量膨胀后的归档/分表策略
-
-## 故障排查
-
-- **评测结果大量 `system_error`**：查看 judge 容器日志。常见原因：沙箱初始化失败；
-  确认 judge 容器以 privileged 运行；Docker Desktop/WSL2 环境保持 `ISOLATE_CG=false`
-- **构建时拉取基础镜像失败**：国内网络走默认的 `docker.1ms.run` 加速；若该源失效，
-  在 `.env` 换一个可用的 `REGISTRY_PREFIX`（需以 `/` 结尾）
-- **构建时 go mod download 失败**：确认 Dockerfile 中 `GOPROXY` 指向可达的代理
-- **上传测试数据失败**：确认 `./data` 目录对 uid 1000 可写（见快速开始）
-- **提交一直 `pending`**：检查 judge 容器是否运行、Redis 是否健康
+欢迎通过 Issue 或 Pull Request 提交问题和改进建议。

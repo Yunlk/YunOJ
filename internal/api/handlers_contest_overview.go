@@ -23,6 +23,7 @@ type overviewProblemDTO struct {
 	Title           string `json:"title"`
 	Score           int    `json:"score"`            // 有效满分（覆盖 ?? manifest 总分 ?? 100）
 	SubmissionLimit int    `json:"submission_limit"` // 有效上限（0 = 不限）
+	ThemeColor      string `json:"theme_color"`
 	// 比赛内统计（限定当前比赛，与全局 problems 计数无关）
 	SubmissionCount int64 `json:"submission_count"`
 	AttemptedUsers  int64 `json:"attempted_users"`
@@ -104,6 +105,7 @@ func (a *API) handleContestOverview(w http.ResponseWriter, r *http.Request) {
 			Title:           p.Title,
 			Score:           a.effectiveProblemScore(ctx, p),
 			SubmissionLimit: effectiveSubmissionLimit(c, p),
+			ThemeColor:      p.ThemeColor,
 		}
 		if st, ok := stats[p.ProblemID]; ok {
 			item.SubmissionCount = st.Submissions
@@ -155,13 +157,22 @@ func (a *API) myStandingSummary(ctx context.Context, c model.Contest, userID int
 	if err != nil {
 		return nil, false
 	}
+	now := time.Now()
+	visibleSubs := subs[:0]
+	for _, sub := range subs {
+		if sub.CreatedAt.After(now) {
+			continue
+		}
+		visibleSubs = append(visibleSubs, sub)
+	}
+	subs = visibleSubs
 	blind := c.Feedback == model.FeedbackBlind && time.Now().Before(c.EndTime)
 	visible := isAdmin || !blind
 	switch c.Mode {
 	case model.ContestModeACM:
 		fb := time.Time{}
 		fa := freezeAt(c)
-		if !fa.IsZero() && time.Now().After(fa) {
+		if !fa.IsZero() && !now.Before(fa) {
 			fb = fa
 		}
 		standings, _ := contest.BuildACMStandings(cctx, subs, fb)
@@ -436,7 +447,10 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 
 	page := clamp(queryInt(r, "page", 1), 1, 1<<20)
 	size := clamp(queryInt(r, "size", defaultPageSize), 1, maxPageSize)
-	f := store.SubmissionFilter{Page: page, Size: size, ContestID: &cid, UserID: &u.ID}
+	f := store.SubmissionFilter{Page: page, Size: size, ContestID: &cid}
+	if !isAdmin {
+		f.UserID = &u.ID
+	}
 	if v := int64(queryInt(r, "problem_id", 0)); v > 0 {
 		f.ProblemID = &v
 	}

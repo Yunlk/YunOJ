@@ -56,6 +56,46 @@ func TestProcessACMCompileErrorNoPenalty(t *testing.T) {
 	if st.Penalty != 15 {
 		t.Fatalf("CE 不应计罚时，期望 15，实际 %d", st.Penalty)
 	}
+	if st.Problems[1].LastStatus != model.StatusAccepted {
+		t.Fatalf("AC 后最终状态应为 accepted，实际 %q", st.Problems[1].LastStatus)
+	}
+}
+
+func TestProcessACMRetainsLatestFailedVerdict(t *testing.T) {
+	ctx := acmCtx()
+	st := newACMStanding(10, "队伍A", ctx.Problems)
+
+	statuses := []string{
+		model.StatusWrongAnswer,
+		model.StatusTimeLimitExceeded,
+		model.StatusMemoryLimitExceeded,
+		model.StatusRuntimeError,
+		model.StatusPresentationError,
+	}
+	for i, status := range statuses {
+		ProcessACM(st, sub(int64(i+1), 10, 1, status, ctx.StartTime.Add(time.Duration(i+1)*time.Minute)), ctx.StartTime, ctx.PenaltyMinutes)
+		if got := st.Problems[1].LastStatus; got != status {
+			t.Fatalf("第 %d 次提交状态期望 %q，实际 %q", i+1, status, got)
+		}
+	}
+	if st.Problems[1].FailedAttempts != len(statuses) {
+		t.Fatalf("失败次数期望 %d，实际 %d", len(statuses), st.Problems[1].FailedAttempts)
+	}
+}
+
+func TestProcessACMCompileErrorIsDisplayedWithoutPenalty(t *testing.T) {
+	ctx := acmCtx()
+	st := newACMStanding(10, "队伍A", ctx.Problems)
+
+	if !ProcessACM(st, sub(1, 10, 1, model.StatusCompileError, ctx.StartTime.Add(time.Minute)), ctx.StartTime, ctx.PenaltyMinutes) {
+		t.Fatal("CE 应生成展示状态快照")
+	}
+	if got := st.Problems[1].LastStatus; got != model.StatusCompileError {
+		t.Fatalf("CE 后状态期望 %q，实际 %q", model.StatusCompileError, got)
+	}
+	if got := st.Problems[1].FailedAttempts; got != 0 {
+		t.Fatalf("CE 不应计入失败次数，实际 %d", got)
+	}
 }
 
 func TestACMTieBreaker(t *testing.T) {

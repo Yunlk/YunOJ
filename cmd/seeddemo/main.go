@@ -29,6 +29,7 @@ const (
 	demoContestTitle = "滚榜演示赛"
 	teamCount        = 20
 	problemCount     = 8
+	rankingUserCount = 8
 	demoPassword     = "demo123"
 )
 
@@ -55,6 +56,10 @@ func main() {
 	// 幂等：已有演示赛则直接输出信息
 	if !*reset {
 		if c, err := findDemoContest(ctx, st); err == nil && c != nil {
+			if err := ensureRankingDemoUsers(ctx, st, c); err != nil {
+				slog.Error("创建排名演示用户失败", "err", err)
+				os.Exit(1)
+			}
 			printSummary(ctx, st, c)
 			return
 		}
@@ -277,7 +282,82 @@ func main() {
 		frozenCount++
 	}
 	fmt.Printf("已生成 %d 条提交（其中 %d 条冻结，滚榜可揭晓）\n", inserted, frozenCount)
+	if err := ensureRankingDemoUsers(ctx, st, c); err != nil {
+		slog.Error("创建排名演示用户失败", "err", err)
+		os.Exit(1)
+	}
 	printSummary(ctx, st, c)
+}
+
+// ensureRankingDemoUsers 增加一组不同解题数/通过率的普通用户，供全站排名验收。
+// 只识别自己写入的代码标记，重复运行不会制造重复提交。
+func ensureRankingDemoUsers(ctx context.Context, st *store.Store, c *model.Contest) error {
+	contestProblems, err := st.ListContestProblems(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	if len(contestProblems) == 0 {
+		return fmt.Errorf("演示赛没有题目")
+	}
+	hash, err := auth.HashPassword(demoPassword)
+	if err != nil {
+		return err
+	}
+	solvedPlan := []int{8, 7, 6, 5, 4, 3, 2, 1}
+	attemptedPlan := []int{8, 8, 8, 7, 7, 6, 6, 5}
+	createdUsers := 0
+	createdSubmissions := 0
+	for i := 0; i < rankingUserCount; i++ {
+		username := fmt.Sprintf("rankdemo%02d", i+1)
+		var u model.User
+		if existing, _, lookupErr := st.GetUserByUsername(ctx, username); lookupErr == nil {
+			u = existing
+		} else {
+			u, err = st.CreateUser(ctx, username, username+"@demo.local", hash, model.RoleUser)
+			if err != nil {
+				return err
+			}
+			createdUsers++
+		}
+		var existing int
+		if err := st.Pool().QueryRow(ctx,
+			`SELECT count(*) FROM submissions WHERE user_id = $1 AND code = '// ranking demo submission'`,
+			u.ID).Scan(&existing); err != nil {
+			return err
+		}
+		if existing > 0 {
+			continue
+		}
+		solved := min(solvedPlan[i], len(contestProblems))
+		attempted := min(attemptedPlan[i], len(contestProblems))
+		for p := 0; p < attempted; p++ {
+			status := model.StatusWrongAnswer
+			score := 0
+			caseResults := `[{"case_id":1,"status":"wrong_answer","time_ms":2,"memory_kb":1536}]`
+			if p < solved {
+				status = model.StatusAccepted
+				score = 100
+				caseResults = `[{"case_id":1,"status":"accepted","time_ms":2,"memory_kb":1536}]`
+			}
+			createdAt := time.Now().Add(-time.Duration((i+1)*72+p*5) * time.Hour)
+			if _, err := st.Pool().Exec(ctx,
+				`INSERT INTO submissions (problem_id, user_id, language, code, status, compile_error,
+					case_results, time_ms, memory_kb, score, case_scores, is_frozen, created_at, judged_at)
+				 VALUES ($1, $2, 'cpp', '// ranking demo submission', $3, '', $4::jsonb,
+					2, 1536, $5, $6::jsonb, false, $7, $7)`,
+				contestProblems[p].ProblemID, u.ID, status, caseResults, score,
+				map[bool]string{true: "[100]", false: "[0]"}[status == model.StatusAccepted], createdAt); err != nil {
+				return err
+			}
+			if err := st.AddSubmission(ctx, contestProblems[p].ProblemID, status == model.StatusAccepted); err != nil {
+				return err
+			}
+			createdSubmissions++
+		}
+	}
+	fmt.Printf("排名演示数据：新增 %d 个用户、%d 条提交（rankdemo01..rankdemo08，密码 %s）\n",
+		createdUsers, createdSubmissions, demoPassword)
+	return nil
 }
 
 func findDemoContest(ctx context.Context, st *store.Store) (*model.Contest, error) {
@@ -323,6 +403,7 @@ func printSummary(ctx context.Context, st *store.Store, c *model.Contest) {
 	fmt.Printf("  榜单展示页:  http://localhost:5173/contest/%d/standings\n", c.ID)
 	fmt.Printf("  滚榜展示页:  http://localhost:5173/contest/%d/standings/dynamic\n", c.ID)
 	fmt.Printf("  总览页:      http://localhost:5173/contest/%d\n", c.ID)
+	fmt.Printf("  全站排名:    http://localhost:5173/ranking\n")
 	fmt.Printf("  队伍: %d 支（demo01..demo20，密码 %s）\n", teamCount, demoPassword)
 	freezeAt := c.EndTime.Add(-time.Duration(c.FreezeDurationMinutes) * time.Minute)
 	if subs, err := st.ListContestSubmissions(ctx, c.ID); err == nil {

@@ -7,7 +7,7 @@ import {
 } from '../api'
 import type { ContestDetail, ContestProblem, ProblemListItem } from '../types'
 
-function ProblemManager({ contestId, problems, onChanged }: {
+export function ProblemManager({ contestId, problems, onChanged }: {
   contestId: number
   problems: ContestProblem[]
   onChanged: () => void
@@ -64,6 +64,7 @@ function ProblemManager({ contestId, problems, onChanged }: {
     display_id?: string
     score?: number | null
     submission_limit?: number | null
+    theme_color?: string
   }) => {
     const problem = problems.find((item) => item.problem_id === problemId)
     if (!problem) return
@@ -76,6 +77,7 @@ function ProblemManager({ contestId, problems, onChanged }: {
         submission_limit: patch.submission_limit !== undefined
           ? patch.submission_limit
           : (problem.submission_limit ?? null),
+        theme_color: patch.theme_color ?? problem.theme_color ?? '',
       })
       onChanged()
     } catch (err) {
@@ -104,6 +106,14 @@ function ProblemManager({ contestId, problems, onChanged }: {
 
   return (
     <section className="contest-problem-manager">
+      <div className="section-header contest-problem-manager-heading">
+        <div>
+          <h2>比赛题目</h2>
+          <p className="muted">
+            题目状态不会因加入比赛自动改变。草稿题不会出现在公共题库，但比赛开始后报名选手可在比赛内访问并正常测评；比赛结束后仍保持草稿，除非管理员另行发布。
+          </p>
+        </div>
+      </div>
       <form
         className="admin-problem-search"
         onSubmit={(event: FormEvent<HTMLFormElement>) => {
@@ -132,6 +142,7 @@ function ProblemManager({ contestId, problems, onChanged }: {
             <div key={problem.id} className="candidate-item">
               <span className="mono">#{problem.id}</span>
               <span className="candidate-title">{problem.title}</span>
+              {problem.status && <span className={`candidate-status ${problem.status}`}>{problem.status === 'draft' ? '草稿' : problem.status === 'published' ? '公开' : '停用'}</span>}
               <button type="button" className="link-button" disabled={busy} onClick={() => add(problem.id)}>添加</button>
             </div>
           ))}
@@ -149,12 +160,13 @@ function ProblemManager({ contestId, problems, onChanged }: {
               <th>标题</th>
               <th>单题分值</th>
               <th>提交上限</th>
+              <th>题目颜色</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {problems.length === 0 ? (
-              <tr><td colSpan={6} className="table-empty">暂无题目</td></tr>
+              <tr><td colSpan={7} className="table-empty">暂无题目</td></tr>
             ) : problems.map((problem, index) => (
               <tr
                 key={problem.problem_id}
@@ -186,7 +198,6 @@ function ProblemManager({ contestId, problems, onChanged }: {
                   <input
                     type="number"
                     min={0}
-                    max={100}
                     defaultValue={problem.score ?? ''}
                     disabled={busy}
                     placeholder="默认"
@@ -207,6 +218,12 @@ function ProblemManager({ contestId, problems, onChanged }: {
                       submission_limit: event.target.value === '' ? null : Number(event.target.value),
                     })}
                   />
+                </td>
+                <td>
+                  <select className="contest-theme-select" value={problem.theme_color || ''} disabled={busy} onChange={(event) => void update(problem.problem_id, { theme_color: event.target.value })}>
+                    <option value="">自动</option>
+                    {['blue', 'green', 'orange', 'purple', 'cyan', 'rose', 'yellow', 'indigo'].map((color) => <option key={color} value={color}>{color}</option>)}
+                  </select>
                 </td>
                 <td>
                   <button type="button" className="link-button danger" disabled={busy} onClick={() => void remove(problem.problem_id)}>
@@ -248,7 +265,6 @@ export default function ContestProblemManagerPage() {
         </div>
         <div className="contest-badges">
           <Link to={`/contest/${contestId}`} className="button button-secondary">返回总览</Link>
-          <Link to={`/contest/${contestId}/standings`} className="button button-secondary">查看排行榜</Link>
         </div>
       </div>
       <ProblemManager contestId={contestId} problems={data.problems} onChanged={reload} />

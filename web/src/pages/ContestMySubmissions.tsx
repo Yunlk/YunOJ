@@ -58,7 +58,15 @@ export default function ContestMySubmissions() {
     <div>
       <div className="page-header">
         <h1 className="page-title">{isAdmin ? '比赛全部提交' : '我的比赛提交'}</h1>
-        <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
+        <div className="contest-badges">
+          <Link
+            to={isAdmin ? `/contest/${contestId}/messages` : `/contest/${contestId}#contest-communications`}
+            className="button button-secondary"
+          >
+            {isAdmin ? '消息管理' : '广播 / QA'}
+          </Link>
+          <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
+        </div>
       </div>
       <div className="search-form">
         <select value={status} onChange={(e) => setFilter('status', e.target.value)}>

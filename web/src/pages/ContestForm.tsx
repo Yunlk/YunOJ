@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { createContest, extractError, getContest, updateContest } from '../api'
-import type { ContestInput, ContestMode } from '../types'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { contestCoverUrl, createContest, extractError, getContest, updateContest, uploadContestCover } from '../api'
+import { ProblemManager } from './ContestProblemManagerPage'
+import type { ContestInput, ContestMode, ContestProblem } from '../types'
 import { fromLocalInput, toLocalInput } from '../utils/contest'
 
 /** 赛制模板：三个预置 + 自定义并列 */
-type Template = 'acm' | 'oi' | 'ioi' | 'custom'
+type Template = 'acm' | 'icpc' | 'oi' | 'ioi' | 'practice' | 'custom'
 
 const TEMPLATES: { key: Template; label: string; desc: string }[] = [
-  { key: 'acm', label: 'ACM', desc: '按通过题数排名，罚时 = 分钟 + 错误次数 × 罚时' },
+  { key: 'acm', label: 'ACM 标准', desc: '按通过题数排名，罚时 = 分钟 + 错误次数 × 罚时' },
+  { key: 'icpc', label: 'ICPC 滚榜', desc: 'ACM 规则，启用封榜并在赛后逐条揭晓' },
   { key: 'oi', label: 'OI', desc: '按总分排名，每道题取最后一次提交得分' },
   { key: 'ioi', label: 'IOI', desc: '按总分排名，每道题取各次提交最优得分' },
+  { key: 'practice', label: '练习赛', desc: '实时反馈、无封榜、按总分统计，适合课堂练习' },
   { key: 'custom', label: '自定义', desc: '自由组合评分引擎与全部参数' },
 ]
 
@@ -39,11 +42,17 @@ export default function ContestForm() {
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [description, setDescription] = useState('')
+  const [coverFile, setCoverFile] = useState<File | null>(null)
+  const [coverPreview, setCoverPreview] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'private'>('public')
   const [regEnabled, setRegEnabled] = useState(false)
   const [regStart, setRegStart] = useState('')
   const [regEnd, setRegEnd] = useState('')
   const [submissionLimit, setSubmissionLimit] = useState('0')
+  const [registrationMode, setRegistrationMode] = useState<'individual' | 'team' | 'both'>('both')
+  const [maxTeamSize, setMaxTeamSize] = useState('1')
+  const [allowTeamEdit, setAllowTeamEdit] = useState(true)
+  const [contestProblems, setContestProblems] = useState<ContestProblem[]>([])
   const [loading, setLoading] = useState(isEdit)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,11 +76,16 @@ export default function ContestForm() {
         setStartTime(toLocalInput(c.start_time))
         setEndTime(toLocalInput(c.end_time))
         setDescription(c.description ?? '')
+        setCoverPreview(contestCoverUrl(c.id, c.cover_image))
         setVisibility(c.visibility ?? 'public')
         setRegEnabled(Boolean(c.reg_start_time))
         setRegStart(c.reg_start_time ? toLocalInput(c.reg_start_time) : '')
         setRegEnd(c.reg_end_time ? toLocalInput(c.reg_end_time) : '')
         setSubmissionLimit(String(c.submission_limit ?? 0))
+        setRegistrationMode(c.registration_mode ?? 'both')
+        setMaxTeamSize(String(c.max_team_size ?? 1))
+        setAllowTeamEdit(c.allow_team_edit ?? true)
+        setContestProblems(data.problems)
       })
       .catch((err) => {
         if (!cancelled) setError(extractError(err))
@@ -84,6 +98,13 @@ export default function ContestForm() {
     }
   }, [isEdit, contestId])
 
+  const reloadContestProblems = () => {
+    if (!isEdit) return
+    getContest(contestId)
+      .then((data) => setContestProblems(data.problems))
+      .catch((err) => setError(extractError(err)))
+  }
+
   const applyTemplate = (t: Template) => {
     setTemplate(t)
     switch (t) {
@@ -91,6 +112,13 @@ export default function ContestForm() {
         setEngine('ACM')
         setScoreMode('all_or_nothing')
         setPenaltyMinutes((p) => p || '20')
+        break
+      case 'icpc':
+        setEngine('ACM')
+        setFeedback('realtime')
+        setScoreMode('all_or_nothing')
+        setFreezeEnabled(true)
+        setPenaltyMinutes('20')
         break
       case 'oi':
         setEngine('OI')
@@ -101,6 +129,13 @@ export default function ContestForm() {
         setEngine('IOI')
         setScoreMode('partial')
         setFreezeEnabled(false)
+        break
+      case 'practice':
+        setEngine('IOI')
+        setFeedback('realtime')
+        setScoreMode('partial')
+        setFreezeEnabled(false)
+        setSubmissionLimit('0')
         break
       case 'custom':
         // 保留当前所有参数，仅切换为手动配置
@@ -159,6 +194,9 @@ export default function ContestForm() {
       description,
       visibility,
       submission_limit: Math.max(0, Number(submissionLimit) || 0),
+      registration_mode: registrationMode,
+      max_team_size: registrationMode === 'individual' ? 1 : Math.max(1, Number(maxTeamSize) || 1),
+      allow_team_edit: allowTeamEdit,
       ...(regEnabled && regStart && regEnd
         ? { reg_start_time: fromLocalInput(regStart), reg_end_time: fromLocalInput(regEnd) }
         : {}),
@@ -168,9 +206,11 @@ export default function ContestForm() {
     try {
       if (isEdit) {
         await updateContest(contestId, payload)
+        if (coverFile) await uploadContestCover(contestId, coverFile)
         navigate(`/contest/${contestId}`)
       } else {
         const c = await createContest(payload)
+        if (coverFile) await uploadContestCover(c.id, coverFile)
         navigate(`/contest/${c.id}`)
       }
     } catch (err) {
@@ -182,8 +222,25 @@ export default function ContestForm() {
   if (loading) return <div className="page-loading">加载中…</div>
 
   return (
-    <div className="form-page">
-      <h1 className="page-title">{isEdit ? '编辑比赛' : '新建比赛'}</h1>
+    <div className="form-page contest-manage-page">
+      <div className="page-header">
+        <div>
+          <div className="page-eyebrow">比赛管理</div>
+          <h1 className="page-title">{isEdit ? '比赛设置' : '新建比赛'}</h1>
+        </div>
+        {isEdit && (
+          <div className="contest-badges">
+            <Link to={`/contest/${contestId}/messages`} className="button button-secondary">消息管理</Link>
+            <Link to={`/contest/${contestId}`} className="button button-secondary">返回比赛总览</Link>
+          </div>
+        )}
+      </div>
+      {isEdit && (
+        <div className="contest-nav contest-manage-nav">
+          <span className="contest-nav-item active">比赛设置与题目</span>
+          <Link className="contest-nav-item" to={`/contest/${contestId}/messages`}>消息管理</Link>
+        </div>
+      )}
       <form className="card form-card" onSubmit={submit}>
         <div className="form-group">
           <label htmlFor="contest-title">标题</label>
@@ -195,6 +252,21 @@ export default function ContestForm() {
             onChange={(e) => setTitle(e.target.value)}
             placeholder="比赛标题"
           />
+        </div>
+
+        <div className="contest-cover-editor">
+          <div className="form-group">
+            <label htmlFor="contest-cover">比赛封面</label>
+            <input id="contest-cover" type="file" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (!file) return
+              if (file.size > 8 * 1024 * 1024) { setError('封面不能超过 8MB'); return }
+              setCoverFile(file)
+              setCoverPreview(URL.createObjectURL(file))
+            }} />
+            <p className="field-hint">支持 JPG、PNG、GIF、WebP，最大 8MB。</p>
+          </div>
+          {coverPreview && <img className="contest-cover-preview" src={coverPreview} alt="比赛封面预览" />}
         </div>
 
         <div className="form-group">
@@ -289,21 +361,11 @@ export default function ContestForm() {
         <div className="form-row">
           <div className="form-group">
             <label htmlFor="contest-start">开始时间</label>
-            <input
-              id="contest-start"
-              type="datetime-local"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
-            />
+            <div className="datetime-picker-row"><input id="contest-start-date" type="date" value={startTime.slice(0, 10)} onChange={(e) => setStartTime(`${e.target.value}T${startTime.slice(11, 16) || '00:00'}`)} /><input id="contest-start-time" type="time" value={startTime.slice(11, 16)} onChange={(e) => setStartTime(`${startTime.slice(0, 10)}T${e.target.value}`)} /></div>
           </div>
           <div className="form-group">
             <label htmlFor="contest-end">结束时间</label>
-            <input
-              id="contest-end"
-              type="datetime-local"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
-            />
+            <div className="datetime-picker-row"><input id="contest-end-date" type="date" value={endTime.slice(0, 10)} onChange={(e) => setEndTime(`${e.target.value}T${endTime.slice(11, 16) || '00:00'}`)} /><input id="contest-end-time" type="time" value={endTime.slice(11, 16)} onChange={(e) => setEndTime(`${endTime.slice(0, 10)}T${e.target.value}`)} /></div>
           </div>
         </div>
 
@@ -340,7 +402,7 @@ export default function ContestForm() {
               value={submissionLimit}
               onChange={(e) => setSubmissionLimit(e.target.value)}
             />
-            <p className="field-hint">可在排行榜页的题目管理中为单题设置覆盖值。</p>
+            <p className="field-hint">单题分值和提交上限可在本页下方的比赛题目区单独覆盖。</p>
           </div>
         </div>
 
@@ -353,25 +415,31 @@ export default function ContestForm() {
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="reg-start">报名开始</label>
-                <input
-                  id="reg-start"
-                  type="datetime-local"
-                  value={regStart}
-                  onChange={(e) => setRegStart(e.target.value)}
-                />
+                <div className="datetime-picker-row"><input id="reg-start" type="date" value={regStart.slice(0, 10)} onChange={(e) => setRegStart(`${e.target.value}T${regStart.slice(11, 16) || '00:00'}`)} /><input id="reg-start-time" type="time" value={regStart.slice(11, 16)} onChange={(e) => setRegStart(`${regStart.slice(0, 10)}T${e.target.value}`)} /></div>
               </div>
               <div className="form-group">
                 <label htmlFor="reg-end">报名截止</label>
-                <input
-                  id="reg-end"
-                  type="datetime-local"
-                  value={regEnd}
-                  onChange={(e) => setRegEnd(e.target.value)}
-                />
+                <div className="datetime-picker-row"><input id="reg-end" type="date" value={regEnd.slice(0, 10)} onChange={(e) => setRegEnd(`${e.target.value}T${regEnd.slice(11, 16) || '00:00'}`)} /><input id="reg-end-time" type="time" value={regEnd.slice(11, 16)} onChange={(e) => setRegEnd(`${regEnd.slice(0, 10)}T${e.target.value}`)} /></div>
               </div>
             </div>
           )}
           <p className="field-hint">未设置时报名时间窗随比赛时间窗。</p>
+        </div>
+
+        <div className="form-row contest-registration-settings">
+          <div className="form-group">
+            <label htmlFor="contest-registration-mode">报名方式</label>
+            <select id="contest-registration-mode" value={registrationMode} onChange={(e) => setRegistrationMode(e.target.value as typeof registrationMode)}>
+              <option value="both">个人或队伍报名</option>
+              <option value="individual">仅允许个人报名</option>
+              <option value="team">仅允许队伍报名</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label htmlFor="contest-max-team-size">队伍人数上限</label>
+            <input id="contest-max-team-size" type="number" min={1} max={20} value={registrationMode === 'individual' ? 1 : maxTeamSize} disabled={registrationMode === 'individual'} onChange={(e) => setMaxTeamSize(e.target.value)} />
+          </div>
+          <label className="checkbox-label registration-edit-toggle"><input type="checkbox" checked={allowTeamEdit} onChange={(e) => setAllowTeamEdit(e.target.checked)} /><span>报名截止前允许队长调整成员</span></label>
         </div>
 
         <details className="advanced-section">
@@ -416,6 +484,13 @@ export default function ContestForm() {
           </button>
         </div>
       </form>
+      {isEdit && (
+        <ProblemManager
+          contestId={contestId}
+          problems={contestProblems}
+          onChanged={reloadContestProblems}
+        />
+      )}
     </div>
   )
 }

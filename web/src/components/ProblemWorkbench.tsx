@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import type { ReactNode } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { extractError } from '../api'
 import type { RunTestResult } from '../api'
 import type { Language, ProblemDetail, Sample } from '../types'
@@ -70,7 +71,11 @@ export default function ProblemWorkbench({
   initialSample = null,
   onInitialSampleConsumed,
 }: ProblemWorkbenchProps) {
-  const [consoleOpen, setConsoleOpen] = useState(true)
+  const [consoleOpen, setConsoleOpen] = useState(false)
+  const [consoleMinimized, setConsoleMinimized] = useState(false)
+  const [consolePosition, setConsolePosition] = useState<{ x: number; y: number } | null>(null)
+  const [launcherPosition, setLauncherPosition] = useState<{ x: number; y: number } | null>(null)
+  const [narrowWorkbench, setNarrowWorkbench] = useState(() => window.matchMedia('(max-width: 900px)').matches)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mobilePane, setMobilePane] = useState<'statement' | 'editor'>('statement')
   const [fontSize, setFontSize] = useState(14)
@@ -81,6 +86,10 @@ export default function ProblemWorkbench({
   const [testError, setTestError] = useState('')
   const [testResult, setTestResult] = useState<RunTestResult | null>(null)
   const consumedSample = useRef<Sample | null>(null)
+  const consoleRef = useRef<HTMLDivElement | null>(null)
+  const consoleDrag = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null)
+  const launcherRef = useRef<HTMLButtonElement | null>(null)
+  const launcherDrag = useRef<{ pointerId: number; offsetX: number; offsetY: number; moved: boolean } | null>(null)
 
   const runWithInput = useCallback(async (input: string) => {
     if (!language) {
@@ -92,6 +101,7 @@ export default function ProblemWorkbench({
       return
     }
     setConsoleOpen(true)
+    setConsoleMinimized(false)
     setTestInput(input)
     setTesting(true)
     setTestError('')
@@ -111,6 +121,13 @@ export default function ProblemWorkbench({
   }, [runWithInput])
 
   useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)')
+    const update = () => setNarrowWorkbench(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+
+  useEffect(() => {
     if (!initialSample || consumedSample.current === initialSample) return
     consumedSample.current = initialSample
     runSample(initialSample)
@@ -125,6 +142,207 @@ export default function ProblemWorkbench({
   const languageName = selectedLanguage
     ? `${selectedLanguage.name} · ${selectedLanguage.version}`
     : ''
+  const consoleStyle: CSSProperties | undefined = consolePosition
+    ? { left: consolePosition.x, top: consolePosition.y, right: 'auto', bottom: 'auto' }
+    : undefined
+  const launcherStyle: CSSProperties | undefined = launcherPosition
+    ? { left: launcherPosition.x, top: launcherPosition.y, right: 'auto', bottom: 'auto' }
+    : undefined
+
+  const startConsoleDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth <= 900 || !consoleRef.current) return
+    if ((event.target as HTMLElement).closest('button')) return
+    const rect = consoleRef.current.getBoundingClientRect()
+    consoleDrag.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const moveConsole = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = consoleDrag.current
+    const panel = consoleRef.current
+    if (!drag || drag.pointerId !== event.pointerId || !panel) return
+    const rect = panel.getBoundingClientRect()
+    const margin = 8
+    const x = Math.min(
+      Math.max(margin, event.clientX - drag.offsetX),
+      Math.max(margin, window.innerWidth - rect.width - margin),
+    )
+    const y = Math.min(
+      Math.max(margin, event.clientY - drag.offsetY),
+      Math.max(margin, window.innerHeight - rect.height - margin),
+    )
+    setConsolePosition({ x, y })
+  }
+
+  const stopConsoleDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (consoleDrag.current?.pointerId === event.pointerId) {
+      consoleDrag.current = null
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const startLauncherDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!launcherRef.current) return
+    const rect = launcherRef.current.getBoundingClientRect()
+    launcherDrag.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      moved: false,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const moveLauncher = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = launcherDrag.current
+    const launcher = launcherRef.current
+    if (!drag || drag.pointerId !== event.pointerId || !launcher) return
+    const dx = event.clientX - (launcher.getBoundingClientRect().left + drag.offsetX)
+    const dy = event.clientY - (launcher.getBoundingClientRect().top + drag.offsetY)
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true
+    const rect = launcher.getBoundingClientRect()
+    const margin = 8
+    const x = Math.min(
+      Math.max(margin, event.clientX - drag.offsetX),
+      Math.max(margin, window.innerWidth - rect.width - margin),
+    )
+    const y = Math.min(
+      Math.max(margin, event.clientY - drag.offsetY),
+      Math.max(margin, window.innerHeight - rect.height - margin),
+    )
+    setLauncherPosition({ x, y })
+  }
+
+  const stopLauncherDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = launcherDrag.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    launcherDrag.current = null
+    event.currentTarget.releasePointerCapture(event.pointerId)
+    if (!drag.moved) {
+      if (narrowWorkbench) setMobilePane('editor')
+      setConsoleOpen(true)
+      setConsoleMinimized(false)
+    }
+  }
+
+  const testConsole = consoleOpen ? (
+    <div
+      ref={consoleRef}
+      className={consoleMinimized ? 'run-console minimized' : 'run-console'}
+      id="workbench-run-console"
+      role="region"
+      aria-label="代码自测"
+      style={consoleStyle}
+    >
+      <div
+        className="run-console-bar"
+        onPointerDown={startConsoleDrag}
+        onPointerMove={moveConsole}
+        onPointerUp={stopConsoleDrag}
+        onPointerCancel={stopConsoleDrag}
+      >
+        <span className="console-window-title">代码自测</span>
+        {samplePassed !== null && (
+          <span className={samplePassed ? 'console-badge passed' : 'console-badge failed'}>
+            {samplePassed ? '样例通过' : '样例未通过'}
+          </span>
+        )}
+        <button
+          type="button"
+          className="console-run-button"
+          onClick={() => void runWithInput(testInput)}
+          disabled={testing}
+        >
+          {testing ? '运行中…' : '▶ 运行'}
+        </button>
+        <button
+          type="button"
+          className="console-window-button"
+          onClick={() => setConsoleMinimized((value) => !value)}
+          aria-label={consoleMinimized ? '展开自测窗口' : '最小化自测窗口'}
+          title={consoleMinimized ? '展开' : '最小化'}
+        >
+          {consoleMinimized ? '□' : '−'}
+        </button>
+        <button
+          type="button"
+          className="console-close-button"
+          onClick={() => {
+            setConsoleOpen(false)
+            setConsoleMinimized(false)
+          }}
+          aria-label="关闭自测窗口"
+          title="关闭"
+        >
+          ×
+        </button>
+      </div>
+      {!consoleMinimized && <div className="run-console-body">
+        <div className="console-pane">
+          <div className="console-pane-title">输入</div>
+          <textarea
+            className="console-input"
+            value={testInput}
+            onChange={(event) => {
+              setTestInput(event.target.value)
+              setExpectedForRun(null)
+            }}
+            placeholder="输入测试数据…"
+            spellCheck={false}
+          />
+        </div>
+        <div className="console-divider" />
+        <div className="console-pane">
+          <div className="console-pane-title">输出</div>
+          <div className="console-output">
+            {testError && <div className="error-message">{testError}</div>}
+            {testResult?.compile_error && (
+              <pre className="code-block compile-error">{testResult.compile_error}</pre>
+            )}
+            {testResult && !testResult.compile_error && (
+              <>
+                <div className="test-result-meta">
+                  <StatusBadge status={testResult.status} />
+                  <span className="run-meta">
+                    {formatRunTime(testResult.time_ms)} · {formatMemory(testResult.memory_kb)}
+                  </span>
+                </div>
+                <pre className="io-output">{testResult.stdout || '（无输出）'}</pre>
+                {testResult.stderr && (
+                  <>
+                    <div className="io-label">标准错误</div>
+                    <pre className="io-output">{testResult.stderr}</pre>
+                  </>
+                )}
+              </>
+            )}
+            {!testError && !testResult && <div className="console-empty">运行后在此显示输出</div>}
+          </div>
+        </div>
+      </div>}
+    </div>
+  ) : null
+
+  const consoleLauncher = (
+    <button
+      ref={launcherRef}
+      type="button"
+      className="console-launcher"
+      style={launcherStyle}
+      onPointerDown={startLauncherDrag}
+      onPointerMove={moveLauncher}
+      onPointerUp={stopLauncherDrag}
+      onPointerCancel={stopLauncherDrag}
+      aria-label="打开代码自测"
+      title="打开代码自测"
+    >
+      &gt;_
+    </button>
+  )
 
   return (
     <div className={`workbench workbench-mobile-${mobilePane} ${className}`.trim()}>
@@ -166,13 +384,6 @@ export default function ProblemWorkbench({
             <div className="ide-toolbar">
               <span className="ide-code-label">代码</span>
               <div className="ide-toolbar-right">
-                <button
-                  type="button"
-                  className={consoleOpen ? 'toolbar-button active' : 'toolbar-button'}
-                  onClick={() => setConsoleOpen((value) => !value)}
-                >
-                  自测
-                </button>
                 <div className="settings-wrap">
                   <button
                     type="button"
@@ -247,65 +458,6 @@ export default function ProblemWorkbench({
               />
             </div>
 
-            {consoleOpen && (
-              <div className="run-console">
-                <div className="run-console-bar">
-                  <span className="console-label">输入</span>
-                  <button
-                    type="button"
-                    className="console-run-button"
-                    onClick={() => void runWithInput(testInput)}
-                    disabled={testing}
-                  >
-                    {testing ? '运行中…' : '▶ 运行'}
-                  </button>
-                  <span className="console-label">输出</span>
-                  {samplePassed !== null && (
-                    <span className={samplePassed ? 'console-badge passed' : 'console-badge failed'}>
-                      {samplePassed ? '样例通过' : '样例未通过'}
-                    </span>
-                  )}
-                </div>
-                <div className="run-console-body">
-                  <textarea
-                    className="console-input"
-                    value={testInput}
-                    onChange={(event) => {
-                      setTestInput(event.target.value)
-                      setExpectedForRun(null)
-                    }}
-                    placeholder="输入测试数据…"
-                    spellCheck={false}
-                  />
-                  <div className="console-divider" />
-                  <div className="console-output">
-                    {testError && <div className="error-message">{testError}</div>}
-                    {testResult?.compile_error && (
-                      <pre className="code-block compile-error">{testResult.compile_error}</pre>
-                    )}
-                    {testResult && !testResult.compile_error && (
-                      <>
-                        <div className="test-result-meta">
-                          <StatusBadge status={testResult.status} />
-                          <span className="run-meta">
-                            {formatRunTime(testResult.time_ms)} · {formatMemory(testResult.memory_kb)}
-                          </span>
-                        </div>
-                        <pre className="io-output">{testResult.stdout || '（无输出）'}</pre>
-                        {testResult.stderr && (
-                          <>
-                            <div className="io-label">标准错误</div>
-                            <pre className="io-output">{testResult.stderr}</pre>
-                          </>
-                        )}
-                      </>
-                    )}
-                    {!testError && !testResult && <div className="console-empty">运行后在此显示输出</div>}
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="ide-statusbar">
               <span>Ln {cursor.line}, Col {cursor.column}</span>
               <span>{languageName}</span>
@@ -324,6 +476,13 @@ export default function ProblemWorkbench({
           </>
         )}
       </div>
+      {!showSubmissions && createPortal(
+        <>
+          {consoleLauncher}
+          {(!narrowWorkbench || mobilePane === 'editor') && testConsole}
+        </>,
+        document.body,
+      )}
     </div>
   )
 }

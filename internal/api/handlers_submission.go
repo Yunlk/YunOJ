@@ -35,6 +35,8 @@ type submitRequest struct {
 	ProblemID int64  `json:"problem_id"`
 	Language  string `json:"language"`
 	Code      string `json:"code"`
+	// AssignmentID 可选；从作业页面提交时用于统计最高分。
+	AssignmentID *int64 `json:"assignment_id"`
 	// Optimize 可选；缺省视为 true（默认开启 O2）
 	Optimize *bool `json:"optimize"`
 }
@@ -101,6 +103,34 @@ func (a *API) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
+	if req.AssignmentID != nil {
+		assignment, assignmentErr := a.store.GetAssignment(r.Context(), *req.AssignmentID)
+		if errors.Is(assignmentErr, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "作业不存在")
+			return
+		}
+		if assignmentErr != nil {
+			writeError(w, http.StatusInternalServerError, "查询作业失败")
+			return
+		}
+		group, groupErr := a.store.GetGroup(r.Context(), assignment.GroupID)
+		if groupErr != nil || !a.canAccessGroup(r, group) || (!assignment.Published && !a.canManageGroup(r, group)) {
+			writeError(w, http.StatusForbidden, "没有访问该作业的权限")
+			return
+		}
+		if !a.canManageGroup(r, group) {
+			open, openErr := a.store.IsAssignmentOpen(r.Context(), assignment.ID, time.Now())
+			if openErr != nil || !open {
+				writeError(w, http.StatusForbidden, "当前不在作业提交时间内")
+				return
+			}
+		}
+		contains, containsErr := a.store.AssignmentContainsProblem(r.Context(), assignment.ID, req.ProblemID)
+		if containsErr != nil || !contains {
+			writeError(w, http.StatusBadRequest, "该题目不属于当前作业")
+			return
+		}
+	}
 	if msg, status := a.validateSubmitBasics(r, req.Language, req.Code, u.ID); msg != "" {
 		writeError(w, status, msg)
 		return
@@ -110,7 +140,7 @@ func (a *API) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	if req.Optimize != nil {
 		optimize = *req.Optimize
 	}
-	id, err := a.store.CreateSubmission(r.Context(), req.ProblemID, u.ID, req.Language, req.Code, optimize)
+	id, err := a.store.CreateSubmissionContext(r.Context(), req.ProblemID, u.ID, req.Language, req.Code, optimize, nil, req.AssignmentID)
 	if err != nil {
 		slogError(r, "创建提交", err)
 		writeError(w, http.StatusInternalServerError, "提交失败")

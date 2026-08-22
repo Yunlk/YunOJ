@@ -1,11 +1,179 @@
-export type Role = 'admin' | 'user'
+export type Role = 'admin' | 'teacher' | 'student' | 'user'
 
 export interface User {
   id: number
   username: string
   email: string
   role: Role
+  disabled: boolean
+  avatar: string
+  rating: number
+  rank: number
   created_at: string
+}
+
+export interface Group {
+  id: number
+  name: string
+  description: string
+  owner_id: number
+  owner_name: string
+  member_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface GroupMember {
+  user_id: number
+  username: string
+  email: string
+  role: 'student' | 'teacher'
+  joined_at: string
+}
+
+export interface Assignment {
+  id: number
+  group_id: number
+  title: string
+  description: string
+  kind: 'assignment' | 'test'
+  creator_id: number
+  creator_name: string
+  start_at: string
+  due_at?: string
+  published: boolean
+  problem_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AssignmentProblem {
+  assignment_id: number
+  problem_id: number
+  title: string
+  sort_order: number
+  max_score: number
+}
+
+export interface AssignmentProgress {
+  user_id: number
+  username: string
+  solved: number
+  problem_count: number
+  best_score: number
+  total_score: number
+}
+
+export interface HomeSummary {
+  user_count: number
+  problem_count: number
+  contest_count: number
+  submission_count: number
+  group_count: number
+  assignment_count: number
+  active_contests: Contest[]
+  upcoming_contests: Contest[]
+  recent_problems: ProblemListItem[]
+}
+
+export interface HomeData {
+  summary: HomeSummary
+  groups?: Group[]
+  my_stats?: {
+    total_submissions: number
+    accepted_submissions: number
+    attempted_problems: number
+    contests: number
+  }
+}
+
+export type HomeProblem = ProblemListItem
+
+export interface ProblemDiscussion {
+  id: number
+  problem_id: number
+  user_id: number
+  username: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ProblemEditorial {
+  problem_id: number
+  content: string
+  updated_by: number
+  updated_at: string
+}
+
+export interface Notification {
+  id: number
+  recipient_id?: number
+  author_id: number
+  author_name: string
+  kind: string
+  title: string
+  content: string
+  read: boolean
+  created_at: string
+}
+
+export interface GroupDetail {
+  group: Group
+  members: GroupMember[]
+  assignments: Assignment[]
+  can_manage: boolean
+}
+
+export interface AssignmentDetail {
+  assignment: Assignment
+  group: Group
+  problems: AssignmentProblem[]
+  progress?: AssignmentProgress[]
+  can_manage: boolean
+}
+
+export interface RankingEntry {
+  rank: number
+  user_id: number
+  username: string
+  avatar: string
+  rating: number
+  weighted_solved: number
+  solved_problems: number
+  attempted_problems: number
+  first_bloods: number
+  acceptance_rate: number
+  last_accepted_at?: string
+}
+
+export interface ProfileStats {
+  total_submissions: number
+  accepted_submissions: number
+  attempted_problems: number
+  contests: number
+}
+
+export interface ProfileActivityDay {
+  date: string
+  count: number
+}
+
+export interface ProfileContest {
+  id: number
+  title: string
+  mode: ContestMode
+  submission_count: number
+  last_submitted_at: string
+}
+
+export interface ProfileData {
+  user: User
+  ranking: RankingEntry | null
+  stats: ProfileStats
+  activity: ProfileActivityDay[]
+  recent_submissions: SubmissionListItem[]
+  contests: ProfileContest[]
 }
 
 export interface Page<T> {
@@ -49,6 +217,7 @@ export interface ProblemDetail extends ProblemListItem {
   testcase_scores: number[]
   submission_limit: number
   status: ProblemStatus
+  is_favorite?: boolean
   // 管理员专属
   spj_source?: string
   interactor_source?: string
@@ -139,6 +308,7 @@ export interface Language {
 export type ContestMode = 'ACM' | 'OI' | 'IOI'
 export type ContestFeedback = 'realtime' | 'blind'
 export type ContestScoreMode = 'all_or_nothing' | 'partial'
+export type ContestRegistrationMode = 'individual' | 'team' | 'both'
 
 export interface Contest {
   id: number
@@ -152,10 +322,14 @@ export interface Contest {
   start_time: string
   end_time: string
   description: string
+  cover_image: string
   visibility: 'public' | 'private'
   reg_start_time?: string
   reg_end_time?: string
   submission_limit: number
+  registration_mode: ContestRegistrationMode
+  max_team_size: number
+  allow_team_edit: boolean
   created_at: string
 }
 
@@ -167,11 +341,24 @@ export interface ContestProblem {
   score?: number | null
   total_score?: number
   submission_limit?: number | null
+  theme_color?: string
+}
+
+export interface ContestTeamMember {
+  contest_id: number
+  team_id: number
+  user_id: number
+  username: string
+  is_captain: boolean
+  joined_at: string
 }
 
 export interface MyTeam {
   team_name: string
   avatar: string
+  team_id?: number
+  members?: ContestTeamMember[]
+  is_captain?: boolean
 }
 
 export interface ContestDetail {
@@ -180,6 +367,49 @@ export interface ContestDetail {
   is_registered?: boolean
   is_admin?: boolean
   my_team?: MyTeam
+}
+
+export interface ContestParticipant {
+  contest_id: number
+  team_id: number
+  team_name: string
+  username: string
+  avatar: string
+  submission_count: number
+  accepted_count: number
+  last_submitted_at?: string
+  members: string[]
+}
+
+export interface ContestAnnouncement {
+  id: number
+  contest_id: number
+  author_id: number
+  author_name: string
+  title: string
+  content: string
+  pinned: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ContestQuestion {
+  id: number
+  contest_id: number
+  asker_id: number
+  asker_name: string
+  content: string
+  answer: string
+  answerer_id?: number
+  answerer_name?: string
+  public: boolean
+  asked_at: string
+  answered_at?: string
+}
+
+export interface ContestCommunications {
+  announcements: ContestAnnouncement[]
+  questions: ContestQuestion[]
 }
 
 export interface ContestInput {
@@ -193,10 +423,24 @@ export interface ContestInput {
   start_time: string
   end_time: string
   description: string
+  cover_image?: string
   visibility: 'public' | 'private'
   reg_start_time?: string
   reg_end_time?: string
   submission_limit: number
+  registration_mode: ContestRegistrationMode
+  max_team_size: number
+  allow_team_edit: boolean
+}
+
+export interface ContestRegistration {
+  contest: Contest
+  registration_mode: ContestRegistrationMode
+  max_team_size: number
+  allow_team_edit: boolean
+  is_registered: boolean
+  team: { team_id: number; team_name: string; avatar: string; is_captain: boolean } | null
+  members: ContestTeamMember[]
 }
 
 // ---- 比赛总览 ----
@@ -215,6 +459,7 @@ export interface OverviewProblem {
   my_remaining: number | null
   my_status: 'untried' | 'judging' | 'passed' | 'failed'
   my_score: number
+  theme_color: string
 }
 
 export interface ContestOverview {
@@ -253,6 +498,7 @@ export interface ContestProblemView {
 export interface ACMProblemState {
   solved: boolean
   failed_attempts: number
+  last_status?: string
   solved_at?: string
   first_blood?: boolean
 }
@@ -290,6 +536,7 @@ export interface ContestStandings {
   roll_available?: boolean
   roll_initial_standings?: ACMStanding[]
   roll_events?: RollEvent[]
+  fun_stats?: ContestFunStats
 }
 
 export interface LiveSubmission {
@@ -312,4 +559,20 @@ export interface RollEvent {
   team_name: string
   team_avatar: string
   standings: ACMStanding[]
+}
+
+export interface ContestFunEntry {
+  team_id: number
+  team_name: string
+  count?: number
+  display_ids?: string[]
+  created_at?: string
+  elapsed_seconds?: number
+}
+
+export interface ContestFunStats {
+  fastest_first_blood: ContestFunEntry[]
+  most_first_blood: ContestFunEntry[]
+  most_wrong_answers: ContestFunEntry[]
+  last_accepted: ContestFunEntry[]
 }

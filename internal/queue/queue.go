@@ -29,6 +29,12 @@ type Queue struct {
 	rdb *redis.Client
 }
 
+// Stats 返回评测队列长度及各 worker 正在处理的任务数。
+type Stats struct {
+	Queued     int64         `json:"queued"`
+	Processing map[int]int64 `json:"processing"`
+}
+
 // New 创建队列客户端（惰性连接）。
 func New(addr string) *Queue {
 	return &Queue{rdb: redis.NewClient(&redis.Options{Addr: addr})}
@@ -39,6 +45,23 @@ func (q *Queue) Close() error { return q.rdb.Close() }
 
 // Ping 验证 Redis 连通性。
 func (q *Queue) Ping(ctx context.Context) error { return q.rdb.Ping(ctx).Err() }
+
+// Stats 查询队列运行概况，不会移动任务。
+func (q *Queue) Stats(ctx context.Context, workers int) (Stats, error) {
+	queued, err := q.rdb.LLen(ctx, mainKey).Result()
+	if err != nil {
+		return Stats{}, err
+	}
+	result := Stats{Queued: queued, Processing: map[int]int64{}}
+	for workerID := 0; workerID < workers; workerID++ {
+		n, err := q.rdb.LLen(ctx, processingKey(workerID)).Result()
+		if err != nil {
+			return Stats{}, err
+		}
+		result.Processing[workerID] = n
+	}
+	return result, nil
+}
 
 func processingKey(workerID int) string {
 	return fmt.Sprintf("%s%d", processingPrefix, workerID)

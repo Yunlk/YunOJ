@@ -177,6 +177,189 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_submissions_contest_user ON submissions (contest_id, user_id, id DESC)`,
 		},
 	},
+	{
+		version: 7,
+		name:    "user_avatar",
+		stmts: []string{
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT NOT NULL DEFAULT ''`,
+		},
+	},
+	{
+		version: 8,
+		name:    "contest_communications",
+		stmts: []string{
+			`CREATE TABLE IF NOT EXISTS contest_announcements (
+				id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				contest_id  BIGINT NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+				author_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+				title       TEXT NOT NULL DEFAULT '',
+				content     TEXT NOT NULL,
+				pinned      BOOLEAN NOT NULL DEFAULT false,
+				created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_announcements_contest ON contest_announcements (contest_id, pinned DESC, created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS contest_questions (
+				id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				contest_id    BIGINT NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+				asker_id      BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				content       TEXT NOT NULL,
+				answer        TEXT NOT NULL DEFAULT '',
+				answerer_id   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+				public        BOOLEAN NOT NULL DEFAULT false,
+				asked_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+				answered_at   TIMESTAMPTZ
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_questions_contest ON contest_questions (contest_id, asked_at DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_questions_asker ON contest_questions (asker_id, asked_at DESC)`,
+		},
+	},
+	{
+		version: 9,
+		name:    "difficulty_levels_and_ranking_index",
+		stmts: []string{
+			// 旧系统允许 1-10；新九级体系保留 1-9，仅将历史最高档 10 合并为 Limit。
+			`UPDATE problems SET difficulty = 9 WHERE difficulty > 9`,
+			`UPDATE problems SET difficulty = 1 WHERE difficulty < 1`,
+			`ALTER TABLE problems DROP CONSTRAINT IF EXISTS problems_difficulty_check`,
+			`ALTER TABLE problems ADD CONSTRAINT problems_difficulty_check CHECK (difficulty BETWEEN 1 AND 9)`,
+			// 全站排名按用户、题目和终态聚合；此索引避免提交量增长后重复全表排序。
+			`CREATE INDEX IF NOT EXISTS idx_submissions_ranking ON submissions (user_id, problem_id, status, created_at, id)`,
+		},
+	},
+	{
+		version: 10,
+		name:    "teaching_workspace",
+		stmts: []string{
+			// 旧 user 角色统一迁移为 student；保留应用层对旧值的兼容判断。
+			`UPDATE users SET role = 'student' WHERE role = 'user'`,
+			`ALTER TABLE users ADD COLUMN IF NOT EXISTS disabled BOOLEAN NOT NULL DEFAULT false`,
+			`CREATE INDEX IF NOT EXISTS idx_users_role_created ON users (role, created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS groups (
+				id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				name TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_groups_owner ON groups (owner_id, created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS group_members (
+				group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				member_role TEXT NOT NULL DEFAULT 'student',
+				joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (group_id, user_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members (user_id, joined_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS assignments (
+				id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+				creator_id BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+				title TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				kind TEXT NOT NULL DEFAULT 'assignment',
+				start_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				due_at TIMESTAMPTZ,
+				published BOOLEAN NOT NULL DEFAULT false,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_assignments_group ON assignments (group_id, start_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS assignment_problems (
+				assignment_id BIGINT NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+				problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE RESTRICT,
+				sort_order INTEGER NOT NULL DEFAULT 0,
+				max_score INTEGER NOT NULL DEFAULT 100,
+				PRIMARY KEY (assignment_id, problem_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_assignment_problems_problem ON assignment_problems (problem_id)`,
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS assignment_id BIGINT REFERENCES assignments(id) ON DELETE SET NULL`,
+			`CREATE INDEX IF NOT EXISTS idx_submissions_assignment_user ON submissions (assignment_id, user_id, problem_id, status, score)`,
+		},
+	},
+	{
+		version: 11,
+		name:    "problem_learning_tools",
+		stmts: []string{
+			`CREATE TABLE IF NOT EXISTS problem_favorites (
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (user_id, problem_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_problem_favorites_user ON problem_favorites (user_id, created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS problem_discussions (
+				id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				content TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_problem_discussions_problem ON problem_discussions (problem_id, created_at DESC)`,
+			`CREATE TABLE IF NOT EXISTS problem_editorials (
+				problem_id BIGINT PRIMARY KEY REFERENCES problems(id) ON DELETE CASCADE,
+				content TEXT NOT NULL DEFAULT '',
+				updated_by BIGINT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+		},
+	},
+	{
+		version: 12,
+		name:    "site_notifications",
+		stmts: []string{
+			`CREATE TABLE IF NOT EXISTS notifications (
+				id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				recipient_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+				author_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+				kind TEXT NOT NULL DEFAULT 'system',
+				title TEXT NOT NULL,
+				content TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE TABLE IF NOT EXISTS notification_reads (
+				notification_id BIGINT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (notification_id, user_id)
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications (recipient_id, created_at DESC)`,
+		},
+	},
+	{
+		version: 13,
+		name:    "contest_registration_theme",
+		stmts: []string{
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS registration_mode TEXT NOT NULL DEFAULT 'both'`,
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS max_team_size INTEGER NOT NULL DEFAULT 1`,
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS allow_team_edit BOOLEAN NOT NULL DEFAULT true`,
+			`ALTER TABLE contest_problems ADD COLUMN IF NOT EXISTS theme_color TEXT NOT NULL DEFAULT ''`,
+			`CREATE TABLE IF NOT EXISTS contest_team_members (
+
+				contest_id BIGINT NOT NULL,
+				team_id BIGINT NOT NULL,
+				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				is_captain BOOLEAN NOT NULL DEFAULT false,
+				joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (contest_id, team_id, user_id),
+				FOREIGN KEY (contest_id, team_id) REFERENCES contest_teams(contest_id, team_id) ON DELETE CASCADE
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_contest_team_members_user ON contest_team_members (contest_id, user_id)`,
+			`INSERT INTO contest_team_members (contest_id, team_id, user_id, is_captain)
+			 SELECT contest_id, team_id, team_id, true FROM contest_teams
+			 ON CONFLICT DO NOTHING`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_team_members_team ON contest_team_members (contest_id, team_id, joined_at)`,
+		},
+	},
+	{
+		version: 14,
+		name:    "contest_cover_image",
+		stmts: []string{
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS cover_image TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

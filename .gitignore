@@ -14,6 +14,10 @@ node_modules/
 web/node_modules/
 .npm-cache/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # 前端构建产物（web/dist/.gitkeep 除外，保证 go:embed 在未构建前端时也能编译）
 web/dist/*
 !web/dist/.gitkeep

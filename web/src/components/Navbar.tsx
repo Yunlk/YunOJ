@@ -1,10 +1,13 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { TOKEN_KEY } from '../api'
 import { useAuth } from '../context/AuthContext'
+import { ratingClass } from '../utils/rating'
 
 export default function Navbar() {
   const { user, setUser } = useAuth()
+  const location = useLocation()
   const navigate = useNavigate()
+  const navClass = ({ isActive }: { isActive: boolean }) => isActive ? 'active' : undefined
 
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY)
@@ -19,31 +22,43 @@ export default function Navbar() {
           YunOJ
         </Link>
         <nav className="nav-links">
-          <Link to="/">题目</Link>
-          <Link to="/status">状态</Link>
-          <Link to="/contests">比赛</Link>
+          <NavLink to="/problems" className={({ isActive }) => navClass({ isActive: isActive || location.pathname.startsWith('/problem/') })}>题目</NavLink>
+          <NavLink to="/status" className={navClass}>状态</NavLink>
+          <NavLink to="/contests" className={({ isActive }) => navClass({ isActive: isActive || location.pathname.startsWith('/contest/') })}>比赛</NavLink>
+          <NavLink to="/ranking" className={navClass}>排名</NavLink>
           {user?.role === 'admin' && (
             <>
-              <Link to="/admin/problems">题目管理</Link>
-              <Link to="/contest/new">新建比赛</Link>
+              <NavLink to="/admin/problems" className={navClass}>题目管理</NavLink>
+              <NavLink to="/admin/users" className={navClass}>用户管理</NavLink>
+              <NavLink to="/admin/judge" className={navClass}>评测服务</NavLink>
+              <NavLink to="/admin/notifications" className={navClass}>全站通知</NavLink>
+              <NavLink to="/contest/new" className={navClass}>新建比赛</NavLink>
             </>
           )}
+          {(user?.role === 'admin' || user?.role === 'teacher') && <NavLink to="/groups" className={navClass}>教学空间</NavLink>}
         </nav>
         <div className="nav-auth">
           {user ? (
             <>
-              <span className="username" title={user.email}>
+              <NavLink
+                to="/profile"
+                className={({ isActive }) => `username ${(user.role === 'student' || user.role === 'user') ? ratingClass(user.rating) : ''}${isActive ? ' active' : ''}`}
+                title={(user.role === 'student' || user.role === 'user') ? `综合分 ${user.rating || 1000}` : '打开个人中心'}
+              >
                 {user.username}
                 {user.role === 'admin' && <span className="admin-tag">管理员</span>}
-              </span>
+                {user.role === 'teacher' && <span className="teacher-tag">教师</span>}
+              </NavLink>
+              <NavLink to="/favorites" className={navClass}>收藏</NavLink>
+              <NavLink to="/notifications" className={navClass}>通知</NavLink>
               <button type="button" className="link-button" onClick={logout}>
                 退出
               </button>
             </>
           ) : (
             <>
-              <Link to="/login">登录</Link>
-              <Link to="/register">注册</Link>
+              <NavLink to="/login" className={navClass}>登录</NavLink>
+              <NavLink to="/register" className={navClass}>注册</NavLink>
             </>
           )}
         </div>

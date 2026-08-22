@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { createProblem, extractError, getProblem, updateProblem } from '../api'
 import Markdown from '../components/Markdown'
 import type { ProblemType, Sample } from '../types'
+import { DIFFICULTIES } from '../utils/difficulty'
 
 const emptySample = (): Sample => ({ input: '', output: '', note: '' })
 
@@ -136,8 +137,8 @@ export default function ProblemForm() {
       return
     }
     const difficulty = Number(form.difficulty)
-    if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 10) {
-      setError('难度需为 1-10 的整数')
+    if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 9) {
+      setError('请选择有效的题目难度')
       return
     }
     const time = Number(form.time_limit_ms)
@@ -261,15 +262,18 @@ export default function ProblemForm() {
 
         <div className="form-row">
           <div className="form-group">
-            <label htmlFor="p-difficulty">难度（1-10）</label>
-            <input
+            <label htmlFor="p-difficulty">难度</label>
+            <select
               id="p-difficulty"
-              type="number"
-              min={1}
-              max={10}
               value={form.difficulty}
               onChange={(e) => setField('difficulty', e.target.value)}
-            />
+            >
+              {DIFFICULTIES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}（权重 {item.weight.toFixed(1)}）
+                </option>
+              ))}
+            </select>
           </div>
           <div className="form-group">
             <label htmlFor="p-time">时间限制（ms）</label>

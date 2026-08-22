@@ -42,13 +42,20 @@ func (a *API) Router() http.Handler {
 	r.Post("/api/auth/login", a.handleLogin)
 	r.Get("/api/languages", a.handleLanguages)
 	r.Get("/api/submissions", a.handleListSubmissions)
+	r.Get("/api/rankings", a.handleRankings)
+	r.Group(func(r chi.Router) {
+		r.Use(a.optionalAuth)
+		r.Get("/api/home", a.handleHome)
+	})
 
 	// 匿名可访问，但携带有效令牌时可见敏感字段（管理员看到草稿/停用题目与评测器源码）
 	r.Group(func(r chi.Router) {
 		r.Use(a.optionalAuth)
 		r.Get("/api/problems", a.handleListProblems)
 		r.Get("/api/problems/{id}", a.handleGetProblem)
+		r.Get("/api/problems/{id}/learning", a.handleProblemLearning)
 		r.Get("/api/submissions/{id}", a.handleGetSubmission)
+		r.Get("/api/users/{id}/avatar", a.handleServeUserAvatar)
 	})
 
 	// 比赛接口：匿名可访问，携带有效令牌时返回报名状态/管理员标记
@@ -58,27 +65,72 @@ func (a *API) Router() http.Handler {
 		r.Get("/api/contests/{id}", a.handleGetContest)
 		r.Get("/api/contests/{id}/standings", a.handleContestStandings)
 		r.Get("/api/contests/{id}/teams/{team_id}/avatar", a.handleServeContestAvatar)
+		r.Get("/api/contests/{id}/cover", a.handleServeContestCover)
 	})
 
 	// 登录用户接口
 	r.Group(func(r chi.Router) {
 		r.Use(a.requireAuth)
 		r.Get("/api/auth/me", a.handleMe)
+		r.Post("/api/profile/password", a.handleChangePassword)
+		r.Get("/api/notifications", a.handleListNotifications)
+		r.Post("/api/notifications/{id}/read", a.handleReadNotification)
+		r.Get("/api/profile", a.handleProfile)
+		r.Post("/api/profile/avatar", a.handleUploadUserAvatar)
+		r.Get("/api/profile/favorites", a.handleListFavorites)
+		r.Post("/api/problems/{id}/favorite", a.handleToggleProblemFavorite)
+		r.Post("/api/problems/{id}/discussions", a.handleCreateProblemDiscussion)
+		r.Delete("/api/discussions/{id}", a.handleDeleteProblemDiscussion)
 		r.Post("/api/submissions", a.handleSubmit)
+		r.Get("/api/groups", a.handleListGroups)
+		r.Get("/api/groups/{id}", a.handleGetGroup)
+		r.Get("/api/assignments/{id}", a.handleGetAssignment)
+		r.Get("/api/assignments/{id}/progress", a.handleAssignmentProgress)
 		r.Post("/api/problems/{id}/test", a.handleRunTest)
 		r.Post("/api/problems/{id}/test-samples", a.handleRunSamples)
 		r.Post("/api/contests/{id}/problems/{problem_id}/test", a.handleContestRunTest)
 		r.Post("/api/contests/{id}/register", a.handleRegisterContest)
+		r.Get("/api/contests/{id}/registration", a.handleGetContestRegistration)
+		r.Post("/api/contests/{id}/teams/{team_id}/members", a.handleAddContestMember)
+		r.Delete("/api/contests/{id}/teams/{team_id}/members/{user_id}", a.handleRemoveContestMember)
 		r.Post("/api/contests/{id}/avatar", a.handleUploadContestAvatar)
 		r.Post("/api/contests/{id}/submit", a.handleContestSubmit)
 		r.Get("/api/contests/{id}/overview", a.handleContestOverview)
+		r.Get("/api/contests/{id}/communications", a.handleContestCommunications)
 		r.Get("/api/contests/{id}/problems/{problem_id}", a.handleContestProblem)
 		r.Get("/api/contests/{id}/submissions", a.handleContestMySubmissions)
+		r.Post("/api/contests/{id}/questions", a.handleCreateContestQuestion)
+	})
+
+	// 教师/管理员接口：班级、作业和作业内题目管理。
+	r.Group(func(r chi.Router) {
+		r.Use(a.requireAuth, a.requireStaff)
+		r.Post("/api/groups", a.handleCreateGroup)
+		r.Put("/api/groups/{id}", a.handleUpdateGroup)
+		r.Post("/api/groups/{id}/members", a.handleAddGroupMember)
+		r.Delete("/api/groups/{id}/members/{user_id}", a.handleRemoveGroupMember)
+		r.Post("/api/groups/{id}/assignments", a.handleCreateAssignment)
+		r.Put("/api/assignments/{id}", a.handleUpdateAssignment)
+		r.Post("/api/assignments/{id}/problems", a.handleAddAssignmentProblem)
+		r.Delete("/api/assignments/{id}/problems/{problem_id}", a.handleRemoveAssignmentProblem)
 	})
 
 	// 管理员接口
 	r.Group(func(r chi.Router) {
 		r.Use(a.requireAuth, a.requireAdmin)
+		r.Get("/api/admin/users", a.handleAdminListUsers)
+		r.Patch("/api/admin/users/{id}", a.handleAdminUpdateUser)
+		r.Put("/api/problems/{id}/editorial", a.handleUpsertProblemEditorial)
+		r.Get("/api/admin/judge/health", a.handleJudgeHealth)
+		r.Post("/api/admin/judge/recover-stale", a.handleResetStaleJudgeTasks)
+		r.Post("/api/notifications", a.handleCreateNotification)
+		r.Delete("/api/notifications/{id}", a.handleDeleteNotification)
+		r.Get("/api/contests/{id}/participants", a.handleContestParticipants)
+		r.Delete("/api/contests/{id}/participants/{team_id}", a.handleRemoveContestParticipant)
+		r.Get("/api/contests/{id}/participants/export", a.handleExportContestParticipants)
+		r.Get("/api/contests/{id}/standings/export", a.handleExportContestStandings)
+		r.Get("/api/contests/{id}/data-package", a.handleExportContestDataPackage)
+		r.Post("/api/contests/{id}/cover", a.handleUploadContestCover)
 		r.Post("/api/problems", a.handleCreateProblem)
 		r.Put("/api/problems/{id}", a.handleUpdateProblem)
 		r.Delete("/api/problems/{id}", a.handleDeleteProblem)
@@ -103,6 +155,9 @@ func (a *API) Router() http.Handler {
 		r.Put("/api/contests/{id}/problems/{problem_id}", a.handleUpdateContestProblem)
 		r.Put("/api/contests/{id}/problems/order", a.handleReorderContestProblems)
 		r.Delete("/api/contests/{id}/problems/{problem_id}", a.handleRemoveContestProblem)
+		r.Post("/api/contests/{id}/announcements", a.handleCreateContestAnnouncement)
+		r.Delete("/api/contests/{id}/announcements/{announcement_id}", a.handleDeleteContestAnnouncement)
+		r.Put("/api/contests/{id}/questions/{question_id}", a.handleAnswerContestQuestion)
 	})
 
 	// 未匹配路径：/api 下返回 JSON 404，其余走前端静态资源

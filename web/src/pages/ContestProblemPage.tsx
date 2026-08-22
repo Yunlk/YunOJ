@@ -11,6 +11,7 @@ import {
 } from '../api'
 import ProblemWorkbench from '../components/ProblemWorkbench'
 import SubmissionPanel from '../components/SubmissionPanel'
+import DifficultyBadge from '../components/DifficultyBadge'
 import { useAuth } from '../context/AuthContext'
 import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
 import type { Contest, ContestProblemView, Language } from '../types'
@@ -133,7 +134,6 @@ export default function ContestProblemPage() {
   const { problem, contest_problem: contestProblem } = view
   const startMs = new Date(contest.start_time).getTime()
   const endMs = new Date(contest.end_time).getTime()
-  const progress = Math.min(100, Math.max(0, ((now - startMs) / Math.max(1, endMs - startMs)) * 100))
   const running = now >= startMs && now < endMs
   const upcoming = now < startMs
   const my = view.my
@@ -146,6 +146,7 @@ export default function ContestProblemPage() {
 
   const statementMeta = (
     <div className="workbench-meta-line">
+      <span><DifficultyBadge value={problem.difficulty} /></span>
       <span>题号 {contestProblem.display_id}</span>
       <span>满分 {contestProblem.score}</span>
       <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
@@ -180,24 +181,14 @@ export default function ContestProblemPage() {
 
   return (
     <div className="contest-problem-page">
-      <div className="contest-topbar">
-        <div className="contest-topbar-title">
-          <Link to={`/contest/${contestId}`} className="problem-link">← {contest.title}</Link>
-          <span className="contest-topbar-pid">{contestProblem.display_id}</span>
-          <span>{problem.title}</span>
-        </div>
-        <div className="contest-topbar-time">
-          {upcoming ? (
-            <span>距开始 {formatRemaining(startMs - now)}</span>
-          ) : running ? (
-            <span className="danger">剩余 {formatRemaining(endMs - now)}</span>
-          ) : (
-            <span>已结束</span>
-          )}
-          <div className="contest-progress slim">
-            <div className="contest-progress-fill" style={{ width: `${progress}%` }} />
-          </div>
-        </div>
+      <div className="contest-focus-clock" role="timer" aria-live="off">
+        {upcoming ? (
+          <span>距离比赛开始 <strong>{formatRemaining(startMs - now)}</strong></span>
+        ) : running ? (
+          <span>距离比赛结束 <strong>{formatRemaining(endMs - now)}</strong></span>
+        ) : (
+          <span>比赛已结束</span>
+        )}
       </div>
 
       <ProblemWorkbench
@@ -220,7 +211,17 @@ export default function ContestProblemPage() {
         canSubmit={running}
         submitLabel={submitLabel}
         submitDisabledReason={submitDisabledReason}
-        headerActions={<Link to={`/contest/${contestId}`} className="mini-btn">返回比赛</Link>}
+        headerActions={(
+          <>
+            <Link
+              to={user?.role === 'admin' ? `/contest/${contestId}/messages` : `/contest/${contestId}#contest-communications`}
+              className="mini-btn"
+            >
+              {user?.role === 'admin' ? '消息管理' : '广播 / QA'}
+            </Link>
+            <Link to={`/contest/${contestId}`} className="mini-btn">返回比赛</Link>
+          </>
+        )}
         statementMeta={statementMeta}
         editorFooter={problemNavigation}
         submissionPanel={(

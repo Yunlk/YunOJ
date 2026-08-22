@@ -3,8 +3,10 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { batchProblems, copyProblem, deleteProblem, extractError, getProblems, getProblemUsage } from '../api'
 import Pagination from '../components/Pagination'
+import DifficultyBadge from '../components/DifficultyBadge'
 import type { ProblemListItem } from '../types'
 import { formatTime } from '../utils/format'
+import { DIFFICULTIES } from '../utils/difficulty'
 
 const PAGE_SIZE = 20
 
@@ -179,8 +181,8 @@ export default function ProblemAdmin() {
         />
         <select value={difficulty ?? ''} onChange={(e) => setFilter('difficulty', e.target.value)}>
           <option value="">全部难度</option>
-          {Array.from({ length: 10 }, (_, i) => i + 1).map((d) => (
-            <option key={d} value={d}>难度 {d}</option>
+          {DIFFICULTIES.map((item) => (
+            <option key={item.value} value={item.value}>{item.label}</option>
           ))}
         </select>
         <select value={type} onChange={(e) => setFilter('type', e.target.value)}>
@@ -255,7 +257,7 @@ export default function ProblemAdmin() {
                   <Link to={`/problem/${p.id}`} className="problem-link">{p.title}</Link>
                 </td>
                 <td><span className="tag-chip">{TYPE_LABELS[p.type ?? 'standard'] ?? p.type}</span></td>
-                <td className="mono">{p.difficulty}</td>
+                <td><DifficultyBadge value={p.difficulty} /></td>
                 <td className="mono">{p.testcase_count ?? 0}</td>
                 <td className="mono">{p.accepted_count} / {p.submission_count}</td>
                 <td>

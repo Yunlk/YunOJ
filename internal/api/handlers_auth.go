@@ -21,6 +21,11 @@ type credentialsRequest struct {
 	Password string `json:"password"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 // handleRegister 注册（注册即登录）。第一个注册的用户自动成为管理员。
 func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req credentialsRequest
@@ -82,13 +87,46 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
+	if u.Disabled {
+		writeError(w, http.StatusForbidden, "账号已被禁用，请联系管理员")
+		return
+	}
 	a.issueToken(w, r, u, http.StatusOK)
 }
 
 // handleMe 返回当前登录用户信息。
 func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 	u, _ := userFromCtx(r.Context())
+	u = a.decorateUserRanking(r, u)
 	writeJSON(w, http.StatusOK, map[string]any{"user": u})
+}
+
+// handleChangePassword 修改当前用户密码。
+func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	u, _ := userFromCtx(r.Context())
+	var req changePasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if utf8.RuneCountInString(req.NewPassword) < 6 || utf8.RuneCountInString(req.NewPassword) > 72 {
+		writeError(w, http.StatusBadRequest, "新密码长度需在 6-72 位之间")
+		return
+	}
+	_, hash, err := a.store.GetUserByUsername(r.Context(), u.Username)
+	if err != nil || !auth.CheckPassword(hash, req.CurrentPassword) {
+		writeError(w, http.StatusUnauthorized, "当前密码不正确")
+		return
+	}
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "密码处理失败")
+		return
+	}
+	if err := a.store.UpdateUserPassword(r.Context(), u.ID, newHash); err != nil {
+		writeError(w, http.StatusInternalServerError, "修改密码失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // issueToken 签发令牌并返回 {token, user}。
@@ -99,5 +137,5 @@ func (a *API) issueToken(w http.ResponseWriter, r *http.Request, u model.User, s
 		writeError(w, http.StatusInternalServerError, "登录失败")
 		return
 	}
-	writeJSON(w, status, map[string]any{"token": token, "user": u})
+	writeJSON(w, status, map[string]any{"token": token, "user": a.decorateUserRanking(r, u)})
 }

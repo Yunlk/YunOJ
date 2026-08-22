@@ -40,11 +40,16 @@ func (s *Store) CreateSubmission(ctx context.Context, problemID, userID int64, l
 
 // CreateSubmissionFull 创建提交记录，支持指定比赛上下文。
 func (s *Store) CreateSubmissionFull(ctx context.Context, problemID, userID int64, language, code string, optimize bool, contestID *int64) (int64, error) {
+	return s.CreateSubmissionContext(ctx, problemID, userID, language, code, optimize, contestID, nil)
+}
+
+// CreateSubmissionContext 创建带比赛/作业上下文的提交记录。
+func (s *Store) CreateSubmissionContext(ctx context.Context, problemID, userID int64, language, code string, optimize bool, contestID, assignmentID *int64) (int64, error) {
 	var id int64
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO submissions (problem_id, user_id, language, code, optimize, contest_id)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		problemID, userID, language, code, optimize, contestID,
+		`INSERT INTO submissions (problem_id, user_id, language, code, optimize, contest_id, assignment_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		problemID, userID, language, code, optimize, contestID, assignmentID,
 	).Scan(&id)
 	return id, err
 }

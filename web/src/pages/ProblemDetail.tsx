@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   createSubmission,
   extractError,
   getLanguages,
+  getProblemLearning,
   getProblem,
+  toggleProblemFavorite,
+  createProblemDiscussion,
   getSubmissions,
   runTest,
   uploadTests,
 } from '../api'
 import ProblemStatement from '../components/ProblemStatement'
+import Markdown from '../components/Markdown'
 import ProblemWorkbench from '../components/ProblemWorkbench'
 import SubmissionPanel from '../components/SubmissionPanel'
+import DifficultyBadge from '../components/DifficultyBadge'
 import { useAuth } from '../context/AuthContext'
 import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
 import type { Language, ProblemDetail as ProblemDetailType, Sample } from '../types'
@@ -20,22 +25,25 @@ import { formatMemory, formatTimeLimit } from '../utils/format'
 
 type ViewMode = 'normal' | 'ide' | 'submissions'
 
-function difficultyInfo(d: number): { label: string; className: string } {
-  if (d <= 3) return { label: '简单', className: 'diff-easy' }
-  if (d <= 6) return { label: '中等', className: 'diff-medium' }
-  return { label: '困难', className: 'diff-hard' }
-}
-
 export default function ProblemDetail() {
   const { id } = useParams()
+  const [searchParams] = useSearchParams()
   const { user } = useAuth()
 
+  const assignmentIdParam = Number(searchParams.get('assignment_id') ?? '0')
+  const assignmentId = assignmentIdParam > 0 ? assignmentIdParam : undefined
+
   const [problem, setProblem] = useState<ProblemDetailType | null>(null)
+  const [favorite, setFavorite] = useState(false)
+  const [discussions, setDiscussions] = useState<import('../types').ProblemDiscussion[]>([])
+  const [editorial, setEditorial] = useState<import('../types').ProblemEditorial | null>(null)
+  const [discussionText, setDiscussionText] = useState('')
+  const [discussionError, setDiscussionError] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   const [languages, setLanguages] = useState<Language[]>([])
-  const draftScope = `problem:${id}:user:${user?.id ?? 'guest'}`
+  const draftScope = `${assignmentId ? `assignment:${assignmentId}:` : ''}problem:${id}:user:${user?.id ?? 'guest'}`
   const [language, setLanguage] = useState('')
   const { code, setCode, flushDraft } = useCodeDraft(draftScope, language)
   const [optimize, setOptimize] = useState(true)
@@ -73,6 +81,19 @@ export default function ProblemDetail() {
     return () => {
       cancelled = true
     }
+  }, [id])
+
+  useEffect(() => {
+    let cancelled = false
+    getProblemLearning(id!)
+      .then((data) => {
+        if (cancelled) return
+        setFavorite(data.favorite)
+        setDiscussions(data.discussions)
+        setEditorial(data.editorial ?? null)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
   }, [id])
 
   useEffect(() => {
@@ -121,7 +142,7 @@ export default function ProblemDetail() {
     setSubmittedId(null)
     try {
       flushDraft()
-      const res = await createSubmission(Number(id), language, code, optimize)
+      const res = await createSubmission(Number(id), language, code, optimize, assignmentId)
       setSubmittedId(res.id)
       setSubmissionRefreshKey((key) => key + 1)
       setMode('submissions')
@@ -136,6 +157,23 @@ export default function ProblemDetail() {
     (input: string) => runTest(Number(id), language, code, input, optimize),
     [code, id, language, optimize],
   )
+
+  const toggleFavorite = async () => {
+    if (!user) { setDiscussionError('请先登录后收藏题目'); return }
+    try { setFavorite(await toggleProblemFavorite(Number(id))) } catch (err) { setDiscussionError(extractError(err)) }
+  }
+
+  const postDiscussion = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!user) { setDiscussionError('请先登录后参与讨论'); return }
+    if (!discussionText.trim()) return
+    try {
+      const item = await createProblemDiscussion(Number(id), discussionText.trim())
+      setDiscussions((current) => [item, ...current])
+      setDiscussionText('')
+      setDiscussionError('')
+    } catch (err) { setDiscussionError(extractError(err)) }
+  }
 
   const runSampleFromDetail = (sample: Sample) => {
     setPendingSample(sample)
@@ -207,8 +245,6 @@ export default function ProblemDetail() {
   }
 
   const isAdmin = user?.role === 'admin'
-  const diff = difficultyInfo(problem.difficulty)
-
   /* ---------- IDE 工作台视图 ---------- */
   if (mode === 'ide' || mode === 'submissions') {
     return (
@@ -233,6 +269,7 @@ export default function ProblemDetail() {
           onInitialSampleConsumed={() => setPendingSample(null)}
           statementMeta={(
             <div className="workbench-meta-line">
+              <span><DifficultyBadge value={problem.difficulty} /></span>
               <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
               <span>内存限制 {formatMemory(problem.memory_limit_kb)}</span>
               <span>提交 {problem.submission_count}</span>
@@ -327,6 +364,7 @@ export default function ProblemDetail() {
             </Link>
           </div>
           <div className="overview-actions">
+            <button type="button" className="button button-secondary" onClick={() => void toggleFavorite()}>{favorite ? '已收藏' : '收藏题目'}</button>
             <button
               type="button"
               className="button button-primary"
@@ -338,11 +376,16 @@ export default function ProblemDetail() {
         </div>
       </div>
 
+      <section className={`problem-learning-grid${editorial ? '' : ' single-column'}`}>
+        {editorial && <div className="side-card problem-editorial-card"><div className="side-card-title">官方题解</div><Markdown>{editorial.content}</Markdown></div>}
+        <div className="side-card problem-discussion-card"><div className="side-card-title">题目讨论 <span className="muted">{discussions.length}</span></div><form className="discussion-form" onSubmit={postDiscussion}><textarea value={discussionText} onChange={(event) => setDiscussionText(event.target.value)} placeholder="分享思路、提问或补充说明…" rows={3} /><button className="button button-secondary" type="submit">发布讨论</button></form>{discussionError && <div className="error-message">{discussionError}</div>}<div className="discussion-list">{discussions.length === 0 ? <p className="muted">还没有讨论。</p> : discussions.map((item) => <article className="discussion-item" key={item.id}><div><strong>{item.username}</strong><time>{item.created_at.slice(0, 16).replace('T', ' ')}</time></div><p>{item.content}</p></article>)}</div></div>
+      </section>
+
       {/* 下方：左宽右窄两栏 */}
       <div className="problem-detail-grid">
         <div className="statement-card">
           <div className="statement-card-header">
-            <span className="statement-label">题目描述</span>
+            <span className="statement-label">题面</span>
             <div className="statement-actions">
               <button
                 type="button"
@@ -375,7 +418,7 @@ export default function ProblemDetail() {
             </div>
             <div className="side-row">
               <span className="side-label">难度</span>
-              <span className={`difficulty-badge ${diff.className}`}>{diff.label}</span>
+              <DifficultyBadge value={problem.difficulty} />
             </div>
             <div className="side-row">
               <span className="side-label">标签</span>
@@ -397,20 +440,6 @@ export default function ProblemDetail() {
             </div>
           </div>
 
-          <div className="side-card">
-            <div className="side-card-title">标签</div>
-            <div className="side-row">
-              <span className="tag-list">
-                {problem.tags.length > 0
-                  ? problem.tags.map((t) => (
-                      <span key={t} className="tag-chip">
-                        {t}
-                      </span>
-                    ))
-                  : '暂无标签'}
-              </span>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -87,6 +87,10 @@ func (a *API) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "用户不存在")
 			return
 		}
+		if u.Disabled {
+			writeError(w, http.StatusForbidden, "账号已被禁用，请联系管理员")
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxUserKey, u)))
 	})
 }
@@ -97,7 +101,7 @@ func (a *API) optionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token, ok := bearerToken(r); ok {
 			if userID, _, err := auth.ParseToken(a.cfg.JWTSecret, token); err == nil {
-				if u, err := a.store.GetUserByID(r.Context(), userID); err == nil {
+				if u, err := a.store.GetUserByID(r.Context(), userID); err == nil && !u.Disabled {
 					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxUserKey, u)))
 					return
 				}
@@ -113,6 +117,18 @@ func (a *API) requireAdmin(next http.Handler) http.Handler {
 		u, ok := userFromCtx(r.Context())
 		if !ok || u.Role != model.RoleAdmin {
 			writeError(w, http.StatusForbidden, "需要管理员权限")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireStaff 要求教师或管理员角色。
+func (a *API) requireStaff(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u, ok := userFromCtx(r.Context())
+		if !ok || !model.IsStaff(u.Role) {
+			writeError(w, http.StatusForbidden, "需要教师或管理员权限")
 			return
 		}
 		next.ServeHTTP(w, r)

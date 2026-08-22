@@ -2,11 +2,15 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  deleteContest, extractError, getContest, getContestOverview, registerContest, uploadContestAvatar,
+  askContestQuestion, deleteContest, extractError, getContest, getContestCommunications, getContestOverview,
+  uploadContestAvatar,
 } from '../api'
 import Markdown from '../components/Markdown'
 import { useAuth } from '../context/AuthContext'
-import type { ContestDetail as ContestDetailData, ContestOverview, MyTeam, OverviewProblem } from '../types'
+import type {
+  ContestCommunications, ContestDetail as ContestDetailData, ContestOverview,
+  MyTeam, OverviewProblem,
+} from '../types'
 import { formatRemaining, useClock } from '../utils/clock'
 import {
   contestFeedbackLabel, contestModeLabel, contestPhase, phaseClass, phaseLabel, teamAvatarUrl,
@@ -56,72 +60,6 @@ function TeamAvatar({ contestId, teamId, avatar, size }: {
   const cls = size === 'lg' ? 'avatar-lg' : 'avatar-sm'
   if (!url) return <span className={`${cls} avatar-fallback`}>?</span>
   return <img src={url} alt="" className={cls} />
-}
-
-// ---------- 报名 ----------
-
-function RegisterPanel({ contestId, defaultName, onRegistered }: {
-  contestId: number; defaultName: string; onRegistered: () => void
-}) {
-  const [teamName, setTeamName] = useState(defaultName)
-  const [avatarFile, setAvatarFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  const submit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!teamName.trim()) {
-      setError('请填写队伍名')
-      return
-    }
-    setBusy(true)
-    setError('')
-    try {
-      await registerContest(contestId, teamName.trim())
-      if (avatarFile) {
-        try {
-          await uploadContestAvatar(contestId, avatarFile)
-        } catch {
-          window.alert('报名成功，但头像上传失败，可在总览中重新上传')
-        }
-      }
-      onRegistered()
-    } catch (err) {
-      setError(extractError(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="card">
-      <form className="register-form" onSubmit={submit}>
-        <AvatarPicker
-          preview={preview}
-          onPick={(f) => {
-            setAvatarFile(f)
-            setPreview(URL.createObjectURL(f))
-          }}
-        />
-        <div className="form-group">
-          <label htmlFor="team-name">队伍名</label>
-          <input
-            id="team-name"
-            type="text"
-            value={teamName}
-            maxLength={64}
-            onChange={(e) => setTeamName(e.target.value)}
-            placeholder="你的队伍名（将显示在排行榜上）"
-          />
-        </div>
-        {error && <div className="error-message">{error}</div>}
-        <button type="submit" className="button button-primary" disabled={busy}>
-          {busy ? '报名中…' : '报名'}
-        </button>
-      </form>
-    </div>
-  )
 }
 
 // ---------- 队伍信息（已报名） ----------
@@ -187,6 +125,136 @@ function acceptRate(attempted: number, accepted: number): string {
   return `${Math.round((accepted / attempted) * 100)}%`
 }
 
+function ContestCommunications({ contestId }: { contestId: number }) {
+  const { user } = useAuth()
+  const [data, setData] = useState<ContestCommunications | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [questionContent, setQuestionContent] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const result = await getContestCommunications(contestId)
+      setData(result)
+      setError('')
+    } catch (err) {
+      setError(extractError(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [contestId])
+
+  useEffect(() => {
+    void load()
+    const timer = window.setInterval(() => void load(), 3000)
+    return () => window.clearInterval(timer)
+  }, [load])
+
+  useEffect(() => {
+    if (!data || window.location.hash !== '#contest-communications') return
+    const timer = window.setTimeout(() => {
+      document.getElementById('contest-communications')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [data])
+
+  const submitQuestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!questionContent.trim()) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await askContestQuestion(contestId, questionContent.trim())
+      setQuestionContent('')
+      setNotice('问题已提交，等待出题组回答。')
+      await load()
+    } catch (err) {
+      setError(extractError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (loading && !data) return <div className="page-loading communication-loading">通信区加载中…</div>
+  if (error && !data) return <div className="error-message">{error}</div>
+  if (!data) return null
+
+  return (
+    <section id="contest-communications" className="contest-communications">
+      {error && <div className="error-message">{error}</div>}
+      {notice && <div className="success-message">{notice}</div>}
+      <div className="communications-grid">
+        <section className="card communication-panel">
+          <div className="section-header">
+            <div>
+              <h2>出题组广播</h2>
+              <p className="muted">比赛通知、数据勘误和统一说明会显示在这里。</p>
+            </div>
+          </div>
+          <div className="announcement-list">
+            {data.announcements.length === 0 ? <p className="muted">暂无广播</p> : data.announcements.map((item) => (
+              <article className="announcement-item" key={item.id}>
+                <div className="announcement-item-head">
+                  <strong>{item.title || '出题组广播'}</strong>
+                  <time>{formatTime(item.created_at)}</time>
+                </div>
+                <Markdown>{item.content}</Markdown>
+                {item.pinned && <span className="announcement-pinned">置顶</span>}
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="card communication-panel">
+          <div className="section-header">
+            <div>
+              <h2>题目答疑</h2>
+              <p className="muted">你的问题和出题组公开的回答会显示在这里。</p>
+            </div>
+          </div>
+          <form className="communication-form" onSubmit={(event) => void submitQuestion(event)}>
+            <textarea
+              value={questionContent}
+              maxLength={16 * 1024}
+              onChange={(event) => setQuestionContent(event.target.value)}
+              placeholder="描述你遇到的题意、样例或评测疑问"
+              rows={4}
+            />
+            <div className="communication-form-actions">
+              <span className="muted">提交后由出题组回答</span>
+              <button type="submit" className="button button-primary" disabled={busy || !questionContent.trim()}>提交问题</button>
+            </div>
+          </form>
+          <div className="question-list qa-thread-list">
+            {data.questions.length === 0 ? <p className="muted">暂无答疑记录</p> : data.questions.map((question) => (
+              <article className="qa-thread" key={question.id}>
+                <div className="qa-message qa-message-user">
+                  <div className="qa-message-meta">
+                    <strong>{question.asker_id === user?.id ? '我' : '公开问题'}</strong>
+                    <time>{formatTime(question.asked_at)}</time>
+                  </div>
+                  <div className="qa-bubble">{question.content}</div>
+                </div>
+                <div className="qa-message qa-message-admin">
+                  <div className="qa-message-meta">
+                    <strong>出题组</strong>
+                    <span>{question.answer ? '已回复' : '等待回答'}</span>
+                  </div>
+                  {question.answer && <div className="qa-bubble qa-answer-bubble"><p>{question.answer}</p></div>}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    </section>
+  )
+}
+
 function ContestOverviewContent({ contestId, isAdmin }: { contestId: number; isAdmin: boolean }) {
   const [overview, setOverview] = useState<ContestOverview | null>(null)
   const [error, setError] = useState('')
@@ -230,6 +298,15 @@ function ContestOverviewContent({ contestId, isAdmin }: { contestId: number; isA
             <span className="contest-countdown danger">剩余 {formatRemaining(remainingMs)}</span>
           )}
           {phase === 'ended' && <span className="muted">已结束</span>}
+          {problems.some((problem) => problem.my_status === 'passed') && (
+            <div className="contest-solved-dots" aria-label="已通过题目">
+              {problems.filter((problem) => problem.my_status === 'passed').map((problem) => (
+                <span key={problem.problem_id} className={`contest-solved-dot dot-${problem.theme_color || 'blue'}`} title={`${problem.display_id} 已通过`}>
+                  {problem.display_id}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="contest-progress">
           <div className="contest-progress-fill" style={{ width: `${progress}%` }} />
@@ -249,7 +326,7 @@ function ContestOverviewContent({ contestId, isAdmin }: { contestId: number; isA
         {isAdmin && (
           <>
             <Link className="contest-nav-item" to={`/contest/${contestId}/edit`}>比赛设置</Link>
-            <Link className="contest-nav-item" to={`/contest/${contestId}/problems`}>题目管理</Link>
+            <Link className="contest-nav-item" to={`/contest/${contestId}/messages`}>消息管理</Link>
           </>
         )}
       </div>
@@ -330,6 +407,7 @@ function ContestOverviewContent({ contestId, isAdmin }: { contestId: number; isA
           </div>
         </aside>
       </div>
+      {!isAdmin && <ContestCommunications contestId={contestId} />}
     </div>
   )
 }
@@ -371,6 +449,14 @@ export default function ContestDetail() {
     }
   }, [contestId])
 
+  useEffect(() => {
+    if (loading || !data || window.location.hash !== '#contest-communications') return
+    const timer = window.setTimeout(() => {
+      document.getElementById('contest-communications')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [data, loading])
+
   if (loading) return <div className="page-loading">加载中…</div>
   if (error) return <div className="error-message">{error}</div>
   if (!data) return <div className="error-message">比赛不存在</div>
@@ -381,6 +467,7 @@ export default function ContestDetail() {
 
   return (
     <div className="contest-page">
+      {contest.cover_image && <img className="contest-cover-image" src={`${window.location.origin}/api/contests/${contest.id}/cover`} alt="比赛封面" />}
       <div className="page-header">
         <h1 className="page-title">{contest.title}</h1>
         <div className="contest-badges">
@@ -389,6 +476,8 @@ export default function ContestDetail() {
         </div>
         {isAdmin && (
           <div className="contest-admin-actions">
+            <Link to={`/contest/${contest.id}/messages`} className="button button-secondary">消息管理</Link>
+            <Link to={`/contest/${contest.id}/participants`} className="button button-secondary">参赛者</Link>
             <Link to={`/contest/${contest.id}/edit`} className="button button-secondary">编辑</Link>
             <button
               type="button"
@@ -407,6 +496,7 @@ export default function ContestDetail() {
             </button>
           </div>
         )}
+        {!isAdmin && user && <Link to={`/contest/${contest.id}/register`} className="button button-secondary">{registered ? '队伍报名' : '报名参赛'}</Link>}
       </div>
 
       {registered || isAdmin ? (
@@ -414,7 +504,7 @@ export default function ContestDetail() {
           {registered && user && (
             <TeamPanel
               contestId={contest.id}
-              teamId={user.id}
+              teamId={data.my_team?.team_id ?? user.id}
               team={data.my_team ?? { team_name: user.username, avatar: '' }}
               onChanged={reload}
             />
@@ -448,13 +538,7 @@ export default function ContestDetail() {
           )}
           <section className="contest-section">
             <div className="section-header"><h2>报名参赛</h2></div>
-            {!user ? (
-              <div className="card notice-card">
-                请先 <Link to="/login">登录</Link> 后再报名参赛。
-              </div>
-            ) : (
-              <RegisterPanel contestId={contest.id} defaultName={user.username} onRegistered={reload} />
-            )}
+            {!user ? <div className="card notice-card">请先 <Link to="/login">登录</Link> 后再报名参赛。</div> : <div className="card notice-card"><p>报名、队伍成员和头像设置已集中到独立报名页。</p><Link className="button button-primary" to={`/contest/${contest.id}/register`}>进入报名页</Link></div>}
           </section>
         </>
       )}

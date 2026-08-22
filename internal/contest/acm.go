@@ -25,7 +25,10 @@ type ContestContext struct {
 type ACMProblemState struct {
 	Solved         bool
 	FailedAttempts int
-	SolvedAt       time.Time
+	// LastStatus 保存该题最近一次已完成评测的最终状态。
+	// 它只影响榜单展示，不改变 ACM 的解题数和罚时规则。
+	LastStatus string
+	SolvedAt   time.Time
 }
 
 // ACMStanding ACM 赛制下一条队伍排行。
@@ -54,6 +57,7 @@ func ProcessACM(standing *ACMStanding, sub model.Submission, start time.Time, pe
 	if ps.Solved {
 		return false // 已解决，后续提交不影响榜单
 	}
+	ps.LastStatus = sub.Status
 	if sub.Status == model.StatusAccepted {
 		ps.Solved = true
 		ps.SolvedAt = sub.CreatedAt
@@ -72,7 +76,8 @@ func ProcessACM(standing *ACMStanding, sub model.Submission, start time.Time, pe
 		ps.FailedAttempts++
 		return true
 	}
-	return false
+	// CE 不计入 ACM 错误次数，但仍要让榜单显示最新的编译结果。
+	return true
 }
 
 // newACMStanding 创建队伍的空榜单条目。

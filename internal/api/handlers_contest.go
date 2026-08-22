@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,10 +33,14 @@ type contestPayload struct {
 	StartTime             time.Time  `json:"start_time"`
 	EndTime               time.Time  `json:"end_time"`
 	Description           string     `json:"description"`
+	CoverImage            string     `json:"cover_image"`
 	Visibility            string     `json:"visibility"`
 	RegStartTime          *time.Time `json:"reg_start_time"`
 	RegEndTime            *time.Time `json:"reg_end_time"`
 	SubmissionLimit       int        `json:"submission_limit"`
+	RegistrationMode      string     `json:"registration_mode"`
+	MaxTeamSize           int        `json:"max_team_size"`
+	AllowTeamEdit         bool       `json:"allow_team_edit"`
 }
 
 func validateContestPayload(p *contestPayload) string {
@@ -84,6 +89,23 @@ func validateContestPayload(p *contestPayload) string {
 	if p.SubmissionLimit < 0 || p.SubmissionLimit > 1000 {
 		return "默认提交上限需在 0-1000 之间（0 = 不限）"
 	}
+	if p.RegistrationMode == "" {
+		p.RegistrationMode = model.ContestRegistrationBoth
+	}
+	switch p.RegistrationMode {
+	case model.ContestRegistrationIndividual, model.ContestRegistrationTeam, model.ContestRegistrationBoth:
+	default:
+		return "无效的报名方式（individual/team/both）"
+	}
+	if p.MaxTeamSize == 0 {
+		p.MaxTeamSize = 1
+	}
+	if p.RegistrationMode == model.ContestRegistrationIndividual {
+		p.MaxTeamSize = 1
+	}
+	if p.MaxTeamSize < 1 || p.MaxTeamSize > 20 {
+		return "队伍人数上限需在 1-20 之间"
+	}
 	return ""
 }
 
@@ -103,10 +125,14 @@ func payloadToContest(p *contestPayload) model.Contest {
 		StartTime:             p.StartTime,
 		EndTime:               p.EndTime,
 		Description:           p.Description,
+		CoverImage:            p.CoverImage,
 		Visibility:            vis,
 		RegStartTime:          p.RegStartTime,
 		RegEndTime:            p.RegEndTime,
 		SubmissionLimit:       p.SubmissionLimit,
+		RegistrationMode:      p.RegistrationMode,
+		MaxTeamSize:           p.MaxTeamSize,
+		AllowTeamEdit:         p.AllowTeamEdit,
 	}
 	if c.RankKeys == nil {
 		c.RankKeys = []string{}
@@ -208,7 +234,8 @@ type contestProblemDTO struct {
 	// TotalScore 题目 manifest 的有效总分（用于 ACM 榜单显示，不改变 Score 覆盖语义）。
 	TotalScore int `json:"total_score"`
 	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
-	SubmissionLimit *int `json:"submission_limit"`
+	SubmissionLimit *int   `json:"submission_limit"`
+	ThemeColor      string `json:"theme_color"`
 }
 
 func (a *API) contestProblemsDTO(ctx context.Context, contestID int64) ([]contestProblemDTO, error) {
@@ -221,6 +248,7 @@ func (a *API) contestProblemsDTO(ctx context.Context, contestID int64) ([]contes
 		dto := contestProblemDTO{
 			ProblemID: cp.ProblemID, DisplayID: cp.DisplayID, SortOrder: cp.SortOrder,
 			Score: cp.Score, SubmissionLimit: cp.SubmissionLimit,
+			ThemeColor: contestProblemThemeColor(cp.ThemeColor, cp.SortOrder),
 		}
 		if p, err := a.store.GetProblem(ctx, cp.ProblemID); err == nil {
 			dto.Title = p.Title
@@ -288,7 +316,18 @@ func (a *API) handleGetContest(w http.ResponseWriter, r *http.Request) {
 		resp["is_admin"] = u.Role == model.RoleAdmin
 		if registered {
 			if t, err := a.store.GetContestTeam(r.Context(), id, u.ID); err == nil {
-				resp["my_team"] = map[string]any{"team_name": t.TeamName, "avatar": t.Avatar}
+				members, _ := a.store.ListContestTeamMembers(r.Context(), id, t.TeamID)
+				isCaptain := t.TeamID == u.ID
+				for _, member := range members {
+					if member.UserID == u.ID {
+						isCaptain = member.IsCaptain
+						break
+					}
+				}
+				resp["my_team"] = map[string]any{
+					"team_id": t.TeamID, "team_name": t.TeamName, "avatar": t.Avatar,
+					"members": members, "is_captain": isCaptain,
+				}
 			}
 		}
 	}
@@ -305,7 +344,8 @@ type contestProblemPayload struct {
 	// Score 单题分值覆盖（NULL = 用题目 manifest 总分）
 	Score *int `json:"score"`
 	// SubmissionLimit 单题提交上限覆盖（NULL = 继承比赛默认，0 = 不限）
-	SubmissionLimit *int `json:"submission_limit"`
+	SubmissionLimit *int   `json:"submission_limit"`
+	ThemeColor      string `json:"theme_color"`
 }
 
 // validateContestProblemPayload 校验比赛题目字段。
@@ -316,13 +356,35 @@ func validateContestProblemPayload(p *contestProblemPayload) string {
 	if len([]rune(p.DisplayID)) > 32 {
 		return "题号最长 32 字符"
 	}
-	if p.Score != nil && (*p.Score < 0 || *p.Score > 100) {
-		return "单题分值需在 0-100 之间"
+	if p.Score != nil && *p.Score < 0 {
+		return "单题分值不能为负数"
 	}
 	if p.SubmissionLimit != nil && (*p.SubmissionLimit < 0 || *p.SubmissionLimit > 1000) {
 		return "单题提交上限需在 0-1000 之间（0 = 不限）"
 	}
+	if p.ThemeColor != "" {
+		valid := false
+		for _, color := range model.ContestThemeColors {
+			if p.ThemeColor == color {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return "无效的题目主题色"
+		}
+	}
 	return ""
+}
+
+func contestProblemThemeColor(color string, sortOrder int) string {
+	if color != "" {
+		return color
+	}
+	if sortOrder < 1 {
+		sortOrder = 1
+	}
+	return model.ContestThemeColors[(sortOrder-1)%len(model.ContestThemeColors)]
 }
 
 func (a *API) handleAddContestProblem(w http.ResponseWriter, r *http.Request) {
@@ -350,6 +412,7 @@ func (a *API) handleAddContestProblem(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.AddContestProblem(r.Context(), model.ContestProblem{
 		ContestID: cid, ProblemID: req.ProblemID, DisplayID: strings.TrimSpace(req.DisplayID),
 		SortOrder: req.SortOrder, Score: req.Score, SubmissionLimit: req.SubmissionLimit,
+		ThemeColor: contestProblemThemeColor(req.ThemeColor, req.SortOrder),
 	}); err != nil {
 		slogError(r, "添加比赛题目", err)
 		writeError(w, http.StatusInternalServerError, "操作失败")
@@ -381,6 +444,7 @@ func (a *API) handleUpdateContestProblem(w http.ResponseWriter, r *http.Request)
 	if err := a.store.UpdateContestProblem(r.Context(), model.ContestProblem{
 		ContestID: cid, ProblemID: pid, DisplayID: strings.TrimSpace(req.DisplayID),
 		Score: req.Score, SubmissionLimit: req.SubmissionLimit,
+		ThemeColor: contestProblemThemeColor(req.ThemeColor, req.SortOrder),
 	}); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "该题目不属于本场比赛")
@@ -466,8 +530,14 @@ func (a *API) handleRegisterContest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
 		return
 	}
-	if _, err := a.store.GetContest(r.Context(), cid); err != nil {
+	c, err := a.store.GetContest(r.Context(), cid)
+	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "比赛不存在")
+		return
+	}
+	if err != nil {
+		slogError(r, "查询比赛报名", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
 		return
 	}
 	var req struct {
@@ -476,18 +546,26 @@ func (a *API) handleRegisterContest(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if len(req.TeamName) == 0 || len(req.TeamName) > 64 {
-		writeError(w, http.StatusBadRequest, "队伍名长度需在 1-64 字符之间")
+	if strings.TrimSpace(req.TeamName) == "" {
+		req.TeamName = u.Username
+	}
+	if len(req.TeamName) > 64 {
+		writeError(w, http.StatusBadRequest, "名称长度不能超过 64 字符")
 		return
 	}
 	// 报名时间窗校验（默认随比赛时间窗）
-	c, err := a.store.GetContest(r.Context(), cid)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "比赛不存在")
-		return
-	}
 	if msg := contestRegWindowError(c, time.Now()); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	registered, err := a.store.IsContestTeam(r.Context(), cid, u.ID)
+	if err != nil {
+		slogError(r, "检查比赛报名", err)
+		writeError(w, http.StatusInternalServerError, "报名失败")
+		return
+	}
+	if registered {
+		writeError(w, http.StatusConflict, "你已经报名本场比赛")
 		return
 	}
 	if err := a.store.AddContestTeam(r.Context(), model.ContestTeam{
@@ -503,6 +581,7 @@ func (a *API) handleRegisterContest(w http.ResponseWriter, r *http.Request) {
 // ---------- 队伍头像 ----------
 
 const maxAvatarBytes = 2 << 20 // 头像上限 2MB
+const maxContestCoverBytes = 8 << 20
 
 var avatarExtByType = map[string]string{
 	"image/jpeg": "jpg",
@@ -521,6 +600,11 @@ func (a *API) handleUploadContestAvatar(w http.ResponseWriter, r *http.Request) 
 	}
 	registered, err := a.store.IsContestTeam(r.Context(), cid, u.ID)
 	if err != nil || !registered {
+		writeError(w, http.StatusForbidden, "请先报名参加该比赛")
+		return
+	}
+	team, err := a.store.GetContestTeam(r.Context(), cid, u.ID)
+	if err != nil {
 		writeError(w, http.StatusForbidden, "请先报名参加该比赛")
 		return
 	}
@@ -552,7 +636,7 @@ func (a *API) handleUploadContestAvatar(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	// 时间戳文件名：重复上传不会命中旧缓存，旧文件随后删除
-	filename := fmt.Sprintf("avatars/c%d_t%d_%d.%s", cid, u.ID, time.Now().Unix(), ext)
+	filename := fmt.Sprintf("avatars/c%d_t%d_%d.%s", cid, team.TeamID, time.Now().Unix(), ext)
 	if err := os.MkdirAll(filepath.Join(a.cfg.DataDir, "avatars"), 0o755); err != nil {
 		slogError(r, "创建头像目录", err)
 		writeError(w, http.StatusInternalServerError, "保存失败")
@@ -563,10 +647,10 @@ func (a *API) handleUploadContestAvatar(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "保存失败")
 		return
 	}
-	if old, err := a.store.GetContestTeam(r.Context(), cid, u.ID); err == nil && old.Avatar != "" && old.Avatar != filename {
+	if old, err := a.store.GetContestTeam(r.Context(), cid, team.TeamID); err == nil && old.Avatar != "" && old.Avatar != filename {
 		_ = os.Remove(filepath.Join(a.cfg.DataDir, old.Avatar))
 	}
-	if err := a.store.UpdateContestTeamAvatar(r.Context(), cid, u.ID, filename); err != nil {
+	if err := a.store.UpdateContestTeamAvatar(r.Context(), cid, team.TeamID, filename); err != nil {
 		slogError(r, "更新头像记录", err)
 		writeError(w, http.StatusInternalServerError, "保存失败")
 		return
@@ -604,6 +688,84 @@ func (a *API) handleServeContestAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", http.DetectContentType(b))
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(b)
+}
+
+// handleUploadContestCover 上传比赛封面。封面只保存图片文件，不接受 SVG。
+func (a *API) handleUploadContestCover(w http.ResponseWriter, r *http.Request) {
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	if _, err := a.store.GetContest(r.Context(), cid); err != nil {
+		writeError(w, http.StatusNotFound, "比赛不存在")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxContestCoverBytes+1<<20)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "解析上传内容失败")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "缺少文件字段 file")
+		return
+	}
+	defer file.Close()
+	b, err := io.ReadAll(io.LimitReader(file, maxContestCoverBytes+1))
+	if err != nil || len(b) > maxContestCoverBytes {
+		writeError(w, http.StatusBadRequest, "封面不能超过 8MB")
+		return
+	}
+	ext, ok := avatarExtByType[http.DetectContentType(b)]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "封面仅支持 JPG/PNG/GIF/WebP 图片")
+		return
+	}
+	filename := fmt.Sprintf("contest-covers/c%d_%d.%s", cid, time.Now().UnixNano(), ext)
+	if err := os.MkdirAll(filepath.Join(a.cfg.DataDir, "contest-covers"), 0o755); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(a.cfg.DataDir, filename), b, 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	if old, err := a.store.GetContest(r.Context(), cid); err == nil && old.CoverImage != "" {
+		_ = os.Remove(filepath.Join(a.cfg.DataDir, old.CoverImage))
+	}
+	if err := a.store.UpdateContestCoverImage(r.Context(), cid, filename); err != nil {
+		_ = os.Remove(filepath.Join(a.cfg.DataDir, filename))
+		writeError(w, http.StatusInternalServerError, "保存失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"cover_image": filename})
+}
+
+func (a *API) handleServeContestCover(w http.ResponseWriter, r *http.Request) {
+	cid, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的比赛 ID")
+		return
+	}
+	c, err := a.store.GetContest(r.Context(), cid)
+	if err != nil || c.CoverImage == "" {
+		writeError(w, http.StatusNotFound, "封面不存在")
+		return
+	}
+	dir, base := path.Split(c.CoverImage)
+	if dir != "contest-covers/" || base == "" || base == "." || base == ".." {
+		writeError(w, http.StatusNotFound, "封面不存在")
+		return
+	}
+	b, err := os.ReadFile(filepath.Join(a.cfg.DataDir, c.CoverImage))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "封面不存在")
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(b))
+	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_, _ = w.Write(b)
 }
 
@@ -820,18 +982,34 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "查询失败")
 		return
 	}
+	// 数据库中的演示数据可能预先写入未来时间的提交。排行榜只应使用
+	// 当前时刻已经发生的提交，避免阶段控制脚本把未来事件提前暴露。
+	visibleSubs := subs[:0]
+	now := time.Now()
+	for _, sub := range subs {
+		if sub.CreatedAt.After(now) {
+			continue
+		}
+		visibleSubs = append(visibleSubs, sub)
+	}
+	subs = visibleSubs
 
 	resp := map[string]any{
 		"contest":  c,
 		"problems": problems,
 		"mode":     c.Mode,
 	}
+	// 趣味统计只在比赛结束后向参赛者公开；管理员可在比赛进行中预览。
+	// 统计使用全部提交，因此包含封榜期间的提交。
+	if c.Mode == model.ContestModeACM && (isAdmin || !time.Now().Before(c.EndTime)) {
+		resp["fun_stats"] = buildContestFunStats(subs, problems, cctx.Teams, c.StartTime)
+	}
 
 	switch c.Mode {
 	case model.ContestModeACM:
 		fa := freezeAt(c)
-		now := time.Now()
-		frozenActive := !fa.IsZero() && now.After(fa)
+		// 用 >= 处理精确封榜时刻：到达 freeze_at 的这一秒就进入封榜。
+		frozenActive := !fa.IsZero() && !now.Before(fa)
 		fb := time.Time{}
 		if frozenActive {
 			fb = fa
@@ -943,6 +1121,191 @@ type rollEventDTO struct {
 	Standings    []acmStandingDTO `json:"standings"`
 }
 
+// contestFunEntryDTO 是动态揭晓结束后展示的一条趣味排名记录。
+// DisplayIDs 用于表达同一队伍在并列或多次一血时涉及的题目。
+type contestFunEntryDTO struct {
+	TeamID         int64     `json:"team_id"`
+	TeamName       string    `json:"team_name"`
+	Count          int       `json:"count,omitempty"`
+	DisplayIDs     []string  `json:"display_ids,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitempty"`
+	ElapsedSeconds int       `json:"elapsed_seconds,omitempty"`
+}
+
+type contestFunStatsDTO struct {
+	FastestFirstBlood []contestFunEntryDTO `json:"fastest_first_blood"`
+	MostFirstBlood    []contestFunEntryDTO `json:"most_first_blood"`
+	MostWrongAnswers  []contestFunEntryDTO `json:"most_wrong_answers"`
+	LastAccepted      []contestFunEntryDTO `json:"last_accepted"`
+}
+
+type firstBloodRecord struct {
+	At      time.Time
+	TeamIDs map[int64]struct{}
+}
+
+// buildContestFunStats 计算动态揭晓页使用的趣味排名。
+// 提交列表已经按 ID/创建顺序返回；这里仍以 created_at 比较时间，保证重放数据
+// 或导入数据的顺序变化不会影响一血和最后一发的定义。
+func buildContestFunStats(subs []model.Submission, problems []contestProblemDTO, teams map[int64]string, start time.Time) contestFunStatsDTO {
+	displayIDs := make(map[int64]string, len(problems))
+	problemOrder := make(map[string]int, len(problems))
+	for i, p := range problems {
+		displayIDs[p.ProblemID] = p.DisplayID
+		problemOrder[p.DisplayID] = i
+	}
+
+	firstByProblem := make(map[int64]firstBloodRecord)
+	waCounts := make(map[int64]int)
+	var lastAcceptedAt time.Time
+
+	for _, sub := range subs {
+		if _, ok := teams[sub.UserID]; !ok {
+			continue
+		}
+		switch sub.Status {
+		case model.StatusWrongAnswer:
+			waCounts[sub.UserID]++
+		case model.StatusAccepted:
+			record, ok := firstByProblem[sub.ProblemID]
+			if !ok || sub.CreatedAt.Before(record.At) {
+				firstByProblem[sub.ProblemID] = firstBloodRecord{
+					At:      sub.CreatedAt,
+					TeamIDs: map[int64]struct{}{sub.UserID: {}},
+				}
+			} else if sub.CreatedAt.Equal(record.At) {
+				record.TeamIDs[sub.UserID] = struct{}{}
+				firstByProblem[sub.ProblemID] = record
+			}
+			if sub.CreatedAt.After(lastAcceptedAt) {
+				lastAcceptedAt = sub.CreatedAt
+			}
+		}
+	}
+
+	firstBloodCounts := make(map[int64]int)
+	firstBloodProblems := make(map[int64][]string)
+	fastestAt := time.Time{}
+	fastest := make(map[int64][]string)
+	for problemID, record := range firstByProblem {
+		if record.At.IsZero() {
+			continue
+		}
+		displayID := displayIDs[problemID]
+		for teamID := range record.TeamIDs {
+			firstBloodCounts[teamID]++
+			firstBloodProblems[teamID] = append(firstBloodProblems[teamID], displayID)
+		}
+		if fastestAt.IsZero() || record.At.Before(fastestAt) {
+			fastestAt = record.At
+			fastest = make(map[int64][]string)
+		}
+		if record.At.Equal(fastestAt) {
+			for teamID := range record.TeamIDs {
+				fastest[teamID] = append(fastest[teamID], displayID)
+			}
+		}
+	}
+
+	stats := contestFunStatsDTO{
+		FastestFirstBlood: make([]contestFunEntryDTO, 0, len(fastest)),
+		MostFirstBlood:    make([]contestFunEntryDTO, 0),
+		MostWrongAnswers:  make([]contestFunEntryDTO, 0),
+		LastAccepted:      make([]contestFunEntryDTO, 0),
+	}
+	for teamID, ids := range fastest {
+		stats.FastestFirstBlood = append(stats.FastestFirstBlood, contestFunEntryDTO{
+			TeamID: teamID, TeamName: teams[teamID], DisplayIDs: sortDisplayIDs(ids, problemOrder),
+			CreatedAt: fastestAt, ElapsedSeconds: elapsedSeconds(fastestAt, start),
+		})
+	}
+
+	maxFirstBlood := 0
+	for _, count := range firstBloodCounts {
+		if count > maxFirstBlood {
+			maxFirstBlood = count
+		}
+	}
+	for teamID, count := range firstBloodCounts {
+		if count == maxFirstBlood && count > 0 {
+			stats.MostFirstBlood = append(stats.MostFirstBlood, contestFunEntryDTO{
+				TeamID: teamID, TeamName: teams[teamID], Count: count,
+				DisplayIDs: sortDisplayIDs(firstBloodProblems[teamID], problemOrder),
+			})
+		}
+	}
+
+	maxWA := 0
+	for _, count := range waCounts {
+		if count > maxWA {
+			maxWA = count
+		}
+	}
+	for teamID, count := range waCounts {
+		if count == maxWA && count > 0 {
+			stats.MostWrongAnswers = append(stats.MostWrongAnswers, contestFunEntryDTO{
+				TeamID: teamID, TeamName: teams[teamID], Count: count,
+			})
+		}
+	}
+
+	if !lastAcceptedAt.IsZero() {
+		lastAccepted := make(map[int64][]string)
+		for _, sub := range subs {
+			if sub.Status == model.StatusAccepted && sub.CreatedAt.Equal(lastAcceptedAt) {
+				if _, ok := teams[sub.UserID]; ok {
+					lastAccepted[sub.UserID] = append(lastAccepted[sub.UserID], displayIDs[sub.ProblemID])
+				}
+			}
+		}
+		for teamID, ids := range lastAccepted {
+			stats.LastAccepted = append(stats.LastAccepted, contestFunEntryDTO{
+				TeamID: teamID, TeamName: teams[teamID], DisplayIDs: sortDisplayIDs(ids, problemOrder),
+				CreatedAt: lastAcceptedAt, ElapsedSeconds: elapsedSeconds(lastAcceptedAt, start),
+			})
+		}
+	}
+
+	sortFunEntries(stats.FastestFirstBlood)
+	sortFunEntries(stats.MostFirstBlood)
+	sortFunEntries(stats.MostWrongAnswers)
+	sortFunEntries(stats.LastAccepted)
+	return stats
+}
+
+func elapsedSeconds(at, start time.Time) int {
+	if at.IsZero() || start.IsZero() {
+		return 0
+	}
+	seconds := int(at.Sub(start).Seconds())
+	if seconds < 0 {
+		return 0
+	}
+	return seconds
+}
+
+func sortDisplayIDs(ids []string, order map[string]int) []string {
+	result := append([]string(nil), ids...)
+	sort.SliceStable(result, func(i, j int) bool {
+		left, lok := order[result[i]]
+		right, rok := order[result[j]]
+		if lok && rok && left != right {
+			return left < right
+		}
+		return result[i] < result[j]
+	})
+	return result
+}
+
+func sortFunEntries(entries []contestFunEntryDTO) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].TeamID != entries[j].TeamID {
+			return entries[i].TeamID < entries[j].TeamID
+		}
+		return entries[i].TeamName < entries[j].TeamName
+	})
+}
+
 // rollEventDTOs 将榜单引擎事件转换为统一榜单页面使用的轻量 DTO。
 func rollEventDTOs(events []contest.RollEvent, problems []contestProblemDTO, avatars map[int64]string) []rollEventDTO {
 	dtos := make([]rollEventDTO, 0, len(events))
@@ -967,6 +1330,7 @@ func rollEventDTOs(events []contest.RollEvent, problems []contestProblemDTO, ava
 type acmProblemDTO struct {
 	Solved         bool   `json:"solved"`
 	FailedAttempts int    `json:"failed_attempts"`
+	LastStatus     string `json:"last_status,omitempty"`
 	SolvedAt       string `json:"solved_at,omitempty"`
 	// FirstBlood 该题一血（全场最早通过）
 	FirstBlood bool `json:"first_blood"`
@@ -1037,7 +1401,7 @@ func acmStandingsDTO(standings []contest.ACMStanding, problems []contestProblemD
 			if key == "" {
 				key = strconv.FormatInt(pid, 10)
 			}
-			item := acmProblemDTO{Solved: ps.Solved, FailedAttempts: ps.FailedAttempts}
+			item := acmProblemDTO{Solved: ps.Solved, FailedAttempts: ps.FailedAttempts, LastStatus: ps.LastStatus}
 			if !ps.SolvedAt.IsZero() {
 				item.SolvedAt = ps.SolvedAt.Format(time.RFC3339)
 			}

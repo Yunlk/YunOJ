@@ -2,27 +2,18 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { extractError, getProblems } from '../api'
+import DifficultyBadge from '../components/DifficultyBadge'
 import Pagination from '../components/Pagination'
 import type { ProblemListItem } from '../types'
+import { DIFFICULTIES } from '../utils/difficulty'
 
 const PAGE_SIZE = 20
-
-function difficultyLabel(difficulty: number): string {
-  if (difficulty <= 3) return '简单'
-  if (difficulty <= 6) return '中等'
-  return '困难'
-}
-
-function difficultyClass(difficulty: number): string {
-  if (difficulty <= 3) return 'diff-easy'
-  if (difficulty <= 6) return 'diff-medium'
-  return 'diff-hard'
-}
 
 export default function ProblemList() {
   const [searchParams, setSearchParams] = useSearchParams()
   const page = Math.max(1, Number(searchParams.get('page') ?? '1') || 1)
   const keyword = searchParams.get('keyword') ?? ''
+  const difficulty = Number(searchParams.get('difficulty') ?? '0') || undefined
 
   const [problems, setProblems] = useState<ProblemListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -34,7 +25,7 @@ export default function ProblemList() {
     let cancelled = false
     setLoading(true)
     setError('')
-    getProblems({ page, size: PAGE_SIZE, keyword: keyword || undefined })
+    getProblems({ page, size: PAGE_SIZE, keyword: keyword || undefined, difficulty })
       .then((data) => {
         if (cancelled) return
         setProblems(data.items)
@@ -49,13 +40,14 @@ export default function ProblemList() {
     return () => {
       cancelled = true
     }
-  }, [page, keyword])
+  }, [page, keyword, difficulty])
 
   const search = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const next = new URLSearchParams()
     const kw = input.trim()
     if (kw) next.set('keyword', kw)
+    if (difficulty) next.set('difficulty', String(difficulty))
     next.set('page', '1')
     setSearchParams(next)
   }
@@ -66,11 +58,25 @@ export default function ProblemList() {
     setSearchParams(next)
   }
 
+  const changeDifficulty = (value: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (value) next.set('difficulty', value)
+    else next.delete('difficulty')
+    next.set('page', '1')
+    setSearchParams(next)
+  }
+
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">题目列表</h1>
         <form className="search-form" onSubmit={search}>
+          <select value={difficulty ?? ''} onChange={(event) => changeDifficulty(event.target.value)} aria-label="难度筛选">
+            <option value="">全部难度</option>
+            {DIFFICULTIES.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
           <input
             className="search-input"
             type="text"
@@ -119,9 +125,7 @@ export default function ProblemList() {
                   </Link>
                 </td>
                 <td>
-                  <span className={`difficulty-badge ${difficultyClass(p.difficulty)}`}>
-                    {difficultyLabel(p.difficulty)} {p.difficulty}
-                  </span>
+                  <DifficultyBadge value={p.difficulty} />
                 </td>
                 <td>
                   <div className="tag-list">

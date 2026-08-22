@@ -58,7 +58,7 @@ func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		IncludeUnpublished: isAdmin,
 	}
 	if isAdmin {
-		if v := queryInt(r, "difficulty", 0); v >= 1 && v <= 10 {
+		if v := queryInt(r, "difficulty", 0); v >= model.MinDifficulty && v <= model.MaxDifficulty {
 			f.Difficulty = &v
 		}
 		f.Tag = strings.TrimSpace(r.URL.Query().Get("tag"))
@@ -114,6 +114,7 @@ type problemDetailDTO struct {
 	SPJSource        string `json:"spj_source,omitempty"`
 	InteractorSource string `json:"interactor_source,omitempty"`
 	TestcaseCount    int64  `json:"testcase_count,omitempty"`
+	IsFavorite       bool   `json:"is_favorite,omitempty"`
 }
 
 // handleGetProblem 题目详情。
@@ -151,6 +152,11 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 		Type: p.Type, TestcaseScores: p.TestcaseScores,
 		SubmissionLimit: p.SubmissionLimit, Status: p.Status,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+	if loggedIn {
+		if favorite, favoriteErr := a.store.IsProblemFavorite(r.Context(), u.ID, p.ID); favoriteErr == nil {
+			dto.IsFavorite = favorite
+		}
 	}
 	if isAdmin {
 		dto.SPJSource = p.SPJSource
@@ -362,8 +368,8 @@ func validateProblem(p problemPayload) string {
 	if p.MemoryLimitKb < 16384 || p.MemoryLimitKb > 1048576 {
 		return "内存限制需在 16MB-1GB 之间"
 	}
-	if p.Difficulty < 1 || p.Difficulty > 10 {
-		return "难度需在 1-10 之间"
+	if p.Difficulty < model.MinDifficulty || p.Difficulty > model.MaxDifficulty {
+		return "请选择有效的题目难度"
 	}
 	if len(p.Tags) > 10 {
 		return "标签最多 10 个"

@@ -9,11 +9,12 @@ import type {
 } from '../types'
 import { formatTime } from '../utils/format'
 import { formatContestMinutes } from '../utils/contest'
+import { formatRemaining, useClock } from '../utils/clock'
 import { getStatusInfo, isPendingStatus } from '../utils/status'
 
 // ---------- 排行榜 ----------
 
-function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus, activeAnimationKey }: {
+function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus, revealedStatus, activeAnimationKey }: {
   contestId: number
   standings: ACMStanding[]
   problems: ContestProblem[]
@@ -21,6 +22,7 @@ function ACMTable({ contestId, standings, problems, startTime, activeTeamId, act
   activeTeamId?: number
   activeProblemId?: number
   activeStatus?: string
+  revealedStatus?: string
   activeAnimationKey?: string
 }) {
   const previousTops = useRef(new Map<number, number>())
@@ -58,7 +60,8 @@ function ACMTable({ contestId, standings, problems, startTime, activeTeamId, act
             <th className="team-column">队伍</th>
             <th className="total-column">总分</th>
             {problems.map((p) => (
-              <th key={p.problem_id} title={p.title} className="problem-column">
+              <th key={p.problem_id} title={p.title} className={`problem-column problem-theme-${p.theme_color || 'blue'}`}>
+                <span className={`standings-problem-swatch swatch-${p.theme_color || 'blue'}`} aria-hidden="true" />
                 <span className="standings-problem-id">{p.display_id}</span>
                 <span className="standings-problem-title">{p.title}</span>
               </th>
@@ -100,6 +103,7 @@ function ACMTable({ contestId, standings, problems, startTime, activeTeamId, act
                     startTime={startTime}
                     score={p.score ?? p.total_score ?? 100}
                     className={activeCell ? `active-evaluation-cell standings-cell-${activeColor}` : ''}
+                    statusOverride={activeCell ? revealedStatus : undefined}
                   />
                 })}
               </tr>
@@ -140,7 +144,8 @@ function OITable({ contestId, standings, problems }: {
             <th className="team-column">队伍</th>
             <th className="total-column">总分</th>
             {problems.map((p) => (
-              <th key={p.problem_id} title={p.title} className="problem-column">
+              <th key={p.problem_id} title={p.title} className={`problem-column problem-theme-${p.theme_color || 'blue'}`}>
+                <span className={`standings-problem-swatch swatch-${p.theme_color || 'blue'}`} aria-hidden="true" />
                 <span className="standings-problem-id">{p.display_id}</span>
                 <span className="standings-problem-title">{p.title}</span>
               </th>
@@ -181,6 +186,150 @@ function OITable({ contestId, standings, problems }: {
   )
 }
 
+function DynamicRevealStatus({
+  contest,
+  now,
+  rolling,
+  dynamicPrelude,
+  rollStep,
+  rollTotal,
+}: {
+  contest: ContestStandings['contest']
+  now: number
+  rolling: boolean
+  dynamicPrelude: boolean
+  rollStep: number
+  rollTotal: number
+}) {
+  const startMs = new Date(contest.start_time).getTime()
+  const endMs = new Date(contest.end_time).getTime()
+  const freezeMinutes = Math.max(0, contest.freeze_duration_minutes || 0)
+  const freezeAtMs = freezeMinutes > 0 ? endMs - freezeMinutes * 60_000 : 0
+
+  if (dynamicPrelude) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-reveal" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>检查提交结果</strong>
+          <span className="dynamic-reveal-progress">从底部向上查看提交与通过情况</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (rolling) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-reveal" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>正在公布排名</strong>
+          <span className="dynamic-reveal-progress">第 {Math.min(rollStep + 1, rollTotal)} / {rollTotal} 条提交</span>
+        </div>
+        <span className="muted">按评测完成顺序展示最终榜单</span>
+      </div>
+    )
+  }
+
+  if (now < startMs) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-upcoming" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>比赛尚未开始</strong>
+          <b>{formatRemaining(startMs - now)}</b>
+        </div>
+        <span className="muted">动态榜将在比赛开始后实时同步</span>
+      </div>
+    )
+  }
+
+  if (now < endMs && freezeAtMs > 0 && now < freezeAtMs) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-running" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>距离封榜</strong>
+          <b>{formatRemaining(freezeAtMs - now)}</b>
+        </div>
+        <span className="muted">封榜前提交和评测状态会实时同步</span>
+      </div>
+    )
+  }
+
+  if (now < endMs && freezeAtMs > 0) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-freeze" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>封榜中</strong>
+          <b>{formatRemaining(endMs - now)}</b>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="dynamic-countdown-banner dynamic-countdown-waiting" aria-live="polite">
+      <div className="dynamic-countdown-main">
+        <strong>等待公布排名</strong>
+      </div>
+      <span className="muted">正在等待封榜提交完成评测</span>
+    </div>
+  )
+}
+
+type RevealMode = 'choice' | 'dynamic' | 'quick'
+
+function RevealChoiceOverlay({ dynamicAvailable, onDynamic, onQuick }: {
+  dynamicAvailable: boolean
+  onDynamic: () => void
+  onQuick: () => void
+}) {
+  return (
+    <div className="reveal-choice-overlay" role="dialog" aria-modal="true" aria-label="比赛结束榜单展示方式">
+      <div className="reveal-choice-panel">
+        <div className="reveal-choice-actions">
+          <button type="button" className="reveal-choice-button reveal-choice-button-primary" onClick={onDynamic} disabled={!dynamicAvailable}>
+            动态榜单
+          </button>
+          <button type="button" className="reveal-choice-button" onClick={onQuick}>
+            快速榜单
+          </button>
+        </div>
+        {!dynamicAvailable && <p className="reveal-choice-hint">封榜提交尚未全部完成评测</p>}
+      </div>
+    </div>
+  )
+}
+
+function animateStandingsFromBottom(onDone: () => void, delayMs = 0, speed = 1): () => void {
+  const wrap = document.querySelector<HTMLElement>('.standings-wrap')
+  if (!wrap) {
+    onDone()
+    return () => undefined
+  }
+  const distance = Math.max(0, wrap.scrollHeight - wrap.clientHeight)
+  wrap.scrollTop = distance
+  if (distance === 0) {
+    onDone()
+    return () => undefined
+  }
+  const duration = Math.max(3200, Math.min(15000, (2200 + distance * 3) * speed))
+  let startedAt = 0
+  let frame = 0
+  const tick = (timestamp: number) => {
+    if (startedAt === 0) startedAt = timestamp
+    const progress = Math.min(1, (timestamp - startedAt) / duration)
+    const eased = 1 - Math.pow(1 - progress, 2)
+    wrap.scrollTop = distance * (1 - eased)
+    if (progress < 1) frame = window.requestAnimationFrame(tick)
+    else onDone()
+  }
+  const timer = window.setTimeout(() => {
+    frame = window.requestAnimationFrame(tick)
+  }, delayMs)
+  return () => {
+    window.clearTimeout(timer)
+    if (frame) window.cancelAnimationFrame(frame)
+  }
+}
+
 function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number; dynamicOnly?: boolean }) {
   const [standings, setStandings] = useState<ContestStandings | null>(null)
   const [loading, setLoading] = useState(true)
@@ -197,6 +346,50 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
   const [rollStep, setRollStep] = useState(-1)
   const [rollPhase, setRollPhase] = useState<'focus' | 'judging' | 'result' | 'settled' | 'done'>('done')
   const [rolling, setRolling] = useState(false)
+  const [revealMode, setRevealMode] = useState<RevealMode | null>(dynamicOnly ? 'choice' : null)
+  const [dynamicPrelude, setDynamicPrelude] = useState(false)
+  const [quickPreview, setQuickPreview] = useState(false)
+  const now = useClock(1000)
+
+  useEffect(() => {
+    rollStarted.current = false
+    setRevealMode(dynamicOnly ? 'choice' : null)
+    setDynamicPrelude(false)
+    setQuickPreview(false)
+    setRolling(false)
+    setRollStep(-1)
+    setRollPhase('done')
+  }, [contestId, dynamicOnly])
+
+  const revealFinalStandings = useCallback(() => {
+    setRevealMode('quick')
+    setDynamicPrelude(false)
+    setRolling(false)
+    setRollStep(-1)
+    setRollPhase('done')
+    setStandings((current) => {
+      if (!current) return current
+      const events = current.roll_events
+      const finalStandings = events && events.length > 0
+        ? events[events.length - 1].standings
+        : current.standings
+      return {
+        ...current,
+        standings: finalStandings,
+        roll_available: false,
+        roll_events: undefined,
+        roll_initial_standings: undefined,
+        frozen_submissions: 0,
+      }
+    })
+    setQuickPreview(true)
+  }, [])
+
+  const chooseDynamicReveal = useCallback(() => {
+    setRevealMode('dynamic')
+    setQuickPreview(false)
+    setDynamicPrelude(true)
+  }, [])
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true)
@@ -253,16 +446,6 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
           })
           if (newIds.length > 0) setLiveQueue((queue) => [...queue, ...newIds])
         }
-        if (dynamicOnly && s.roll_available && s.roll_events && s.roll_events.length > 0 && !rollStarted.current) {
-          rollStarted.current = true
-          setLive(false)
-          setLiveQueue([])
-          setLiveEventId(null)
-          setLivePhase('done')
-          setRollStep(0)
-          setRollPhase('focus')
-          setRolling(true)
-        }
       })
       .catch((err) => setError(extractError(err)))
       .finally(() => {
@@ -280,6 +463,44 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
     const t = window.setInterval(() => load(true), 3000)
     return () => window.clearInterval(t)
   }, [live, load])
+
+  // 动态页必须在封榜和比赛结束的边界主动刷新一次，否则页面可能一直停留
+  // 在封榜前的 API 快照，错过 roll_available 的出现时刻。
+  useEffect(() => {
+    if (!dynamicOnly || !standings || standings.mode !== 'ACM') return
+    const endMs = new Date(standings.contest.end_time).getTime()
+    const freezeMinutes = Math.max(0, standings.contest.freeze_duration_minutes || 0)
+    const freezeAtMs = freezeMinutes > 0 ? endMs - freezeMinutes * 60_000 : 0
+    const nextBoundary = [freezeAtMs, endMs]
+      .filter((value) => value > now)
+      .sort((a, b) => a - b)[0]
+    if (!nextBoundary) return
+    const timer = window.setTimeout(() => load(true), Math.max(200, nextBoundary - now + 250))
+    return () => window.clearTimeout(timer)
+  }, [dynamicOnly, load, now, standings?.contest.end_time, standings?.contest.freeze_duration_minutes])
+
+  // 选择动态榜单后，先从表格底部向上检查提交结果，再进入逐条滚榜。
+  useEffect(() => {
+    if (!dynamicPrelude) return
+    return animateStandingsFromBottom(() => {
+      rollStarted.current = true
+      setDynamicPrelude(false)
+      setLive(false)
+      setLiveQueue([])
+      setLiveEventId(null)
+      setLivePhase('done')
+      setRollStep(0)
+      setRollPhase('focus')
+      setRolling(true)
+    })
+  }, [dynamicPrelude])
+
+  // 快速榜单直接使用最终排名，但仍从底部向上滚动一遍供预览。
+  useEffect(() => {
+    if (!quickPreview) return
+    // 最终榜先完整停留片刻，再以较慢速度从底部向上扫过。
+    return animateStandingsFromBottom(() => setQuickPreview(false), 1800, 1.8)
+  }, [quickPreview])
 
   useEffect(() => {
     if (liveEventId !== null || liveQueue.length === 0) return
@@ -385,7 +606,20 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
     : liveSubmission
       ? `live-${liveSubmission.submission_id}-${livePhase}`
       : undefined
+  const revealedStatus = rollEvent && rollPhase === 'result'
+    ? rollEvent.status
+    : liveSubmission && livePhase === 'result'
+      ? liveSubmission.status
+      : undefined
   const activeColor = activeStatus ? getStatusInfo(activeStatus).color : 'gray'
+  const contestEnded = now >= new Date(standings.contest.end_time).getTime()
+  const revealChoiceVisible = dynamicOnly && isACM && contestEnded && revealMode === 'choice'
+  const dynamicAvailable = Boolean(standings.roll_available && standings.roll_events && standings.roll_events.length > 0)
+  const dynamicFreezeActive = dynamicOnly
+    && isACM
+    && standings.contest.freeze_duration_minutes > 0
+    && now >= new Date(standings.contest.end_time).getTime() - standings.contest.freeze_duration_minutes * 60_000
+    && now < new Date(standings.contest.end_time).getTime()
   let visibleACM = standings.standings as ACMStanding[]
   if (rolling && rollEvent && rollStep >= 0 && rollPhase !== 'settled') {
     visibleACM = rollStep === 0 ? (standings.roll_initial_standings ?? visibleACM) : standings.roll_events![rollStep - 1].standings
@@ -398,6 +632,30 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
 
   return (
     <div>
+      {revealChoiceVisible && (
+        <RevealChoiceOverlay
+          dynamicAvailable={dynamicAvailable}
+          onDynamic={chooseDynamicReveal}
+          onQuick={revealFinalStandings}
+        />
+      )}
+      {dynamicOnly && isACM && revealMode === 'choice' && !contestEnded && (
+        <DynamicRevealStatus
+          contest={standings.contest}
+          now={now}
+          rolling={rolling}
+          dynamicPrelude={dynamicPrelude}
+          rollStep={rollStep}
+          rollTotal={standings.roll_events?.length ?? 0}
+        />
+      )}
+      {dynamicOnly && isACM && revealMode === 'dynamic' && (rolling || (standings.roll_available && (standings.roll_events?.length ?? 0) > 0)) && (
+        <div className="dynamic-reveal-toolbar">
+          <button type="button" className="button button-secondary" onClick={revealFinalStandings}>
+            直接揭晓最终榜单
+          </button>
+        </div>
+      )}
       {!dynamicOnly && <div className="standings-toolbar">
         {!dynamicOnly && live && !frozen && <span className="live-indicator"><span className="live-dot" />榜单实时更新中</span>}
         {!dynamicOnly && frozen && !live && !rolling && <span className="muted">榜单已冻结</span>}
@@ -422,16 +680,19 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
               <span className="focus-status">{submissionStatusLabel(activeStatus)}</span>
             </div>
           )}
-          <ACMTable
-            contestId={contestId}
-            standings={visibleACM}
-            problems={standings.problems}
-            startTime={standings.contest.start_time}
-            activeTeamId={activeTeamId}
-            activeProblemId={activeProblemId}
-            activeStatus={activeStatus}
-            activeAnimationKey={activeAnimationKey}
-          />
+          <div className={dynamicFreezeActive ? 'dynamic-freeze-board' : ''}>
+            <ACMTable
+              contestId={contestId}
+              standings={visibleACM}
+              problems={standings.problems}
+              startTime={standings.contest.start_time}
+              activeTeamId={activeTeamId}
+              activeProblemId={activeProblemId}
+              activeStatus={activeStatus}
+              revealedStatus={revealedStatus}
+              activeAnimationKey={activeAnimationKey}
+            />
+          </div>
         </>
       ) : (
         <OITable
@@ -474,6 +735,12 @@ export default function ContestStandingsPage() {
       {!dynamicOnly && <div className="page-header">
         <h1 className="page-title">排行榜 · {data.contest.title}</h1>
         <div className="contest-badges">
+          <Link
+            to={data.is_admin ? `/contest/${contestId}/messages` : `/contest/${contestId}#contest-communications`}
+            className="button button-secondary"
+          >
+            {data.is_admin ? '消息管理' : '广播 / QA'}
+          </Link>
           <Link to={`/contest/${contestId}`} className="button button-secondary">← 返回总览</Link>
           {mode === 'ACM' && (
             <Link

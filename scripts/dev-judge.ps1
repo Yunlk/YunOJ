@@ -8,5 +8,5 @@ $env:GOTOOLCHAIN = 'local'
 # 裸 Linux 服务器可开启 cgroup 精确内存计量
 $env:ISOLATE_CG = if ($env:ISOLATE_CG) { $env:ISOLATE_CG } else { 'false' }
 
-Set-Location (Join-Path $PSScriptRoot '..')
+Set-Location (Join-Path $PSScriptRoot '..\backend')
 go run ./cmd/judge

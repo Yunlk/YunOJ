@@ -96,7 +96,7 @@ def discover_contest(client: Client, title: str) -> dict[str, Any]:
     for contest in data.get("items", []):
         if contest.get("title") == title:
             return contest
-    raise APIError(f"找不到比赛 {title!r}，请先运行 go run ./cmd/seedcontests")
+    raise APIError(f"找不到比赛 {title!r}，请先运行 go -C backend run ./cmd/seedcontests")
 
 
 def register(account: Account, contest_id: int) -> None:

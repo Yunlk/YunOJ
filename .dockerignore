@@ -6,6 +6,6 @@ data
 node_modules
 **/node_modules
 .npm-cache
-web/dist
+frontend/dist
 *.log
 *.exe

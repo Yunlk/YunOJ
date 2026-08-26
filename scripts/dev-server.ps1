@@ -1,4 +1,4 @@
-# 本地开发：启动 web/API 服务（原生运行，不依赖 Docker）
+# 本地开发：启动 backend API 服务（原生运行，不依赖 Docker）
 # 前置：postgres/redis 已就绪（docker compose up -d postgres redis）
 # 用法：pwsh -File scripts/dev-server.ps1
 $ErrorActionPreference = 'Stop'
@@ -7,5 +7,5 @@ $ErrorActionPreference = 'Stop'
 $env:GOPROXY = if ($env:GOPROXY) { $env:GOPROXY } else { 'https://goproxy.cn,direct' }
 $env:GOTOOLCHAIN = 'local'
 
-Set-Location (Join-Path $PSScriptRoot '..')
+Set-Location (Join-Path $PSScriptRoot '..\backend')
 go run ./cmd/server

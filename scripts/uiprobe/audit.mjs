@@ -35,6 +35,9 @@ const ROUTES = [
   ['文件提交', '/problem/437/submit-file'],
   ['滚榜演示', '/demo/rolling'],
   ['教学空间', '/groups'],
+  // 非成员访问私有班级返回 403：这是后端对无权资源的正常应答（必须问了才知道），
+  // 页面已渲染带 h1 的禁入态，因此标注为「预期内响应」，不计入缺陷。
+  ['小组详情(禁入态)', '/groups/1', { expectStatus: [403] }],
   ['404', '/no-such-route'],
   ['排名', '/ranking'],
   ['个人中心', '/profile'],
@@ -54,7 +57,6 @@ const ROUTES = [
   ['比赛消息', `/contest/${cid}/messages`],
   ['参赛者', `/contest/${cid}/participants`],
   ['比赛报名', `/contest/${cid}/register`],
-  ['小组详情', '/groups/1'],
   ['登录', '/login'],
   ['注册', '/register'],
 ]
@@ -76,11 +78,19 @@ page.on('response', (r) => {
 })
 
 const wanted = ONLY ? ONLY.split(',') : null
-for (const [label, route] of ROUTES) {
+for (const [label, route, opts = {}] of ROUTES) {
   if (wanted && !wanted.some((w) => route === w || label === w)) continue
   errors.length = 0
   await page.goto(`${BASE}${route}`, { waitUntil: 'networkidle', timeout: 30000 }).catch((e) => errors.push(e.message))
   await page.waitForTimeout(600)
+  // 预期内响应（如无权资源的 403）从错误列表中剔除，不作为缺陷报告。
+  // 浏览器会为同一次失败产生两条日志：带 URL 的请求日志与不含 URL 的控制台日志。
+  const expected = opts.expectStatus ?? []
+  if (expected.length) {
+    for (let i = errors.length - 1; i >= 0; i--) {
+      if (expected.some((s) => new RegExp(`(HTTP |status of |\\()${s}\\b`).test(errors[i]))) errors.splice(i, 1)
+    }
+  }
 
   const m = await page.evaluate((foldHeight) => {
     const de = document.documentElement

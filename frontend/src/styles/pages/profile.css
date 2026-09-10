@@ -1,0 +1,573 @@
+/* ============================================================================
+   个人中心 / 收藏 / 通知页样式（C 组）
+   只使用设计令牌（--c-* / --fs-* / --space-*）与设计基座类，
+   颜色一律走 token，禁止硬编码色值。
+   ========================================================================== */
+
+/* ---------- 个人中心：两栏骨架 ---------- */
+
+.pf-main {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.pf-side {
+  min-width: 0;
+}
+
+.pf-side .kv-list + .button,
+.pf-side .kv-list + .pf-link {
+  margin-top: var(--space-4);
+}
+
+/* ---------- 通用小工具 ---------- */
+
+.pf-muted {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+.pf-mono {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pf-link {
+  color: var(--c-primary);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pf-link:hover {
+  color: var(--c-primary-hover);
+  text-decoration: underline;
+}
+
+.pf-problem-link {
+  color: var(--c-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pf-problem-link:hover {
+  color: var(--c-primary);
+  text-decoration: underline;
+}
+
+.pf-time-cell {
+  width: 150px;
+}
+
+/* 基座 .status-flag 为「提交结论」场景预留了左边距，这里作为独立单元格使用，去掉它 */
+.status-flag-accepted,
+.status-flag-attempted,
+.status-flag-todo {
+  margin-left: 0;
+}
+
+.status-flag-accepted {
+  background: var(--c-positive-soft);
+  color: var(--c-positive);
+}
+
+.status-flag-attempted {
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+}
+
+.status-flag-todo {
+  background: var(--c-surface-3);
+  color: var(--c-text-3);
+}
+
+/* 表格内的内联空状态（不依赖其它页面样式表） */
+.empty-state-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--c-text-3);
+  font-size: var(--fs-13);
+}
+
+/* ---------- 主区块：与 .side-card 同款的浅色面板 ---------- */
+
+.pf-panel {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.pf-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.pf-panel-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  font-weight: 680;
+}
+
+.pf-panel-sub {
+  margin: 2px 0 0;
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+/* ---------- 刷题活动热力图（保留原有数据逻辑，仅收敛密度与配色） ---------- */
+
+.pf-heatmap-total {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.pf-heatmap-wrap {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+}
+
+.pf-week-labels {
+  display: grid;
+  flex: 0 0 10px;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  color: var(--c-text-3);
+  font-size: 10px;
+  line-height: 11px;
+}
+
+.pf-week-labels > span:nth-child(2) { grid-row: 3; }
+.pf-week-labels > span:nth-child(3) { grid-row: 5; }
+
+.pf-heatmap-grid {
+  display: grid;
+  min-width: max-content;
+  grid-auto-flow: column;
+  grid-auto-columns: 11px;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+}
+
+.pf-heatmap-cell,
+.pf-heatmap-legend i {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--c-border);
+  border-radius: 2px;
+}
+
+.pf-heatmap-cell {
+  cursor: help;
+}
+
+/* 活动密度分级：0 ~ 4 档，颜色只走 token */
+.pf-heatmap-cell.level-0,
+.pf-heatmap-legend i.level-0 {
+  background: var(--c-surface-3);
+}
+
+.pf-heatmap-cell.level-1,
+.pf-heatmap-legend i.level-1 {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-soft);
+}
+
+.pf-heatmap-cell.level-2,
+.pf-heatmap-legend i.level-2 {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-border);
+}
+
+.pf-heatmap-cell.level-3,
+.pf-heatmap-legend i.level-3 {
+  border-color: var(--c-primary);
+  background: var(--c-primary);
+}
+
+.pf-heatmap-cell.level-4,
+.pf-heatmap-legend i.level-4 {
+  border-color: var(--c-primary-active);
+  background: var(--c-primary-active);
+}
+
+.pf-heatmap-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+/* ---------- 参加过的比赛 ---------- */
+
+.pf-contest-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pf-contest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  text-decoration: none;
+}
+
+.pf-contest-item:hover {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-soft);
+}
+
+.pf-contest-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pf-contest-main strong {
+  overflow: hidden;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-contest-main small,
+.pf-contest-item time {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+/* ---------- 侧栏：账号卡 ---------- */
+
+.pf-account-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.pf-avatar {
+  display: inline-flex;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+}
+
+.pf-avatar-image,
+.pf-avatar-fallback {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.pf-avatar-fallback {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-size: var(--fs-18);
+  font-weight: 700;
+}
+
+.pf-avatar-image {
+  object-fit: cover;
+}
+
+.pf-account-name {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pf-account-name strong {
+  overflow: hidden;
+  font-size: var(--fs-16);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-account-name .badge {
+  align-self: flex-start;
+}
+
+/* ---------- 侧栏：刷题进度卡 ---------- */
+
+.pf-progress-figure {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+
+.pf-progress-figure strong {
+  color: var(--c-positive);
+  font-size: var(--fs-26);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.pf-progress-note {
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.pf-difficulty-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.pf-difficulty-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 46px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-12);
+}
+
+/* 难度色由 .difficulty-level-N 提供 */
+.pf-difficulty-label {
+  color: var(--difficulty-color, var(--c-text-2));
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.pf-difficulty-bar {
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.pf-difficulty-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--difficulty-color, var(--c-primary));
+  transition: width 0.3s ease;
+}
+
+.pf-difficulty-count {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ---------- 表格布局（两页共用） ----------
+   .data-table 默认是 table-layout:auto：只要某列内容（尤其是末列那排按钮）放不下，
+   浏览器会把该列压到最小宽度并折行，行高就从 44px 涨到 68~225px，th 的 inline width 也会被无视。
+   这里固定列宽（过长内容省略号截断），并给表格一个最小宽度，
+   窄屏交给 .table-frame 横向滚动，而不是把列压扁。 */
+.profile-page .data-table,
+.favorites-page .data-table {
+  table-layout: fixed;
+}
+
+/* .visually-hidden 是 position:absolute；若表格容器不是它的包含块，
+   它的包含块会落到文档上，从而「逃出」容器的 overflow 裁剪，
+   把 document.scrollWidth 撑大、窄屏出现整页横向滚动。这里让容器成为包含块。 */
+.profile-page .table-frame,
+.favorites-page .table-frame {
+  position: relative;
+}
+
+.profile-page .data-table {
+  min-width: 720px;
+}
+
+.favorites-page .data-table {
+  min-width: 900px;
+}
+
+/* 收藏表列宽：# / 题目(自适应) / 难度 / 标签 / 通过·提交 / 状态 / 操作 */
+.favorites-page .data-table th:nth-child(1) { width: 72px; }
+.favorites-page .data-table th:nth-child(3) { width: 96px; }
+.favorites-page .data-table th:nth-child(4) { width: 200px; }
+.favorites-page .data-table th:nth-child(5) { width: 120px; }
+.favorites-page .data-table th:nth-child(6) { width: 96px; }
+.favorites-page .data-table th:nth-child(7) { width: 156px; }
+
+/* 最近提交表列宽：题目(自适应) / 结果 / 语言 / CPU / 提交时间 / 操作 */
+.profile-page .data-table th:nth-child(2) { width: 110px; }
+.profile-page .data-table th:nth-child(3) { width: 110px; }
+.profile-page .data-table th:nth-child(4) { width: 110px; }
+.profile-page .data-table th:nth-child(5) { width: 150px; }
+.profile-page .data-table th:nth-child(6) { width: 84px; }
+
+/* 可长的文本列统一单行省略：题名再长也不会把行高撑破 */
+.favorites-page .data-table td:nth-child(2),
+.profile-page .data-table td:nth-child(1) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 收藏页 ---------- */
+
+.favorites-page .toolbar {
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+
+.favorites-page .data-table .cell-actions {
+  white-space: nowrap;
+}
+
+.favorites-page .data-table .cell-actions .button + .button {
+  margin-left: var(--space-2);
+}
+
+/* 标签列保持单行，表格行高才维持 44px；超出部分裁掉而不是换行
+   （overflow 只放在内部 flex 容器上：给 table-cell 加 overflow 会让单元格自身撑高） */
+.pf-tags-cell .tag-list {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.pf-tags-cell .tag-chip {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 通知页 ---------- */
+
+.nt-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nt-item {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.nt-item-unread {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-soft);
+}
+
+.nt-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.nt-item-unread .nt-dot {
+  background: var(--c-primary);
+}
+
+.nt-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: var(--space-2);
+}
+
+.nt-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.nt-title {
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  font-weight: 650;
+}
+
+.nt-time {
+  margin-left: auto;
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.nt-content {
+  margin: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nt-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-height: var(--h-ctl-sm);
+}
+
+.nt-meta .button {
+  margin-left: auto;
+}
+
+/* ---------- 窄屏 ---------- */
+
+/* ≤1080px 时 .layout-side 变单列；把侧栏整体提到主区之前，
+   这样「刷题进度」是首屏就能看到的第一块信息（进度卡在 .pf-side 内本就排第一）。 */
+@media (max-width: 1080px) {
+  .pf-side {
+    display: grid;
+    order: -1;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--space-4);
+  }
+
+  .pf-side .side-card + .side-card {
+    margin-top: 0;
+  }
+}

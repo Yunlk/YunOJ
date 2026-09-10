@@ -4,6 +4,7 @@ export function contestModeLabel(mode: string): string {
   if (mode === 'ACM') return 'ACM'
   if (mode === 'OI') return 'OI'
   if (mode === 'IOI') return 'IOI'
+  if (mode === 'CF') return 'Codeforces'
   return mode
 }
 
@@ -16,6 +17,19 @@ export function scoreModeLabel(mode: string): string {
   if (mode === 'all_or_nothing') return '整题通过才计分'
   if (mode === 'partial') return '按测试点部分计分'
   return mode
+}
+
+/**
+ * 报名方式说明。maxTeamSize 为 0/未设置时不显示人数上限：
+ * 历史比赛（如 186）的 registration_mode 落库为空串、max_team_size 为 0，
+ * 直接拼「最多 0 人」会误导用户。
+ */
+export function registrationModeLabel(mode: string, maxTeamSize: number): string {
+  const size = maxTeamSize > 1 ? `（最多 ${maxTeamSize} 人）` : ''
+  if (mode === 'individual') return '个人'
+  if (mode === 'team') return `队伍${size}`
+  if (mode === 'both') return `个人或队伍${size}`
+  return '报名方式未设置'
 }
 
 export type ContestPhase = 'upcoming' | 'running' | 'ended'
@@ -86,4 +100,26 @@ export function formatContestMinutes(minutes: number): string {
 export function teamAvatarUrl(contestId: number, teamId: number, avatar: string): string | null {
   if (!avatar) return null
   return `/api/contests/${contestId}/teams/${teamId}/avatar`
+}
+
+// ---------- Codeforces 风格赛制 ----------
+
+/** 衰减下限：比赛结束时保留初始分的比例（与后端 contest.CFMinScoreRatio 保持一致）。 */
+export const CF_MIN_SCORE_RATIO = 0.3
+
+/**
+ * 计算 at 时刻提交可得的分数：开赛满分，线性衰减到比赛结束时的 30%。
+ * 与后端 contest.CFDecayScore 同一公式，用于前端展示"当前分值"。
+ */
+export function cfDecayScore(initial: number, at: number, start: number, end: number): number {
+  if (initial <= 0) return 0
+  if (!(end > start)) return initial
+  let ratio = 1
+  if (at > start) {
+    const fraction = Math.min(1, (at - start) / (end - start))
+    ratio = 1 - (1 - CF_MIN_SCORE_RATIO) * fraction
+  }
+  const floor = Math.round(initial * CF_MIN_SCORE_RATIO)
+  const score = Math.round(initial * ratio)
+  return Math.min(initial, Math.max(floor, score))
 }

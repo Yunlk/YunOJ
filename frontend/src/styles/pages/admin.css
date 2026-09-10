@@ -1,0 +1,393 @@
+/*
+ * 管理端与辅助页面的视觉收敛样式。
+ *
+ * 只用两种东西：
+ *   1. 设计基座缺位的结构性补丁（表单栅格、表格内行内控件宽度），
+ *      一律用 `.app-shell` 前缀保证特异性，不污染沉浸式页面；
+ *   2. 旧全局样式表里无法用新类替代的交互态覆盖（status-toggle / button-ghost.danger）。
+ *
+ * 禁止在这里新造按钮、表格、卡片样式 —— 那些属于 components.css。
+ */
+
+/* ==================== 管理员表格 ==================== */
+/* 两行单元格（名称 + 编号/版本/心跳）由 styles.css 里历史的
+   .judge-node-table td small / .admin-users-table 规则负责，这里不重复声明；
+   只补基座缺位的东西。 */
+
+/* 列数多、末列是操作按钮组的表：table-layout:auto 时浏览器会为了
+   「至少能放下一行内容」把末列压到很窄，行的实际宽度由内容决定，
+   inline width 被无视（ProblemAdmin 的 6 个按钮 = 308px，被压到 78px → 5 行 225px）。
+   固定布局后表头 inline width 成为硬约束，行高精确等于 --h-row。 */
+.app-shell .data-table.admin-table-fixed {
+  table-layout: fixed;
+}
+
+/* 行内控件不要撑破单元格 */
+.app-shell .data-table td > input[type='number'] {
+  width: 84px;
+}
+
+.app-shell .data-table td .select-input {
+  min-width: 0;
+  width: 100%;
+}
+
+/* 行内动作组：右对齐、紧凑间距，按钮可折行 */
+.app-shell .data-table .row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+
+/* 操作列内允许换行：components.css 的 .cell-actions 是 width:1% + nowrap，
+   在 table-layout:auto 下会把末列压到内容最小宽度（实测 78px），
+   6 个操作按钮被迫折成 5~6 行 → 行高从 44px 涨到 225px。
+   ProblemAdmin 配合 .admin-table-fixed 用后单行即可容纳全部按钮。 */
+.app-shell .data-table td.cell-actions {
+  white-space: normal;
+}
+
+/* 只放一个状态开关的窄列：width:1% 让浏览器按内容留出富余，与相邻列的
+   分配不稳定；显式给宽度让「调度」列宽度确定。 */
+.app-shell .data-table td.cell-state {
+  width: 96px;
+}
+
+/* 「实际 / 目标」这类同行双值单元格：块级 strong 需要与后续文本同行 */
+.app-shell .admin-judge-page .data-table td > strong + .table-subtext {
+  display: inline;
+  margin-top: 0;
+}
+
+/* ==================== 表单栅格 ==================== */
+/* 基座只给了单列 .form-group，管理端表单需要 2 / 3 列并排 */
+
+.app-shell .admin-form-cols,
+.app-shell .admin-form-row-3 {
+  display: grid;
+  align-items: start;
+  gap: 0 var(--space-4);
+}
+
+.app-shell .admin-form-cols {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.app-shell .admin-form-row-3 {
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* 两列并排时左右两侧的 form-group 不再叠加下边距 */
+.app-shell .layout-split > .form-group,
+.app-shell .admin-form-cols > .form-group,
+.app-shell .admin-form-row-3 > .form-group {
+  margin-bottom: var(--space-4);
+}
+
+/* 表单内的操作行：右对齐，主操作在左、说明文案在右 */
+.app-shell .admin-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.app-shell .admin-form-actions .success-message,
+.app-shell .admin-form-actions .error-message,
+.app-shell .admin-form-actions .field-hint {
+  margin: 0;
+}
+
+/* 用 fieldset 承载「单选卡片组」时，去掉浏览器默认边框 */
+.app-shell .admin-fieldset {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.app-shell .admin-fieldset > .field-label {
+  display: block;
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+
+/* 题目类型 / 样例这类纵向堆叠的子表单，收紧块间距 */
+.app-shell .problem-form > .layout-split > .form-group,
+.app-shell .problem-form > .admin-form-row-3 > .form-group {
+  margin-bottom: var(--space-4);
+}
+
+/* ==================== 设置页 ==================== */
+/* 该页把 .settings-form 从「label 包裹控件」改成了 .form-group 包裹，
+   旧的 .settings-form label 规则不再命中，这里按基座语义重新声明。 */
+
+.app-shell .settings-panel .panel-head {
+  align-items: flex-start;
+}
+
+.app-shell .settings-panel .panel-head .field-hint {
+  margin: 2px 0 0;
+}
+
+.app-shell .settings-panel .panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.app-shell .settings-form {
+  display: block;
+}
+
+.app-shell .settings-form .form-group {
+  margin-bottom: var(--space-4);
+}
+
+.app-shell .settings-panel .settings-form + .success-message,
+.app-shell .settings-panel .settings-form + .error-message {
+  margin: 0;
+}
+
+/* ==================== 交互态覆盖 ==================== */
+
+/* 状态开关：语义色走判定色板，命中区域对齐控件高度 */
+.app-shell .status-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-ctl-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.app-shell .status-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.app-shell .status-toggle.enabled {
+  border-color: var(--c-positive-border);
+  background: var(--c-positive-soft);
+  color: var(--c-positive);
+}
+
+.app-shell .status-toggle.enabled:hover:not(:disabled) {
+  border-color: var(--c-positive);
+}
+
+.app-shell .status-toggle.disabled {
+  border-color: var(--c-danger-border);
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.app-shell .status-toggle.disabled:hover:not(:disabled) {
+  border-color: var(--c-danger);
+}
+
+/* 行内危险动作：保持 ghost 的低干扰，仅文字转为危险色 */
+.app-shell .button-ghost.danger {
+  color: var(--c-danger);
+}
+
+.app-shell .button-ghost.danger:hover:not(:disabled) {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+/* 行内动作组与操作列的换行规则见文件开头「管理员表格」一节 */
+
+/* ==================== 测评集群 ==================== */
+
+.app-shell .judge-admin-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: var(--space-7);
+}
+
+/* judge-admin-section 的旧上边框分割线在 .section 语义下已由区块间距承担 */
+.app-shell .judge-admin-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.app-shell .judge-node-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.app-shell .judge-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+.app-shell .judge-online-dot.online {
+  background: var(--c-positive);
+  box-shadow: 0 0 0 3px var(--c-positive-soft);
+}
+
+.app-shell .judge-online-dot.offline {
+  background: var(--c-danger);
+}
+
+.app-shell .judge-concurrency-control {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.app-shell .judge-concurrency-control input {
+  width: 76px;
+}
+
+.app-shell .judge-language-list,
+.app-shell .judge-audit-list {
+  border-top: 1px solid var(--c-border);
+}
+
+.app-shell .judge-language-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  min-height: var(--h-row);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.app-shell .judge-language-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.app-shell .judge-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--c-border);
+}
+
+.app-shell .judge-status-grid > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 38px;
+  padding-right: var(--space-4);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.app-shell .judge-status-grid > div:nth-child(odd) {
+  margin-right: var(--space-5);
+}
+
+.app-shell .judge-status-grid span {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.app-shell .judge-status-grid strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.app-shell .judge-audit-list > div {
+  display: grid;
+  grid-template-columns: 170px 110px 150px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 38px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: var(--fs-12);
+}
+
+.app-shell .judge-audit-list time,
+.app-shell .judge-audit-list code {
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+/* ==================== 文件提交 / 作业详情 ==================== */
+
+/* 代码预览：限制高度并允许内部滚动，避免长文件把页面撑到几千像素 */
+.app-shell .admin-code-preview {
+  max-height: 360px;
+  margin: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 4;
+}
+
+/* 作业说明：保留作者输入的换行与缩进（基座没有等价类） */
+.app-shell .admin-prewrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 拖拽落区高亮：SubmitFile 用 data-dragging 保留状态，这里补视觉反馈 */
+.app-shell .empty-state[data-dragging] {
+  border-color: var(--c-primary);
+  border-style: solid;
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.app-shell .empty-state[data-dragging] .empty-state-title {
+  color: var(--c-primary);
+}
+
+/* ==================== 滚榜演示页 ==================== */
+/* 该页原本依赖 styles.css 里的 .rolling-demo-header .eyebrow / .muted 定位；
+   改用基座的 .page-eyebrow / .field-hint 后补回相同的间距。 */
+
+.app-shell .rolling-demo-header .page-eyebrow,
+.app-shell .rolling-demo-board-heading .page-eyebrow {
+  margin: 0 0 var(--space-1);
+}
+
+.app-shell .rolling-demo-header .field-hint {
+  margin: var(--space-2) 0 0;
+}
+
+/* ==================== 窄屏 ==================== */
+
+@media (max-width: 960px) {
+  .app-shell .admin-form-cols,
+  .app-shell .admin-form-row-3,
+  .app-shell .judge-admin-columns,
+  .app-shell .judge-status-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app-shell .judge-status-grid > div:nth-child(odd) {
+    margin-right: 0;
+  }
+
+  .app-shell .judge-audit-list > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+    padding: var(--space-2) 0;
+  }
+}

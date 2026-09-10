@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { batchProblems, copyProblem, deleteProblem, extractError, getProblems, getProblemUsage } from '../api'
+import {
+  batchProblems,
+  copyProblem,
+  deleteProblem,
+  exportProblemPackage,
+  extractError,
+  getProblems,
+  getProblemUsage,
+  importProblemPackage,
+} from '../api'
 import Pagination from '../components/Pagination'
 import DifficultyBadge from '../components/DifficultyBadge'
+import PageHeader from '../components/PageHeader'
 import type { ProblemListItem } from '../types'
 import { formatTime } from '../utils/format'
 import { DIFFICULTIES } from '../utils/difficulty'
@@ -12,6 +22,7 @@ const PAGE_SIZE = 20
 
 const TYPE_LABELS: Record<string, string> = {
   standard: '标准',
+  hack: 'Hack',
   spj: 'SPJ',
   interactive: '交互',
   output_only: '输出题',
@@ -23,10 +34,10 @@ const STATUS_LABELS: Record<string, string> = {
   disabled: '已停用',
 }
 
-function statusClass(status: string): string {
-  if (status === 'published') return 'phase-running'
-  if (status === 'draft') return 'phase-upcoming'
-  return 'phase-ended'
+function statusBadgeClass(status: string): string {
+  if (status === 'published') return 'badge badge-positive'
+  if (status === 'draft') return 'badge badge-warning'
+  return 'badge'
 }
 
 export default function ProblemAdmin() {
@@ -46,13 +57,16 @@ export default function ProblemAdmin() {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
   const [input, setInput] = useState(keyword)
+  const [importing, setImporting] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
     setError('')
     getProblems({
       page, size: PAGE_SIZE, keyword: keyword || undefined,
-      difficulty, tag: tag || undefined, type: type || undefined, status: status || undefined,
+      difficulty: difficulty ? [difficulty] : undefined,
+      tag: tag ? [tag] : undefined,
+      type: type || undefined, status: status || undefined,
     })
       .then((data) => {
         setProblems(data.items)
@@ -142,6 +156,34 @@ export default function ProblemAdmin() {
     }
   }
 
+  const handleImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setImporting(true)
+    setError('')
+    try {
+      const result = await importProblemPackage(file)
+      navigate(`/admin/problems/${result.problem.id}/tests`)
+    } catch (err) {
+      setError(extractError(err))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleExport = async (id: number) => {
+    setBusy(true)
+    setError('')
+    try {
+      await exportProblemPackage(id)
+    } catch (err) {
+      setError(extractError(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleDelete = async (p: ProblemListItem) => {
     try {
       const usage = await getProblemUsage(p.id)
@@ -164,34 +206,47 @@ export default function ProblemAdmin() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">题目管理</h1>
-        <Link to="/problem/new" className="button button-primary">
-          新建题目
-        </Link>
-      </div>
+      <PageHeader
+        eyebrow="平台管理"
+        title="题目管理"
+        description="维护题面、测试点、状态与可见性。"
+        actions={<div className="page-actions">
+          <label className="button button-secondary">
+            {importing ? '导入中…' : '导入迁移包'}
+            <input
+              type="file"
+              accept=".zip,application/zip"
+              onChange={handleImport}
+              disabled={importing}
+              style={{ display: 'none' }}
+            />
+          </label>
+          <Link to="/problem/new" className="button button-primary">新建题目</Link>
+        </div>}
+      />
 
-      <form className="search-form admin-filters" onSubmit={search}>
+      <form className="toolbar" onSubmit={search}>
         <input
           className="search-input"
-          type="text"
+          type="search"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="按标题搜索…"
+          aria-label="按标题搜索"
         />
-        <select value={difficulty ?? ''} onChange={(e) => setFilter('difficulty', e.target.value)}>
+        <select value={difficulty ?? ''} onChange={(e) => setFilter('difficulty', e.target.value)} aria-label="难度">
           <option value="">全部难度</option>
           {DIFFICULTIES.map((item) => (
             <option key={item.value} value={item.value}>{item.label}</option>
           ))}
         </select>
-        <select value={type} onChange={(e) => setFilter('type', e.target.value)}>
+        <select value={type} onChange={(e) => setFilter('type', e.target.value)} aria-label="题型">
           <option value="">全部题型</option>
           {Object.entries(TYPE_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
           ))}
         </select>
-        <select value={status} onChange={(e) => setFilter('status', e.target.value)}>
+        <select value={status} onChange={(e) => setFilter('status', e.target.value)} aria-label="状态">
           <option value="">全部状态</option>
           {Object.entries(STATUS_LABELS).map(([k, v]) => (
             <option key={k} value={k}>{v}</option>
@@ -199,46 +254,59 @@ export default function ProblemAdmin() {
         </select>
         <input
           className="search-input"
-          type="text"
+          type="search"
           value={tag}
           onChange={(e) => setFilter('tag', e.target.value)}
           placeholder="标签筛选…"
+          aria-label="按标签筛选"
         />
         <button type="submit" className="button button-primary">搜索</button>
       </form>
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="batch-bar">
-        <label className="checkbox-label">
-          <input type="checkbox" checked={selected.size > 0 && selected.size === problems.length} onChange={toggleAll} />
-          全选
+      <div className="toolbar toolbar-plain">
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={selected.size > 0 && selected.size === problems.length}
+            onChange={toggleAll}
+            aria-label="全选本页题目"
+          />
+          全选本页
         </label>
-        <span className="muted">已选 {selected.size} 项</span>
-        <button type="button" className="button button-secondary" disabled={busy} onClick={() => runBatch('publish')}>
+        <span className="toolbar-label">已选 {selected.size} 项</span>
+        <span className="toolbar-spacer" />
+        <button type="button" className="button button-secondary button-sm" disabled={busy || selected.size === 0} onClick={() => runBatch('publish')}>
           批量发布
         </button>
-        <button type="button" className="button button-secondary" disabled={busy} onClick={() => runBatch('disable')}>
+        <button type="button" className="button button-secondary button-sm" disabled={busy || selected.size === 0} onClick={() => runBatch('disable')}>
           批量停用
         </button>
-        <button type="button" className="button button-danger" disabled={busy} onClick={() => runBatch('delete')}>
+        <button type="button" className="button button-danger button-sm" disabled={busy || selected.size === 0} onClick={() => runBatch('delete')}>
           批量删除
         </button>
       </div>
 
-      <table className="data-table">
+      <div className="table-summary">
+        <span>共 {total} 道题目</span>
+        <span>第 {page} 页 · 每页 {PAGE_SIZE} 条</span>
+      </div>
+
+      <div className="table-frame">
+      <table className="data-table admin-table-fixed">
         <thead>
           <tr>
             <th style={{ width: 40 }} />
-            <th style={{ width: 70 }}>#</th>
+            <th style={{ width: 70 }} className="cell-id">#</th>
             <th>标题</th>
             <th style={{ width: 80 }}>题型</th>
             <th style={{ width: 90 }}>难度</th>
-            <th style={{ width: 80 }}>测试点</th>
-            <th style={{ width: 120 }}>通过 / 提交</th>
+            <th style={{ width: 80 }} className="cell-num">测试点</th>
+            <th style={{ width: 120 }} className="cell-num">通过 / 提交</th>
             <th style={{ width: 90 }}>状态</th>
             <th style={{ width: 150 }}>更新时间</th>
-            <th style={{ width: 230 }}>操作</th>
+            <th style={{ width: 320 }} className="cell-actions">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -249,30 +317,36 @@ export default function ProblemAdmin() {
           ) : (
             problems.map((p) => (
               <tr key={p.id}>
-                <td>
-                  <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
+                <td className="cell-tight">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(p.id)}
+                    onChange={() => toggle(p.id)}
+                    aria-label={`选择题目 ${p.title}`}
+                  />
                 </td>
-                <td className="mono">{p.id}</td>
+                <td className="cell-id">{p.id}</td>
                 <td>
                   <Link to={`/problem/${p.id}`} className="problem-link">{p.title}</Link>
                 </td>
                 <td><span className="tag-chip">{TYPE_LABELS[p.type ?? 'standard'] ?? p.type}</span></td>
                 <td><DifficultyBadge value={p.difficulty} /></td>
-                <td className="mono">{p.testcase_count ?? 0}</td>
-                <td className="mono">{p.accepted_count} / {p.submission_count}</td>
+                <td className="cell-num">{p.testcase_count ?? 0}</td>
+                <td className="cell-num">{p.accepted_count} / {p.submission_count}</td>
                 <td>
-                  <span className={`phase-badge ${statusClass(p.status ?? 'published')}`}>
+                  <span className={statusBadgeClass(p.status ?? 'published')}>
                     {STATUS_LABELS[p.status ?? 'published'] ?? p.status}
                   </span>
                 </td>
-                <td className="mono">{formatTime(p.updated_at)}</td>
-                <td>
+                <td className="cell-num">{formatTime(p.updated_at)}</td>
+                <td className="cell-actions">
                   <div className="row-actions">
-                    <Link to={`/problem/${p.id}`} className="link-button">预览</Link>
-                    <button type="button" className="link-button" disabled={busy} onClick={() => handleCopy(p.id)}>复制</button>
-                    <Link to={`/admin/problems/${p.id}/tests`} className="link-button">测试点</Link>
-                    <Link to={`/problem/${p.id}/edit`} className="link-button">编辑</Link>
-                    <button type="button" className="link-button danger" onClick={() => handleDelete(p)}>删除</button>
+                    <Link to={`/problem/${p.id}`} className="button button-ghost button-sm">预览</Link>
+                    <button type="button" className="button button-ghost button-sm" disabled={busy} onClick={() => handleCopy(p.id)}>复制</button>
+                    <button type="button" className="button button-ghost button-sm" disabled={busy} onClick={() => handleExport(p.id)}>导出</button>
+                    <Link to={`/admin/problems/${p.id}/tests`} className="button button-ghost button-sm">测试点</Link>
+                    <Link to={`/problem/${p.id}/edit`} className="button button-ghost button-sm">编辑</Link>
+                    <button type="button" className="button button-ghost button-sm danger" onClick={() => handleDelete(p)}>删除</button>
                   </div>
                 </td>
               </tr>
@@ -280,6 +354,7 @@ export default function ProblemAdmin() {
           )}
         </tbody>
       </table>
+      </div>
 
       <Pagination page={page} total={total} size={PAGE_SIZE} onChange={changePage} />
     </div>

@@ -64,11 +64,9 @@ export default function ContestRegister() {
 
       {data.contest.description && (
         <section className="card contest-register-announcement">
-          <div className="section-header">
-            <div>
-              <span className="page-eyebrow">赛前信息</span>
-              <h2>比赛公告</h2>
-            </div>
+          <div className="section-head">
+            <h2 className="section-title">比赛公告</h2>
+            <span className="section-hint">赛前信息</span>
           </div>
           <Markdown>{data.contest.description}</Markdown>
         </section>
@@ -76,11 +74,11 @@ export default function ContestRegister() {
 
       <div className="contest-register-grid">
         <section className="card">
-          <h2>报名方式</h2>
-          <p className="muted">{data.registration_mode === 'individual' ? '个人报名' : data.registration_mode === 'team' ? `队伍报名，最多 ${data.max_team_size} 人` : `个人或队伍报名，队伍最多 ${data.max_team_size} 人`}</p>
+          <h2 className="section-title">报名方式</h2>
+          <p className="section-hint">{data.registration_mode === 'individual' ? '个人报名' : data.registration_mode === 'team' ? `队伍报名，最多 ${data.max_team_size} 人` : `个人或队伍报名，队伍最多 ${data.max_team_size} 人`}</p>
           {!data.is_registered ? <form onSubmit={submit} className="form-stack"><label>报名名称<input value={name} maxLength={64} onChange={(e) => setName(e.target.value)} placeholder="个人名或队伍名" /></label><button className="button button-primary" disabled={busy}>{busy ? '提交中…' : '确认报名'}</button></form> : <div className="registration-success">已报名：<strong>{data.team?.team_name}</strong></div>}
         </section>
-        {data.is_registered && data.team && <section className="card"><h2>队伍成员</h2><div className="team-member-list">{data.members.map((member) => <div className="team-member-row" key={member.user_id}><span>{member.username}</span><span className="muted">{member.is_captain ? '队长' : '成员'}</span>{data.team?.is_captain && !member.is_captain && <button className="button button-link" onClick={() => removeContestMember(contestId, data.team!.team_id, member.user_id).then(load).catch((err) => setError(extractError(err)))}>移除</button>}</div>)}</div>{data.team.is_captain && data.allow_team_edit && data.registration_mode !== 'individual' && <form onSubmit={addMember} className="inline-form"><input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="输入用户名添加成员" /><button className="button button-secondary" disabled={busy}>添加</button></form>}<p className="muted">成员的提交会统一计入本队排行榜。</p></section>}
+        {data.is_registered && data.team && <section className="card"><h2 className="section-title">队伍成员</h2><div className="team-member-list">{data.members.map((member) => <div className="team-member-row" key={member.user_id}><span>{member.username}</span><span className="section-hint">{member.is_captain ? '队长' : '成员'}</span>{data.team?.is_captain && !member.is_captain && <button type="button" className="button button-ghost button-sm danger" aria-label={`移除成员 ${member.username}`} onClick={() => removeContestMember(contestId, data.team!.team_id, member.user_id).then(load).catch((err) => setError(extractError(err)))}>移除</button>}</div>)}</div>{data.team.is_captain && data.allow_team_edit && data.registration_mode !== 'individual' && <form onSubmit={addMember} className="inline-form"><input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="输入用户名添加成员" aria-label="新成员用户名" /><button className="button button-secondary" disabled={busy}>添加</button></form>}<p className="section-hint">成员的提交会统一计入本队排行榜。</p></section>}
       </div>
       {error && <div className="error-message">{error}</div>}
     </div>

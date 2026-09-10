@@ -6,6 +6,7 @@ import {
   extractError, getContest, getContestCommunications,
 } from '../api'
 import Markdown from '../components/Markdown'
+import PageHeader from '../components/PageHeader'
 import type { ContestCommunications, ContestQuestion } from '../types'
 import { formatTime } from '../utils/format'
 
@@ -131,54 +132,53 @@ export default function ContestMessagesPage() {
   if (loading && !data) return <div className="page-loading">消息管理加载中…</div>
 
   return (
-    <div className="contest-manage-page contest-message-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">比赛管理</div>
-          <h1 className="page-title">消息管理{contestTitle ? ` · ${contestTitle}` : ''}</h1>
-        </div>
-        <Link to={`/contest/${contestId}`} className="button button-secondary">返回比赛总览</Link>
-      </div>
+    <div className="contest-form-page contest-message-page">
+      <PageHeader
+        eyebrow="比赛管理"
+        title={`消息管理${contestTitle ? ` · ${contestTitle}` : ''}`}
+        description="发布广播、回复参赛者提问；广播发布后所有在比赛页面中的参赛者都会收到强提醒。"
+        actions={<Link to={`/contest/${contestId}`} className="button button-secondary">返回比赛总览</Link>}
+      />
 
-      <div className="contest-nav contest-manage-nav">
-        <Link className="contest-nav-item" to={`/contest/${contestId}/edit`}>比赛设置与题目</Link>
-        <span className="contest-nav-item active">消息管理</span>
-      </div>
+      <nav className="tabs contest-manage-nav" aria-label="比赛管理导航">
+        <Link className="tab" to={`/contest/${contestId}/edit`}>比赛设置与题目</Link>
+        <span className="tab active" aria-current="page">消息管理</span>
+      </nav>
 
       {error && <div className="error-message">{error}</div>}
-      {notice && <div className="success-message">{notice}</div>}
+      {notice && <div className="success-message" role="status">{notice}</div>}
 
-      <div className="contest-message-grid">
+      <div className="layout-split">
         <section className="card communication-panel">
-          <div className="section-header">
-            <div>
-              <h2>发布广播</h2>
-              <p className="muted">发布后，所有正在比赛页面中的参赛者都会收到强提醒。</p>
-            </div>
+          <div className="section-head">
+            <h2 className="section-title">发布广播</h2>
+            <span className="section-hint">发布后，所有正在比赛页面中的参赛者都会收到强提醒。</span>
           </div>
           <form className="communication-form" onSubmit={(event) => void publishAnnouncement(event)}>
             <input
               type="text"
               value={announcementTitle}
               maxLength={120}
+              aria-label="广播标题（可选）"
               onChange={(event) => setAnnouncementTitle(event.target.value)}
               placeholder="广播标题（可选）"
             />
             <textarea
               value={announcementContent}
               maxLength={64 * 1024}
+              aria-label="广播内容（支持 Markdown）"
               onChange={(event) => setAnnouncementContent(event.target.value)}
               placeholder="输入广播内容，支持 Markdown"
               rows={6}
             />
             <div className="communication-form-actions">
-              <label className="checkbox-label">
+              <label className="check-row">
                 <input
                   type="checkbox"
                   checked={announcementPinned}
                   onChange={(event) => setAnnouncementPinned(event.target.checked)}
                 />
-                置顶
+                <span>置顶</span>
               </label>
               <button
                 type="submit"
@@ -191,17 +191,22 @@ export default function ContestMessagesPage() {
           </form>
 
           <div className="announcement-list">
-            {!data?.announcements.length ? <p className="muted">暂无广播</p> : data.announcements.map((item) => (
+            {!data?.announcements.length ? (
+              <div className="empty-state">
+                <span className="empty-state-title">暂无广播</span>
+                <span className="empty-state-hint">在上方输入标题与内容后发布第一条广播。</span>
+              </div>
+            ) : data.announcements.map((item) => (
               <article className="announcement-item" key={item.id}>
                 <div className="announcement-item-head">
                   <strong>{item.title || '出题组广播'}</strong>
                   <time>{formatTime(item.created_at)}</time>
                 </div>
                 <Markdown>{item.content}</Markdown>
-                {item.pinned && <span className="announcement-pinned">置顶</span>}
+                {item.pinned && <span className="badge badge-warning">置顶</span>}
                 <button
                   type="button"
-                  className="link-button danger announcement-delete"
+                  className="button button-ghost button-sm danger announcement-delete"
                   disabled={Boolean(busyAction)}
                   onClick={() => void removeAnnouncement(item.id)}
                 >
@@ -213,15 +218,18 @@ export default function ContestMessagesPage() {
         </section>
 
         <section className="card communication-panel message-question-panel">
-          <div className="section-header">
-            <div>
-              <h2>参赛者问题</h2>
-              <p className="muted">待回复 {pendingQuestions.length} 条。已回复内容可以进入编辑状态后修正。</p>
-            </div>
+          <div className="section-head">
+            <h2 className="section-title">参赛者问题</h2>
+            <span className="section-hint">待回复 {pendingQuestions.length} 条。已回复内容可以进入编辑状态后修正。</span>
           </div>
 
           <div className="question-list qa-thread-list">
-            {pendingQuestions.length === 0 && <p className="muted">暂无待回复问题</p>}
+            {pendingQuestions.length === 0 && (
+              <div className="empty-state">
+                <span className="empty-state-title">暂无待回复问题</span>
+                <span className="empty-state-hint">参赛者提问后会出现在这里，回复可设为对所有参赛者公开。</span>
+              </div>
+            )}
             {pendingQuestions.map((question) => (
               <article className="qa-thread" key={question.id}>
                 <div className="qa-message qa-message-user">
@@ -238,18 +246,19 @@ export default function ContestMessagesPage() {
                       id={`qa-answer-${question.id}`}
                       value={answerDrafts[question.id] ?? ''}
                       maxLength={16 * 1024}
+                      aria-label={`回复 ${question.asker_name} 的提问`}
                       onChange={(event) => setAnswerDrafts((current) => ({ ...current, [question.id]: event.target.value }))}
                       placeholder="输入回复"
                       rows={4}
                     />
                     <div className="communication-form-actions">
-                      <label className="checkbox-label">
+                      <label className="check-row">
                         <input
                           type="checkbox"
                           checked={publicDrafts[question.id] ?? false}
                           onChange={(event) => setPublicDrafts((current) => ({ ...current, [question.id]: event.target.checked }))}
                         />
-                        对所有参赛者公开
+                        <span>对所有参赛者公开</span>
                       </label>
                       <button
                         type="button"
@@ -286,17 +295,18 @@ export default function ContestMessagesPage() {
                         id={`qa-answer-${question.id}`}
                         value={answerDrafts[question.id] ?? question.answer}
                         maxLength={16 * 1024}
+                        aria-label={`修改对 ${question.asker_name} 的回复`}
                         onChange={(event) => setAnswerDrafts((current) => ({ ...current, [question.id]: event.target.value }))}
                         rows={4}
                       />
                       <div className="communication-form-actions">
-                        <label className="checkbox-label">
+                        <label className="check-row">
                           <input
                             type="checkbox"
                             checked={publicDrafts[question.id] ?? question.public}
                             onChange={(event) => setPublicDrafts((current) => ({ ...current, [question.id]: event.target.checked }))}
                           />
-                          对所有参赛者公开
+                          <span>对所有参赛者公开</span>
                         </label>
                         <div className="message-edit-actions">
                           <button type="button" className="button button-secondary" disabled={Boolean(busyAction)} onClick={() => setEditingQuestionId(null)}>取消</button>
@@ -318,7 +328,7 @@ export default function ContestMessagesPage() {
                         <span>{question.public ? '所有参赛者可见' : '仅提问者可见'}</span>
                         <button
                           type="button"
-                          className="link-button"
+                          className="button button-ghost button-sm"
                           disabled={Boolean(busyAction)}
                           onClick={() => {
                             setAnswerDrafts((current) => ({ ...current, [question.id]: question.answer }))
@@ -331,7 +341,7 @@ export default function ContestMessagesPage() {
                       </div>
                     </div>
                   )}
-                  </div>
+                </div>
               </article>
             ))}
           </div>

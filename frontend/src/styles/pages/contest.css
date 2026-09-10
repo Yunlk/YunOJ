@@ -1,0 +1,420 @@
+/*
+ * 比赛页（列表 / 详情 / 比赛提交）
+ * 只使用设计基座的类名与令牌；本文件负责比赛页特有的分组、状态条、赛制侧栏与紧凑密度。
+ */
+
+/* ==================== 比赛列表 ==================== */
+
+/* 未报名用户看到的广播/答疑入口提示（不发起答疑请求） */
+.contest-broadcast-hint {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.contest-group {
+  margin: 0 0 var(--space-6);
+}
+
+.contest-group-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-2);
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  font-weight: 680;
+}
+
+.contest-group-count {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.contest-table .contest-title-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contest-row-chip {
+  margin-left: var(--space-2);
+}
+
+.contest-row-team {
+  margin-left: var(--space-2);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.contest-time-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.35;
+  font-size: var(--fs-12);
+}
+
+.contest-time-cell .muted {
+  font-size: var(--fs-11);
+}
+
+.contest-countdown {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  color: var(--c-text);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.contest-countdown.danger {
+  color: var(--c-danger);
+}
+
+.contest-countdown-label {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.contest-time-ended {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+/* 报名状态：已报名 / 可报名 / 未参赛 / 查询中 */
+.contest-reg-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  font-weight: 650;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.contest-reg-badge.is-registered {
+  border-color: var(--c-positive-border);
+  background: var(--c-positive-soft);
+  color: var(--c-positive);
+}
+
+.contest-reg-badge.is-open {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.contest-reg-badge.is-closed,
+.contest-reg-badge.is-unknown {
+  color: var(--c-text-3);
+}
+
+.contest-list-note {
+  margin: var(--space-2) 0 0;
+}
+
+/* ==================== 比赛详情 ==================== */
+
+.contest-page .contest-status-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  margin: 0 0 var(--space-4);
+}
+
+.contest-status-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.contest-status-time {
+  font-size: var(--fs-12);
+}
+
+.contest-status-bar .contest-progress {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.contest-status-bar .contest-progress-fill {
+  height: 100%;
+  background: var(--c-primary);
+  transition: width 1s linear;
+}
+
+.contest-status-bar .contest-progress-labels {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  font-size: var(--fs-11);
+}
+
+.contest-status-bar .contest-solved-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.contest-status-bar .contest-solved-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  border-radius: 50%;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-text);
+  font-size: var(--fs-11);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 比赛内导航：沿用基座标签页外观（.tabs > .tab） */
+.contest-tabs {
+  margin: 0 0 var(--space-5);
+}
+
+.contest-tabs .tab,
+.contest-tabs .tab:hover {
+  text-decoration: none;
+}
+
+.contest-tabs .tab.active {
+  cursor: default;
+}
+
+.contest-announcement {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5);
+}
+
+.contest-overview {
+  margin-bottom: var(--space-6);
+}
+
+.contest-overview-side {
+  min-width: 0;
+}
+
+.contest-overview-side .side-card + .side-card {
+  margin-top: var(--space-4);
+}
+
+.contest-overview-side .stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: var(--space-2);
+}
+
+.contest-overview-side .stat-tile {
+  padding: var(--space-2) var(--space-3);
+}
+
+.contest-overview-side .stat-tile-value {
+  font-size: var(--fs-16);
+}
+
+.contest-overview-side .field-hint {
+  margin: var(--space-3) 0 0;
+}
+
+.contest-problems-table .contest-problem-id {
+  font-weight: 700;
+}
+
+.contest-my-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-13);
+  font-weight: 700;
+}
+
+.contest-my-status.is-passed {
+  color: var(--c-positive);
+}
+
+.contest-my-status.is-failed {
+  color: var(--c-danger);
+}
+
+.contest-my-status.is-judging {
+  color: var(--c-info);
+  font-weight: 600;
+}
+
+.contest-my-status.is-untried {
+  color: var(--c-text-3);
+  font-weight: 600;
+}
+
+.contest-my-score {
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+/* 报名前 / 未登录时的赛题预览与公告 */
+.contest-page .contest-section {
+  margin-bottom: var(--space-5);
+}
+
+/* ==================== 比赛提交页 ==================== */
+
+.contest-problem-filter {
+  width: 104px;
+  min-height: var(--h-ctl-sm);
+  font-size: var(--fs-12);
+}
+
+/* 工具栏内的字段：与题库页一致的紧凑布局（不依赖其它页面样式表） */
+.toolbar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar-field select {
+  min-height: var(--h-ctl-sm);
+  min-width: 118px;
+  font-size: var(--fs-12);
+}
+
+/* 表格空态里的一行文字 + 清除筛选动作 */
+.empty-state-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--c-text-3);
+}
+
+/* ==================== 通信区（广播 / 答疑） ==================== */
+
+.contest-communications {
+  margin-top: var(--space-6);
+}
+
+.contest-communications .communications-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.contest-communications .communication-panel {
+  min-width: 0;
+}
+
+.contest-communications .section-head {
+  margin: 0 0 var(--space-3);
+}
+
+.contest-communications .announcement-item + .announcement-item {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.contest-communications .announcement-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--fs-13);
+}
+
+.contest-communications .announcement-item-head time {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.contest-communications .announcement-pinned {
+  display: inline-block;
+  margin-top: var(--space-2);
+  padding: 0 6px;
+  border: 1px solid var(--c-warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+  font-size: var(--fs-11);
+  font-weight: 650;
+}
+
+.contest-communications .communication-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+
+.contest-communications .communication-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.contest-communications .qa-thread + .qa-thread {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--c-border);
+}
+
+.contest-communications .qa-message + .qa-message {
+  margin-top: var(--space-2);
+}
+
+.contest-communications .qa-message-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.contest-communications .qa-bubble {
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+
+.contest-communications .qa-answer-bubble {
+  border-color: var(--c-primary-border);
+  background: var(--c-primary-soft);
+}
+
+/* ==================== 响应式 ==================== */
+
+@media (max-width: 1080px) {
+  .contest-communications .communications-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

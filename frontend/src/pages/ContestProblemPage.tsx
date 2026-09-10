@@ -10,12 +10,14 @@ import {
   submitToContest,
 } from '../api'
 import ProblemWorkbench from '../components/ProblemWorkbench'
+import ContestHackPanel from '../components/ContestHackPanel'
 import SubmissionPanel from '../components/SubmissionPanel'
 import DifficultyBadge from '../components/DifficultyBadge'
 import { useAuth } from '../context/AuthContext'
 import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
 import type { Contest, ContestProblemView, Language } from '../types'
 import { formatRemaining, useClock } from '../utils/clock'
+import { cfDecayScore } from '../utils/contest'
 import { formatMemory, formatTimeLimit } from '../utils/format'
 
 const MY_STATUS_LABELS: Record<string, string> = {
@@ -49,10 +51,17 @@ export default function ContestProblemPage() {
   useEffect(() => {
     let cancelled = false
     setLoadError('')
-    Promise.all([getContest(contestId), getContestProblem(contestId, problemId), getLanguages()])
-      .then(([contestResponse, problemView, items]) => {
+    // 先只取比赛本身：未报名（且非管理员）时不应再请求题目，否则必然拿到 403，
+    // 在控制台与网络面板留下一串失败请求。
+    getContest(contestId)
+      .then(async (contestResponse) => {
         if (cancelled) return
-        setContest(contestResponse.contest)
+        const c = contestResponse.contest
+        setContest(c)
+        const allowed = contestResponse.is_registered || contestResponse.is_admin || user?.role === 'admin'
+        if (!allowed) return
+        const [problemView, items] = await Promise.all([getContestProblem(contestId, problemId), getLanguages()])
+        if (cancelled) return
         setView(problemView)
         setLanguages(items)
         const preferred = preferredDraftLanguage(draftScope)
@@ -64,7 +73,7 @@ export default function ContestProblemPage() {
     return () => {
       cancelled = true
     }
-  }, [contestId, draftScope, problemId])
+  }, [contestId, draftScope, problemId, user?.role])
 
   const changeLanguage = (next: string) => {
     flushDraft()
@@ -108,7 +117,15 @@ export default function ContestProblemPage() {
   }
 
   const runContestCode = useCallback(
-    (input: string) => runContestTest(contestId, problemId, language, code, input, optimize),
+    (input: string, sampleIndex?: number) => runContestTest(
+      contestId,
+      problemId,
+      language,
+      code,
+      input,
+      optimize,
+      sampleIndex,
+    ),
     [code, contestId, language, optimize, problemId],
   )
 
@@ -129,6 +146,25 @@ export default function ContestProblemPage() {
   )
 
   if (loadError) return <div className="error-message">{loadError}</div>
+  // 未报名且非管理员：渲染报名引导（语义正确的标题 + 下一步动作），不请求题目
+  if (contest && !view) {
+    return (
+      <div className="state-page">
+        <h1>请先报名参加该比赛</h1>
+        <p>
+          《{contest.title}》的题目与提交入口仅对已报名选手开放。报名后即可查看题面、提交代码并参与榜单。
+        </p>
+        <div className="state-page-actions">
+          <Link to={`/contest/${contestId}/register`} className="button button-primary">
+            报名参赛
+          </Link>
+          <Link to={`/contest/${contestId}`} className="button button-secondary">
+            返回比赛
+          </Link>
+        </div>
+      </div>
+    )
+  }
   if (!contest || !view) return <div className="page-loading">加载中…</div>
 
   const { problem, contest_problem: contestProblem } = view
@@ -148,7 +184,14 @@ export default function ContestProblemPage() {
     <div className="workbench-meta-line">
       <span><DifficultyBadge value={problem.difficulty} /></span>
       <span>题号 {contestProblem.display_id}</span>
-      <span>满分 {contestProblem.score}</span>
+      {contest.mode === 'CF' ? (
+        <span title={`初始满分 ${contestProblem.score}，随比赛进行线性衰减到 30%`}>
+          当前分值 {cfDecayScore(contestProblem.score, now, startMs, endMs)}
+          <span className="muted"> / 初始 {contestProblem.score}</span>
+        </span>
+      ) : (
+        <span>满分 {contestProblem.score}</span>
+      )}
       <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
       <span>内存限制 {formatMemory(problem.memory_limit_kb)}</span>
       <span>
@@ -161,8 +204,18 @@ export default function ContestProblemPage() {
           {my.score > 0 ? `（${my.score} 分）` : ''}
         </span>
       )}
-    </div>
+      </div>
   )
+
+  const hackSection = contest.hacking_enabled ? (
+    <ContestHackPanel
+      contestId={contestId}
+      problemId={problemId}
+      hackingEnabled={contest.hacking_enabled}
+      running={running}
+      solved={my?.status === 'passed'}
+    />
+  ) : null
 
   const problemNavigation = (
     <div className="contest-problem-nav">
@@ -222,7 +275,12 @@ export default function ContestProblemPage() {
             <Link to={`/contest/${contestId}`} className="mini-btn">返回比赛</Link>
           </>
         )}
-        statementMeta={statementMeta}
+        statementMeta={(
+          <>
+            {statementMeta}
+            {hackSection}
+          </>
+        )}
         editorFooter={problemNavigation}
         submissionPanel={(
           <SubmissionPanel

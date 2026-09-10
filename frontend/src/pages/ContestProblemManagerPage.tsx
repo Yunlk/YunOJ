@@ -5,6 +5,7 @@ import {
   addContestProblem, extractError, getContest, getProblems, removeContestProblem,
   reorderContestProblems, updateContestProblem,
 } from '../api'
+import PageHeader from '../components/PageHeader'
 import type { ContestDetail, ContestProblem, ProblemListItem } from '../types'
 
 export function ProblemManager({ contestId, problems, onChanged }: {
@@ -106,16 +107,14 @@ export function ProblemManager({ contestId, problems, onChanged }: {
 
   return (
     <section className="contest-problem-manager">
-      <div className="section-header contest-problem-manager-heading">
-        <div>
-          <h2>比赛题目</h2>
-          <p className="muted">
-            题目状态不会因加入比赛自动改变。草稿题不会出现在公共题库，但比赛开始后报名选手可在比赛内访问并正常测评；比赛结束后仍保持草稿，除非管理员另行发布。
-          </p>
-        </div>
+      <div className="section-head contest-problem-manager-heading">
+        <h2 className="section-title">比赛题目</h2>
+        <span className="section-hint">
+          题目状态不会因加入比赛自动改变。单题分值留空时继承题目满分，也可以填写任意正整数自定义本场分值。草稿题不会出现在公共题库，但比赛开始后报名选手可在比赛内访问并正常测评；比赛结束后仍保持草稿，除非管理员另行发布。
+        </span>
       </div>
       <form
-        className="admin-problem-search"
+        className="toolbar toolbar-plain admin-problem-search"
         onSubmit={(event: FormEvent<HTMLFormElement>) => {
           event.preventDefault()
           search()
@@ -140,10 +139,14 @@ export function ProblemManager({ contestId, problems, onChanged }: {
         <div className="candidate-list">
           {candidates.map((problem) => (
             <div key={problem.id} className="candidate-item">
-              <span className="mono">#{problem.id}</span>
+              <span className="cell-id">#{problem.id}</span>
               <span className="candidate-title">{problem.title}</span>
-              {problem.status && <span className={`candidate-status ${problem.status}`}>{problem.status === 'draft' ? '草稿' : problem.status === 'published' ? '公开' : '停用'}</span>}
-              <button type="button" className="link-button" disabled={busy} onClick={() => add(problem.id)}>添加</button>
+              {problem.status && (
+                <span className={`badge ${problem.status === 'draft' ? 'badge-warning' : problem.status === 'published' ? 'badge-positive' : 'badge-danger'}`}>
+                  {problem.status === 'draft' ? '草稿' : problem.status === 'published' ? '公开' : '停用'}
+                </span>
+              )}
+              <button type="button" className="button button-ghost button-sm" disabled={busy} onClick={() => add(problem.id)}>添加</button>
             </div>
           ))}
         </div>
@@ -151,22 +154,34 @@ export function ProblemManager({ contestId, problems, onChanged }: {
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="admin-problem-table-wrap">
+      <div className="table-summary">
+        <span>本场共 {problems.length} 道题</span>
+        <span className="section-hint">拖拽行可调整顺序</span>
+      </div>
+
+      <div className="table-frame">
         <table className="data-table admin-problem-table">
           <thead>
             <tr>
-              <th>顺序</th>
-              <th>题号</th>
+              <th style={{ width: 64 }}>顺序</th>
+              <th style={{ width: 96 }}>题号</th>
               <th>标题</th>
-              <th>单题分值</th>
-              <th>提交上限</th>
-              <th>题目颜色</th>
-              <th>操作</th>
+              <th style={{ width: 170 }}>单题分值（可自定义）</th>
+              <th style={{ width: 140 }}>提交上限</th>
+              <th style={{ width: 130 }}>题目颜色</th>
+              <th className="cell-actions">操作</th>
             </tr>
           </thead>
           <tbody>
             {problems.length === 0 ? (
-              <tr><td colSpan={7} className="table-empty">暂无题目</td></tr>
+              <tr>
+                <td colSpan={7} className="table-empty">
+                  <div className="empty-state">
+                    <span className="empty-state-title">暂无题目</span>
+                    <span className="empty-state-hint">在上方搜索题库并点击「添加」把题目加入本场比赛。</span>
+                  </div>
+                </td>
+              </tr>
             ) : problems.map((problem, index) => (
               <tr
                 key={problem.problem_id}
@@ -180,13 +195,14 @@ export function ProblemManager({ contestId, problems, onChanged }: {
                 className="admin-problem-row"
                 title="拖拽调整顺序"
               >
-                <td className="mono">{problem.sort_order}</td>
+                <td className="cell-num">{problem.sort_order}</td>
                 <td>
                   <input
                     type="text"
                     defaultValue={problem.display_id}
                     disabled={busy}
                     className="admin-problem-id-input"
+                    aria-label={`题号（${problem.title}）`}
                     onBlur={(event) => {
                       const value = event.target.value.trim()
                       if (value && value !== problem.display_id) void update(problem.problem_id, { display_id: value })
@@ -197,12 +213,19 @@ export function ProblemManager({ contestId, problems, onChanged }: {
                 <td>
                   <input
                     type="number"
-                    min={0}
+                    min={1}
+                    step={1}
                     defaultValue={problem.score ?? ''}
                     disabled={busy}
-                    placeholder="默认"
+                    placeholder="继承题目满分"
+                    aria-label={`单题分值（${problem.title}）`}
                     onBlur={(event) => void update(problem.problem_id, {
-                      score: event.target.value === '' ? null : Number(event.target.value),
+                      score: event.target.value === ''
+                        ? null
+                        : (() => {
+                          const value = Number(event.target.value)
+                          return Number.isFinite(value) ? Math.max(1, Math.floor(value)) : null
+                        })(),
                     })}
                   />
                 </td>
@@ -214,19 +237,26 @@ export function ProblemManager({ contestId, problems, onChanged }: {
                     defaultValue={problem.submission_limit ?? ''}
                     disabled={busy}
                     placeholder="继承"
+                    aria-label={`提交上限（${problem.title}）`}
                     onBlur={(event) => void update(problem.problem_id, {
                       submission_limit: event.target.value === '' ? null : Number(event.target.value),
                     })}
                   />
                 </td>
                 <td>
-                  <select className="contest-theme-select" value={problem.theme_color || ''} disabled={busy} onChange={(event) => void update(problem.problem_id, { theme_color: event.target.value })}>
+                  <select
+                    className="contest-theme-select"
+                    value={problem.theme_color || ''}
+                    disabled={busy}
+                    aria-label={`题目颜色（${problem.title}）`}
+                    onChange={(event) => void update(problem.problem_id, { theme_color: event.target.value })}
+                  >
                     <option value="">自动</option>
                     {['blue', 'green', 'orange', 'purple', 'cyan', 'rose', 'yellow', 'indigo'].map((color) => <option key={color} value={color}>{color}</option>)}
                   </select>
                 </td>
-                <td>
-                  <button type="button" className="link-button danger" disabled={busy} onClick={() => void remove(problem.problem_id)}>
+                <td className="cell-actions">
+                  <button type="button" className="button button-ghost button-sm danger" disabled={busy} onClick={() => void remove(problem.problem_id)}>
                     移除
                   </button>
                 </td>
@@ -258,15 +288,12 @@ export default function ContestProblemManagerPage() {
 
   return (
     <div className="contest-admin-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">比赛管理</div>
-          <h1 className="page-title">题目管理 · {data.contest.title}</h1>
-        </div>
-        <div className="contest-badges">
-          <Link to={`/contest/${contestId}`} className="button button-secondary">返回总览</Link>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="比赛管理"
+        title={`题目管理 · ${data.contest.title}`}
+        description="配置本场题目、显示顺序、分值、提交上限与主题色。"
+        actions={<Link to={`/contest/${contestId}`} className="button button-secondary">返回总览</Link>}
+      />
       <ProblemManager contestId={contestId} problems={data.problems} onChanged={reload} />
     </div>
   )

@@ -3,13 +3,15 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { createProblem, extractError, getProblem, updateProblem } from '../api'
 import Markdown from '../components/Markdown'
-import type { ProblemType, Sample } from '../types'
+import PageHeader from '../components/PageHeader'
+import type { CheckerMode, ProblemType, Sample } from '../types'
 import { DIFFICULTIES } from '../utils/difficulty'
 
 const emptySample = (): Sample => ({ input: '', output: '', note: '' })
 
 const TYPE_LABELS: Record<ProblemType, string> = {
   standard: '标准（输出比对）',
+  hack: 'Hack（攻击目标程序）',
   spj: 'Special Judge（自定义判定/部分分）',
   interactive: '交互题（与交互器通信）',
   output_only: '输出题（仅提交答案）',
@@ -26,9 +28,13 @@ interface FormState {
   output_format: string
   hint: string
   type: ProblemType
+  checker_mode: CheckerMode
   status: string
   spj_source: string
   interactor_source: string
+  hack_generator_source: string
+  hack_reference_source: string
+  hack_target_source: string
 }
 
 const DEFAULT_FORM: FormState = {
@@ -42,9 +48,13 @@ const DEFAULT_FORM: FormState = {
   output_format: '',
   hint: '',
   type: 'standard',
+  checker_mode: 'token',
   status: 'draft',
   spj_source: '',
   interactor_source: '',
+  hack_generator_source: '',
+  hack_reference_source: '',
+  hack_target_source: '',
 }
 
 export default function ProblemForm() {
@@ -79,9 +89,13 @@ export default function ProblemForm() {
           output_format: p.output_format,
           hint: p.hint,
           type: p.type ?? 'standard',
+          checker_mode: p.checker_mode ?? 'token',
           status: p.status ?? 'published',
           spj_source: p.spj_source ?? '',
           interactor_source: p.interactor_source ?? '',
+          hack_generator_source: p.hack_generator_source ?? '',
+          hack_reference_source: p.hack_reference_source ?? '',
+          hack_target_source: p.hack_target_source ?? '',
         })
         setSamples(p.samples.length > 0 ? p.samples.map((s) => ({ ...s })) : [emptySample()])
       })
@@ -159,6 +173,14 @@ export default function ProblemForm() {
       setError('交互题必须提供交互器源码')
       return
     }
+    if (form.type === 'hack' && !form.hack_target_source.trim()) {
+      setError('Hack 题必须提供待攻击的目标程序源码')
+      return
+    }
+    if (form.type === 'hack' && !form.hack_reference_source.trim()) {
+      setError('Hack 题必须提供判题参考解源码')
+      return
+    }
 
     const payload = {
       title: form.title.trim(),
@@ -172,8 +194,12 @@ export default function ProblemForm() {
       difficulty,
       tags: form.tags.split(',').map((t) => t.trim()).filter(Boolean),
       type: form.type,
+      checker_mode: form.type === 'standard' ? form.checker_mode : 'token',
       spj_source: form.spj_source,
       interactor_source: form.interactor_source,
+      hack_generator_source: form.hack_generator_source,
+      hack_reference_source: form.hack_reference_source,
+      hack_target_source: form.hack_target_source,
       testcase_scores: [] as number[],
       submission_limit: 0,
       status: form.status,
@@ -204,20 +230,24 @@ export default function ProblemForm() {
   }
 
   return (
-    <div className="form-page">
-      <div className="page-header">
-        <h1 className="page-title">{isEdit ? '编辑题目' : '新建题目'}</h1>
-        {isEdit && (
-          <div style={{ display: 'flex', gap: 8 }}>
+    <div className="admin-form-page">
+      <PageHeader
+        eyebrow="题目管理"
+        title={isEdit ? '编辑题目' : '新建题目'}
+        description={isEdit
+          ? '修改题面、限制与评测器配置。发布标准/Hack/SPJ/交互题需要测试点总分恰好 100。'
+          : '填写题面与限制，创建后再配置测试点。'}
+        actions={isEdit ? (
+          <div className="page-actions">
             <Link to={`/problem/${id}`} className="button button-secondary">返回题目</Link>
             <Link to={`/admin/problems/${id}/tests`} className="button button-secondary">测试点管理</Link>
           </div>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <form onSubmit={submit} className="problem-form">
-        <div className="form-row">
-          <div className="form-group" style={{ flex: 2 }}>
+        <div className="layout-split">
+          <div className="form-group">
             <label htmlFor="p-title">标题</label>
             <input
               id="p-title"
@@ -235,18 +265,19 @@ export default function ProblemForm() {
               <option value="disabled">已停用</option>
             </select>
             <p className="field-hint">
-              发布标准/SPJ/交互题需要测试点总分恰好 100；输出题无需测试点。
+              发布标准/Hack/SPJ/交互题需要测试点总分恰好 100；输出题无需测试点。
             </p>
           </div>
         </div>
 
-        <div className="form-group">
-          <label>题型</label>
+        <fieldset className="form-group admin-fieldset">
+          <legend className="field-label">题型</legend>
           <div className="template-grid">
             {(Object.keys(TYPE_LABELS) as ProblemType[]).map((t) => (
               <button
                 key={t}
                 type="button"
+                aria-pressed={form.type === t}
                 className={`template-card ${form.type === t ? 'template-card-active' : ''}`}
                 onClick={() => {
                   markDirty()
@@ -258,9 +289,32 @@ export default function ProblemForm() {
               </button>
             ))}
           </div>
-        </div>
+        </fieldset>
 
-        <div className="form-row">
+        {form.type === 'standard' && (
+          <div className="form-group">
+            <label htmlFor="p-checker-mode">输出判定</label>
+            <select
+              id="p-checker-mode"
+              value={form.checker_mode}
+              onChange={(e) => setField('checker_mode', e.target.value)}
+            >
+              <option value="token">Token：忽略空格、换行与制表符差异</option>
+              <option value="exact">Exact：格式必须一致，纯格式差异判为 PE</option>
+            </select>
+            <p className="field-hint">
+              两种模式均区分大小写；Exact 仅统一 Windows / Linux 换行符。
+            </p>
+          </div>
+        )}
+
+        {form.type === 'hack' && (
+          <div className="info-message">
+            Hack 题由管理员提供待攻击的目标程序。题面会公开这段代码，选手提交符合输入格式的攻击数据；目标程序在沙箱中运行，若出现 WA、TLE、MLE 或 RE，则本次 Hack 成功。
+          </div>
+        )}
+
+        <div className="admin-form-row-3">
           <div className="form-group">
             <label htmlFor="p-difficulty">难度</label>
             <select
@@ -332,14 +386,51 @@ export default function ProblemForm() {
             />
           </div>
         )}
+        {form.type === 'hack' && (
+          <>
+            <div className="form-group">
+              <label htmlFor="p-hack-target">待攻击程序源码（C++，会展示在题面）</label>
+              <textarea
+                id="p-hack-target"
+                className="code-editor-textarea"
+                value={form.hack_target_source}
+                onChange={(e) => setField('hack_target_source', e.target.value)}
+                placeholder={'填写需要被攻击的错误程序。选手提交的内容会作为 stdin 传给这段程序。'}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="p-hack-reference">判题参考解源码（C++，管理员维护，不会展示给选手）</label>
+              <textarea
+                id="p-hack-reference"
+                className="code-editor-textarea"
+                value={form.hack_reference_source}
+                onChange={(e) => setField('hack_reference_source', e.target.value)}
+                placeholder={'读取 stdin 中的 Hack 输入数据并输出标准答案。参考解仅在评测沙箱内运行，不会展示给选手。'}
+              />
+            </div>
+            <details className="form-advanced">
+              <summary>兼容旧版：测试生成器</summary>
+              <div className="form-group">
+                <label htmlFor="p-hack-generator">Hack 测试生成器源码（C++，管理员维护）</label>
+                <textarea
+                  id="p-hack-generator"
+                  className="code-editor-textarea"
+                  value={form.hack_generator_source}
+                  onChange={(e) => setField('hack_generator_source', e.target.value)}
+                  placeholder={'从 stdin 读取测试种子并向 stdout 输出一组完整测试输入。每个测试点种子会单独运行一次。'}
+                />
+              </div>
+            </details>
+          </>
+        )}
         {form.type === 'output_only' && (
-          <div className="notice-card">输出题：选手仅提交答案文件，不使用测试点。限制与样例照常展示。</div>
+          <div className="info-message">输出题：选手仅提交答案文件，不使用测试点。限制与样例照常展示。</div>
         )}
 
         <div className="form-group">
           <div className="label-row">
             <label htmlFor="p-statement">题目描述（Markdown，支持 KaTeX）</label>
-            <label className="checkbox-label">
+            <label className="check-row">
               <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} />
               预览
             </label>
@@ -388,33 +479,35 @@ export default function ProblemForm() {
           />
         </div>
 
-        <div className="form-group">
-          <label>样例</label>
+        <fieldset className="form-group admin-fieldset">
+          <legend className="field-label">样例</legend>
           {samples.map((s, i) => (
             <div key={i} className="sample-editor">
               <div className="sample-editor-header">
                 <span>样例 #{i + 1}</span>
                 <button
                   type="button"
-                  className="small-button button-danger"
+                  className="button button-ghost button-sm danger"
                   onClick={() => removeSample(i)}
                   disabled={samples.length <= 1}
                 >
                   删除
                 </button>
               </div>
-              <div className="form-row">
+              <div className="layout-split">
                 <div className="form-group">
-                  <label>输入</label>
+                  <label htmlFor={`p-sample-in-${i}`}>输入</label>
                   <textarea
+                    id={`p-sample-in-${i}`}
                     className="markdown-editor"
                     value={s.input}
                     onChange={(e) => updateSample(i, 'input', e.target.value)}
                   />
                 </div>
                 <div className="form-group">
-                  <label>输出</label>
+                  <label htmlFor={`p-sample-out-${i}`}>输出</label>
                   <textarea
+                    id={`p-sample-out-${i}`}
                     className="markdown-editor"
                     value={s.output}
                     onChange={(e) => updateSample(i, 'output', e.target.value)}
@@ -422,8 +515,9 @@ export default function ProblemForm() {
                 </div>
               </div>
               <div className="form-group">
-                <label>说明（可选）</label>
+                <label htmlFor={`p-sample-note-${i}`}>说明（可选）</label>
                 <textarea
+                  id={`p-sample-note-${i}`}
                   className="markdown-editor"
                   value={s.note}
                   onChange={(e) => updateSample(i, 'note', e.target.value)}
@@ -431,19 +525,21 @@ export default function ProblemForm() {
               </div>
             </div>
           ))}
-          <button type="button" className="button button-secondary" onClick={addSample}>
-            添加样例
-          </button>
-        </div>
+          <div className="admin-form-actions">
+            <button type="button" className="button button-secondary" onClick={addSample}>
+              添加样例
+            </button>
+          </div>
+        </fieldset>
 
         {error && <div className="error-message">{error}</div>}
 
-        <div className="form-actions">
+        <div className="admin-form-actions">
           <button type="submit" className="button button-primary" disabled={saving}>
             {saving ? '保存中…' : isEdit ? '保存修改' : '创建并配置测试点'}
           </button>
           {savedAt !== null && <span className="success-message">已保存</span>}
-          {dirtyRef.current && !saving && <span className="muted">有未保存的修改</span>}
+          {dirtyRef.current && !saving && <span className="field-hint">有未保存的修改</span>}
         </div>
       </form>
     </div>

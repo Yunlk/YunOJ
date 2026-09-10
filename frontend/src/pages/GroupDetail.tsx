@@ -44,10 +44,145 @@ export default function GroupDetail() {
 
   if (!data) return error ? <div className="error-message">{error}</div> : <div className="page-loading">班级加载中…</div>
   const canCreate = data.can_manage && (user?.role === 'teacher' || user?.role === 'admin')
-  return <div className="group-detail-page">
-    <div className="page-header"><div><Link to="/groups" className="back-link">← 班级与团体</Link><h1 className="page-title">{data.group.name}</h1><p className="muted">{data.group.description || '暂无说明'} · {data.group.member_count} 位成员</p></div>{canCreate && <button className="button button-primary" type="button" onClick={() => setShowCreate((value) => !value)}>发布作业</button>}</div>
-    {error && <div className="error-message">{error}</div>}
-    {showCreate && <form className="card form-card" onSubmit={submit}><div className="form-group"><label htmlFor="assignment-title">标题</label><input id="assignment-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="作业或测试标题" /></div><div className="form-row"><div className="form-group"><label htmlFor="assignment-kind">类型</label><select id="assignment-kind" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}><option value="assignment">作业</option><option value="test">测试</option></select></div><div className="form-group"><label htmlFor="assignment-description">说明</label><input id="assignment-description" value={description} onChange={(event) => setDescription(event.target.value)} /></div></div><button className="button button-primary" type="submit" disabled={!title.trim()}>发布</button></form>}
-    <div className="group-detail-grid"><section className="card"><div className="section-header"><h2>作业与测试</h2><span className="muted">{data.assignments.length} 项</span></div>{data.assignments.length === 0 ? <p className="muted">还没有发布作业。</p> : <div className="assignment-list">{data.assignments.map((item) => <Link to={`/assignments/${item.id}`} className="assignment-item" key={item.id}><span><strong>{item.title}</strong><small>{item.kind === 'test' ? '测试' : '作业'} · {item.problem_count} 道题 · {formatTime(item.start_at)}</small></span><span className={item.published ? 'assignment-published' : 'assignment-draft'}>{item.published ? '已发布' : '草稿'}</span></Link>)}</div>}</section><section className="card"><div className="section-header"><h2>成员</h2><span className="muted">{data.members.length} 人</span></div>{canCreate && <form className="member-add-form" onSubmit={addMember}><input value={memberId} onChange={(event) => setMemberId(event.target.value)} placeholder="用户 ID" inputMode="numeric" /><select value={memberRole} onChange={(event) => setMemberRole(event.target.value as typeof memberRole)}><option value="student">学生</option><option value="teacher">教师</option></select><button className="button button-secondary" type="submit">添加</button></form>}<div className="member-list">{data.members.map((member) => <div className="member-item" key={member.user_id}><span><strong>{member.username}</strong><small>{member.email}</small></span><span className="muted">{member.role === 'teacher' ? '教师' : '学生'}</span></div>)}</div></section></div>
-  </div>
+  return (
+    <div>
+      <nav className="breadcrumb" aria-label="当前位置">
+        <Link to="/groups">班级与团体</Link>
+        <span className="breadcrumb-sep">/</span>
+        <span>{data.group.name}</span>
+      </nav>
+
+      <header className="page-header page-header-standard">
+        <div className="page-heading">
+          <h1 className="page-title">{data.group.name}</h1>
+          <p className="page-description">{data.group.description || '暂无说明'} · {data.group.member_count} 位成员</p>
+        </div>
+        {canCreate && (
+          <div className="page-actions">
+            <button className="button button-primary" type="button" onClick={() => setShowCreate((value) => !value)}>发布作业</button>
+          </div>
+        )}
+      </header>
+
+      {error && <div className="error-message">{error}</div>}
+
+      {showCreate && (
+        <form className="card" onSubmit={submit} aria-labelledby="assignment-create-title">
+          <div className="section-head">
+            <h2 className="section-title" id="assignment-create-title">创建作业或测试</h2>
+          </div>
+          <div className="form-group">
+            <label htmlFor="assignment-title">标题</label>
+            <input id="assignment-title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="作业或测试标题" />
+          </div>
+          <div className="layout-split">
+            <div className="form-group">
+              <label htmlFor="assignment-kind">类型</label>
+              <select id="assignment-kind" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+                <option value="assignment">作业</option>
+                <option value="test">测试</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="assignment-description">说明</label>
+              <input id="assignment-description" value={description} onChange={(event) => setDescription(event.target.value)} />
+            </div>
+          </div>
+          <button className="button button-primary" type="submit" disabled={!title.trim()}>发布</button>
+        </form>
+      )}
+
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">作业与测试</h2>
+          <span className="section-hint">{data.assignments.length} 项</span>
+        </div>
+        {data.assignments.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-state-title">还没有发布作业</span>
+            <span className="empty-state-hint">
+              {canCreate ? '点「发布作业」创建第一份作业或测试，学生就能在班级里看到。' : '教师发布作业后，这里会显示作业与测试列表。'}
+            </span>
+            {canCreate && (
+              <button className="button button-primary button-sm" type="button" onClick={() => setShowCreate(true)}>发布作业</button>
+            )}
+          </div>
+        ) : (
+          <div className="table-frame">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 300 }}>标题</th>
+                  <th style={{ width: 88 }}>类型</th>
+                  <th style={{ width: 96 }}>题目数</th>
+                  <th style={{ width: 176 }}>开始时间</th>
+                  <th style={{ width: 96 }}>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.assignments.map((item) => (
+                  <tr key={item.id}>
+                    <td><Link to={`/assignments/${item.id}`}>{item.title}</Link></td>
+                    <td><span className="tag-chip">{item.kind === 'test' ? '测试' : '作业'}</span></td>
+                    <td className="cell-num">{item.problem_count}</td>
+                    <td className="cell-num">{formatTime(item.start_at)}</td>
+                    <td>
+                      <span className={item.published ? 'badge badge-positive' : 'badge'}>{item.published ? '已发布' : '草稿'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">成员</h2>
+          <span className="section-hint">{data.members.length} 人</span>
+        </div>
+        {canCreate && (
+          <form className="toolbar" onSubmit={addMember}>
+            <span className="toolbar-label">添加成员</span>
+            <input aria-label="用户 ID" value={memberId} onChange={(event) => setMemberId(event.target.value)} placeholder="用户 ID" inputMode="numeric" />
+            <select aria-label="成员角色" value={memberRole} onChange={(event) => setMemberRole(event.target.value as typeof memberRole)}>
+              <option value="student">学生</option>
+              <option value="teacher">教师</option>
+            </select>
+            <button className="button button-secondary" type="submit">添加</button>
+          </form>
+        )}
+        {data.members.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-state-title">还没有成员</span>
+            <span className="empty-state-hint">
+              {canCreate ? '按用户 ID 添加学生或教师，成员即可看到班级作业。' : '教师添加成员后，这里会显示班级成员。'}
+            </span>
+          </div>
+        ) : (
+          <div className="table-frame">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 200 }}>用户名</th>
+                  <th>邮箱</th>
+                  <th style={{ width: 96 }}>角色</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.members.map((member) => (
+                  <tr key={member.user_id}>
+                    <td>{member.username}</td>
+                    <td className="cell-id">{member.email}</td>
+                    <td>{member.role === 'teacher' ? '教师' : '学生'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  )
 }

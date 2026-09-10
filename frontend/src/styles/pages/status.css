@@ -1,0 +1,274 @@
+/*
+ * 提交记录 /status + 提交详情 /submission/:id
+ *
+ * 只组合设计基座的类（.toolbar / .segmented / .data-table / .empty-state / .status-*)，
+ * 本文件只负责页面特有的排版：结论色块、指标栅格、测试点与代码块的操作条。
+ * 颜色一律走令牌：--verdict-* / --verdict-color / --verdict-rgb / --c-*。
+ */
+
+/* ==================== 筛选条（一行化） ==================== */
+
+.submission-filters {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+.submission-filter-input {
+  width: 96px;
+  min-width: 0;
+  text-align: left;
+}
+
+.submission-filter-lang {
+  min-width: 116px;
+}
+
+.submission-filters .field-label {
+  white-space: nowrap;
+}
+
+/* 「/」快捷键提示，与题库页搜索框一致 */
+.submission-kbd {
+  flex: 0 0 auto;
+  color: var(--c-text-3);
+}
+
+.submission-range-hint {
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+}
+
+/* 列表范围条：标题固定为「提交记录」后，用徽标说明当前看的是谁的数据 */
+.submission-scope {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+
+/* ==================== 表格摘要补充 ==================== */
+
+.table-summary-filter {
+  color: var(--c-primary);
+  font-weight: 650;
+}
+
+/* ==================== 结论色块（表格首列） ==================== */
+
+.submission-verdict {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 8px 2px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--verdict-color) 10%, var(--c-surface));
+  color: var(--verdict-color);
+  font-size: var(--fs-12);
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.submission-verdict-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: var(--verdict-color);
+}
+
+.submission-verdict-pending {
+  animation: submission-verdict-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes submission-verdict-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* 题目列：标题 + 题目号 */
+.submission-problem-id {
+  margin-left: var(--space-2);
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.submission-time-cell {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.submission-row-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.submission-row-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.submission-empty {
+  margin-top: var(--space-5);
+}
+
+/* ==================== 提交详情：结论区 ==================== */
+
+.verdict-panel {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: stretch;
+  gap: var(--space-5);
+  margin: 0 0 var(--space-6);
+  padding: var(--space-5);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.verdict-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px solid color-mix(in srgb, var(--verdict-color) 28%, var(--c-border));
+  border-left: 4px solid var(--verdict-color);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--verdict-color) 8%, var(--c-surface));
+}
+
+.verdict-label {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+
+.verdict-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--verdict-color);
+}
+
+.verdict-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  background: var(--verdict-color);
+}
+
+.verdict-text {
+  font-size: var(--fs-26);
+  font-weight: 750;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.verdict-pending {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.verdict-flags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.verdict-score {
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 关键指标栅格 */
+.verdict-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  align-content: start;
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+
+.verdict-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.verdict-metrics dt {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.verdict-metrics dd {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.verdict-metric-sub {
+  display: block;
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+/* ==================== 提交详情：测试点与代码 ==================== */
+
+.submission-cases .case-table td {
+  font-size: var(--fs-13);
+}
+
+.submission-cases .case-table tbody tr.case-failed td {
+  background: var(--c-danger-soft);
+}
+
+.submission-cases .case-table tbody tr.case-failed:hover td {
+  background: var(--c-danger-soft);
+}
+
+.submission-case-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: var(--space-3);
+}
+
+.submission-code-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* 代码块沿用全局 .code-block 的深色样式，这里只补高度与滚动 */
+.submission-code-block {
+  max-height: 560px;
+  overflow: auto;
+}
+
+@media (max-width: 960px) {
+  .verdict-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .submission-filter-input {
+    width: 84px;
+  }
+}

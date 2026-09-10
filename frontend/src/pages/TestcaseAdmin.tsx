@@ -6,6 +6,15 @@ import {
   importTestsZip, previewTestsZip, reorderTestcases, updateTestcase,
 } from '../api'
 import type { ProblemDetail, TestcasesResp, ZipPreview } from '../types'
+import PageHeader from '../components/PageHeader'
+
+const PROBLEM_TYPE_LABELS: Record<string, string> = {
+  standard: '标准',
+  hack: 'Hack',
+  spj: 'SPJ',
+  interactive: '交互',
+  output_only: '输出题',
+}
 
 function fmtSize(bytes: number): string {
   if (bytes <= 0) return '—'
@@ -90,7 +99,7 @@ export default function TestcaseAdmin() {
       window.alert('分值需为 0-100')
       return
     }
-    void run(() => updateTestcase(problemId, ordinal, newScore))
+    void run(() => updateTestcase(problemId, ordinal, { score: newScore }))
   }
 
   const handleDelete = (ordinal: number) => {
@@ -147,50 +156,58 @@ export default function TestcaseAdmin() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1 className="page-title">测试点管理 · {problem.title}</h1>
-        <div style={{ display: 'flex', gap: 8 }}>
+      <PageHeader
+        eyebrow="题目管理"
+        title={`测试点 · ${problem.title}`}
+        description="上传、排序并校验评测数据。"
+        actions={<div className="page-actions">
           <Link to={`/problem/${problem.id}/edit`} className="button button-secondary">返回编辑</Link>
           <Link to={`/problem/${problem.id}`} className="button button-secondary">预览题目</Link>
-        </div>
-      </div>
+        </div>}
+      />
 
       {error && <div className="error-message">{error}</div>}
 
-      <div className="card contest-meta">
-        <div className="meta-item">
-          <span className="field-label">题型</span>
-          <span>{problem.type}</span>
-        </div>
-        <div className="meta-item">
-          <span className="field-label">测试点数</span>
-          <span>{data.count}</span>
-        </div>
-        <div className="meta-item">
-          <span className="field-label">总分</span>
-          <span className={scoreValid ? '' : 'error-text'}>
-            {total} / 100 {scoreValid ? '✓' : '（发布需总分恰好 100）'}
-          </span>
-        </div>
-        <div className="meta-item">
-          <span className="field-label">题目状态</span>
-          <span>{problem.status}</span>
-        </div>
+      <div className="card">
+        <dl className="kv-list">
+          <div><dt>题型</dt><dd>{PROBLEM_TYPE_LABELS[problem.type] ?? problem.type}</dd></div>
+          <div><dt>测试点数</dt><dd>{data.count}</dd></div>
+          <div>
+            <dt>总分</dt>
+            <dd className={scoreValid ? 'status-green' : 'status-red'}>
+              {total} / 100 {scoreValid ? '✓' : '（发布需总分恰好 100）'}
+            </dd>
+          </div>
+          <div><dt>题目状态</dt><dd>{problem.status}</dd></div>
+        </dl>
       </div>
 
       {problem.status === 'published' && (
-        <div className="notice-card freeze-notice">
+        <div className="warning-message">
           题目已发布：删除/改分后总分必须仍为 100 且至少保留 1 个测试点；如需自由编辑请先转为草稿。
         </div>
       )}
 
-      <section className="contest-section">
-        <div className="section-header"><h2>测试点列表（拖拽行可排序）</h2></div>
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">测试点列表</h2>
+          <span className="section-hint">拖拽行可调整评测顺序</span>
+        </div>
+        <div className="table-summary">
+          <span>共 {data.items.length} 个测试点 · 总分 {total} / 100</span>
+          <span className={scoreValid ? 'badge badge-positive' : 'badge badge-danger'}>
+            {scoreValid ? '分值合法' : '分值不合法'}
+          </span>
+        </div>
+        <div className="table-frame">
         <table className="data-table">
           <thead>
             <tr>
               <th style={{ width: 50 }}>编号</th>
               <th style={{ width: 110 }}>分值（0-100）</th>
+              <th style={{ width: 84 }} title="预测试点：比赛开启「只评测预测试」时，比赛期间只跑这些点">
+                预测试
+              </th>
               <th>输入文件</th>
               <th>输出文件</th>
               <th style={{ width: 100 }}>大小</th>
@@ -200,7 +217,7 @@ export default function TestcaseAdmin() {
           </thead>
           <tbody>
             {data.items.length === 0 ? (
-              <tr><td colSpan={7} className="table-empty">暂无测试点，上传 ZIP 或添加单个测试点</td></tr>
+              <tr><td colSpan={8} className="table-empty">暂无测试点，上传 ZIP 或添加单个测试点</td></tr>
             ) : (
               data.items.map((t, i) => (
                 <tr
@@ -215,7 +232,7 @@ export default function TestcaseAdmin() {
                   style={{ cursor: 'grab' }}
                   title="拖拽排序"
                 >
-                  <td className="mono">#{t.ordinal}</td>
+                  <td className="cell-id">#{t.ordinal}</td>
                   <td>
                     <input
                       type="number"
@@ -223,20 +240,31 @@ export default function TestcaseAdmin() {
                       max={100}
                       value={t.score}
                       disabled={busy}
+                      aria-label={`测试点 ${t.ordinal} 的分值`}
                       onChange={(e) => handleScore(t.ordinal, Number(e.target.value))}
                       style={{ width: 80 }}
                     />
                   </td>
-                  <td className="mono">{t.ordinal}.in {t.input_exists ? '' : '（缺失）'}</td>
-                  <td className="mono">{t.ordinal}.out {t.output_exists ? '' : '（缺失）'}</td>
-                  <td className="mono">{fmtSize(t.size_bytes)}</td>
                   <td>
-                    <span className={`phase-badge ${t.valid ? 'phase-running' : 'phase-ended'}`}>
+                    <input
+                      type="checkbox"
+                      checked={t.is_pretest}
+                      disabled={busy}
+                      aria-label={`把测试点 ${t.ordinal} 标记为预测试点`}
+                      title="标记为预测试点"
+                      onChange={(e) => void run(() => updateTestcase(problemId, t.ordinal, { is_pretest: e.target.checked }))}
+                    />
+                  </td>
+                  <td className="cell-id">{t.ordinal}.in {t.input_exists ? '' : '（缺失）'}</td>
+                  <td className="cell-id">{t.ordinal}.out {t.output_exists ? '' : '（缺失）'}</td>
+                  <td className="cell-num">{fmtSize(t.size_bytes)}</td>
+                  <td>
+                    <span className={t.valid ? 'badge badge-positive' : 'badge badge-danger'}>
                       {t.valid ? '正常' : '缺失'}
                     </span>
                   </td>
-                  <td>
-                    <button type="button" className="link-button danger" disabled={busy} onClick={() => handleDelete(t.ordinal)}>
+                  <td className="cell-actions">
+                    <button type="button" className="button button-ghost button-sm danger" disabled={busy} onClick={() => handleDelete(t.ordinal)}>
                       删除
                     </button>
                   </td>
@@ -245,12 +273,13 @@ export default function TestcaseAdmin() {
             )}
           </tbody>
         </table>
+        </div>
       </section>
 
-      <section className="contest-section">
-        <div className="section-header"><h2>添加单个测试点</h2></div>
+      <section className="section">
+        <div className="section-head"><h2 className="section-title">添加单个测试点</h2></div>
         <div className="card">
-          <form className="form-row admin-problem-form" onSubmit={handleAdd}>
+          <form className="admin-problem-form" onSubmit={handleAdd}>
             <div className="form-group">
               <label htmlFor="tc-in">输入文件（.in）</label>
               <input id="tc-in" type="file" onChange={(e) => setInFile(e.target.files?.[0] ?? null)} />
@@ -268,10 +297,13 @@ export default function TestcaseAdmin() {
         </div>
       </section>
 
-      <section className="contest-section">
-        <div className="section-header"><h2>ZIP 批量导入（先预览，确认后写入）</h2></div>
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">ZIP 批量导入</h2>
+          <span className="section-hint">先预览，确认后写入</span>
+        </div>
         <div className="card">
-          <div className="form-row">
+          <div className="admin-form-cols">
             <div className="form-group">
               <label htmlFor="tc-zip">测试数据 zip（N.in / N.out 成对）</label>
               <input id="tc-zip" ref={zipInput} type="file" accept=".zip" onChange={(e) => {
@@ -290,7 +322,7 @@ export default function TestcaseAdmin() {
 
           {zipPreview && (
             <div className="zip-preview">
-              <div className={`notice-card ${zipPreview.valid ? '' : 'freeze-notice'}`}>
+              <div className={zipPreview.valid ? 'info-message' : 'warning-message'}>
                 解析结果：{zipPreview.pairs.length} 组成对测试点
                 {zipPreview.unpaired.length > 0 && `，未配对文件：${zipPreview.unpaired.join('、')}`}
                 {zipPreview.valid ? '，可导入' : '，存在未配对文件将无法导入'}
@@ -298,47 +330,52 @@ export default function TestcaseAdmin() {
               </div>
               {zipPreview.pairs.length > 0 && (
                 <>
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th style={{ width: 90 }}>编号</th>
-                        <th>输入大小</th>
-                        <th>输出大小</th>
-                        <th style={{ width: 130 }}>分值（0-100）</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {zipPreview.pairs.map((p, i) => (
-                        <tr key={p.name}>
-                          <td className="mono">{p.name}</td>
-                          <td className="mono">{fmtSize(p.in_size)}</td>
-                          <td className="mono">{fmtSize(p.out_size)}</td>
-                          <td>
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              value={zipScores[i] ?? ''}
-                              placeholder={zipMode === 'replace' ? '留空=均分' : '必填'}
-                              onChange={(e) => {
-                                const next = [...zipScores]
-                                next[i] = e.target.value
-                                setZipScores(next)
-                              }}
-                            />
-                          </td>
+                  <div className="table-frame">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 90 }}>编号</th>
+                          <th>输入大小</th>
+                          <th>输出大小</th>
+                          <th style={{ width: 130 }}>分值（0-100）</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={busy || !zipPreview.valid}
-                    onClick={handleZipImport}
-                  >
-                    {busy ? '导入中…' : '确认导入'}
-                  </button>
+                      </thead>
+                      <tbody>
+                        {zipPreview.pairs.map((p, i) => (
+                          <tr key={p.name}>
+                            <td className="cell-id">{p.name}</td>
+                            <td className="cell-num">{fmtSize(p.in_size)}</td>
+                            <td className="cell-num">{fmtSize(p.out_size)}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={zipScores[i] ?? ''}
+                                placeholder={zipMode === 'replace' ? '留空=均分' : '必填'}
+                                aria-label={`测试点 ${p.name} 的分值`}
+                                onChange={(e) => {
+                                  const next = [...zipScores]
+                                  next[i] = e.target.value
+                                  setZipScores(next)
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="admin-form-actions">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={busy || !zipPreview.valid}
+                      onClick={handleZipImport}
+                    >
+                      {busy ? '导入中…' : '确认导入'}
+                    </button>
+                  </div>
                 </>
               )}
             </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, extractError } from '../api'
+import PageHeader from '../components/PageHeader'
 
 interface JudgeNodeLanguage {
   key: string
@@ -101,9 +102,9 @@ function NodeRow({ node, reload, reportError }: {
         <span>{node.hostname || '未上报'}</span>
         <small>{node.version || '未知版本'}</small>
       </td>
-      <td>
+      <td className="cell-num">
         <strong>{node.actual_concurrency}</strong>
-        <span className="muted"> / {node.desired_concurrency}</span>
+        <span className="table-subtext"> / {node.desired_concurrency}</span>
       </td>
       <td>
         <div className="judge-concurrency-control">
@@ -116,7 +117,7 @@ function NodeRow({ node, reload, reportError }: {
             onChange={(event) => setConcurrency(Number(event.target.value))}
           />
           <button
-            className="button button-secondary button-small"
+            className="button button-secondary button-sm"
             type="button"
             disabled={saving || concurrency === node.desired_concurrency || concurrency < 0 || concurrency > 256}
             onClick={() => void update({ desired_concurrency: concurrency })}
@@ -130,6 +131,8 @@ function NodeRow({ node, reload, reportError }: {
           className={`status-toggle ${node.enabled ? 'enabled' : 'disabled'}`}
           type="button"
           disabled={saving}
+          aria-pressed={node.enabled}
+          title={node.enabled ? '点击停止接收新任务' : '点击恢复接收任务'}
           onClick={() => void update({ enabled: !node.enabled })}
         >
           {node.enabled ? '接收任务' : '已排空'}
@@ -196,36 +199,34 @@ export default function AdminJudge() {
 
   return (
     <div className="admin-judge-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">平台运维</div>
-          <h1 className="page-title">测评集群</h1>
-          <p className="page-description">管理节点容量与对用户开放的语言。节点配置约 3 秒内生效。</p>
-        </div>
-        <button className="button button-secondary" type="button" onClick={() => void recover()} disabled={recovering}>
-          {recovering ? '恢复中...' : '恢复卡住任务'}
-        </button>
-      </div>
+      <PageHeader
+        eyebrow="平台运维"
+        title="测评集群"
+        description="管理节点容量与对用户开放的语言。节点配置约 3 秒内生效。"
+        actions={<button className="button button-secondary" type="button" onClick={() => void recover()} disabled={recovering}>
+          {recovering ? '恢复中…' : '恢复卡住任务'}
+        </button>}
+      />
 
       {error && <div className="error-message">{error}</div>}
       {!data ? <div className="page-loading">读取集群状态...</div> : (
         <>
-          <div className="home-stat-strip judge-stat-strip">
-            <div><strong>{data.queue.queued}</strong><span>队列等待</span></div>
-            <div><strong>{data.summary.processing}</strong><span>正在处理</span></div>
-            <div><strong>{data.summary.online_nodes}/{data.summary.total_nodes}</strong><span>在线节点</span></div>
-            <div><strong>{data.summary.actual_concurrency}/{data.summary.desired_concurrency}</strong><span>实际 / 目标并发</span></div>
+          <div className="stat-grid">
+            <div className="stat-tile"><span className="stat-tile-label">队列等待</span><strong className="stat-tile-value">{data.queue.queued}</strong></div>
+            <div className="stat-tile"><span className="stat-tile-label">正在处理</span><strong className="stat-tile-value">{data.summary.processing}</strong></div>
+            <div className="stat-tile"><span className="stat-tile-label">在线节点</span><strong className="stat-tile-value">{data.summary.online_nodes}/{data.summary.total_nodes}</strong></div>
+            <div className="stat-tile"><span className="stat-tile-label">实际 / 目标并发</span><strong className="stat-tile-value">{data.summary.actual_concurrency}/{data.summary.desired_concurrency}</strong></div>
           </div>
 
-          <section className="judge-admin-section">
-            <div className="section-header">
-              <h2>评测节点</h2>
-              <span className="muted">正在执行的任务会完成后再排空</span>
+          <section className="section">
+            <div className="section-head">
+              <h2 className="section-title">评测节点</h2>
+              <span className="section-hint">正在执行的任务会完成后再排空</span>
             </div>
-            <div className="table-wrap">
+            <div className="table-frame">
               <table className="data-table judge-node-table">
                 <thead>
-                  <tr><th>节点</th><th>主机</th><th>实际 / 目标</th><th>目标并发</th><th>调度</th><th>最后心跳</th></tr>
+                  <tr><th>节点</th><th>主机</th><th>实际 / 目标</th><th>目标并发</th><th className="cell-state">调度</th><th>最后心跳</th></tr>
                 </thead>
                 <tbody>
                   {data.nodes.length === 0 ? (
@@ -239,10 +240,10 @@ export default function AdminJudge() {
           </section>
 
           <div className="judge-admin-columns">
-            <section className="judge-admin-section">
-              <div className="section-header">
-                <h2>提交语言</h2>
-                <span className="muted">命令由服务端配置维护</span>
+            <section className="section judge-admin-section">
+              <div className="section-head">
+                <h2 className="section-title">提交语言</h2>
+                <span className="section-hint">命令由服务端配置维护</span>
               </div>
               <div className="judge-language-list">
                 {data.languages.map((language) => (
@@ -252,6 +253,8 @@ export default function AdminJudge() {
                       className={`status-toggle ${language.enabled ? 'enabled' : 'disabled'}`}
                       type="button"
                       disabled={languageSaving === language.key}
+                      aria-pressed={language.enabled}
+                      title={language.enabled ? '点击停止向用户开放' : '点击重新开放'}
                       onClick={() => void toggleLanguage(language)}
                     >
                       {language.enabled ? '已开放' : '已停用'}
@@ -261,8 +264,8 @@ export default function AdminJudge() {
               </div>
             </section>
 
-            <section className="judge-admin-section">
-              <div className="section-header"><h2>提交状态</h2><span className="muted">全部历史记录</span></div>
+            <section className="section judge-admin-section">
+              <div className="section-head"><h2 className="section-title">提交状态</h2><span className="section-hint">全部历史记录</span></div>
               <div className="judge-status-grid">
                 {Object.entries(data.statuses).map(([status, count]) => (
                   <div key={status}><span>{statusNames[status] || status}</span><strong>{count}</strong></div>
@@ -271,9 +274,14 @@ export default function AdminJudge() {
             </section>
           </div>
 
-          <section className="judge-admin-section">
-            <div className="section-header"><h2>最近操作</h2><span className="muted">保留最近 30 条</span></div>
-            {data.audit_logs.length === 0 ? <p className="empty-state">暂无集群配置变更。</p> : (
+          <section className="section judge-admin-section">
+            <div className="section-head"><h2 className="section-title">最近操作</h2><span className="section-hint">保留最近 30 条</span></div>
+            {data.audit_logs.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-title">暂无集群配置变更</div>
+                <div className="empty-state-hint">调整节点并发或开关语言后，操作记录会出现在这里。</div>
+              </div>
+            ) : (
               <div className="judge-audit-list">
                 {data.audit_logs.map((item) => (
                   <div key={item.id}>

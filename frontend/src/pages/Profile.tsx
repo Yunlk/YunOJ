@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { changePassword, extractError, getProfile, uploadProfileAvatar } from '../api'
+import { extractError, getProblemFacets, getProfile } from '../api'
+import PageHeader from '../components/PageHeader'
 import StatusBadge from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
-import type { ProfileActivityDay, ProfileData, SubmissionListItem } from '../types'
+import type { ProblemFacets, ProfileActivityDay, ProfileData, SubmissionListItem } from '../types'
+import { getDifficulty } from '../utils/difficulty'
 import { formatRunTime, formatTime } from '../utils/format'
 import { ratingClass } from '../utils/rating'
 
-function dateKey(date: Date): string {
-  return date.toISOString().slice(0, 10)
-}
+const dateKey = (date: Date): string => date.toISOString().slice(0, 10)
 
-function heatLevel(count: number): string {
+/** 热力图密度分级：与题库页一致的 5 档。 */
+const heatLevel = (count: number): string => {
   if (count <= 0) return 'level-0'
   if (count === 1) return 'level-1'
   if (count <= 3) return 'level-2'
@@ -19,14 +20,14 @@ function heatLevel(count: number): string {
   return 'level-4'
 }
 
-function buildHeatmap(activity: ProfileActivityDay[]) {
+/** 最近一年（按周一开头对齐）的提交活动格子。 */
+function buildHeatmap(activity: ProfileActivityDay[]): { date: string; count: number }[] {
   const counts = new Map(activity.map((item) => [item.date, item.count]))
   const now = new Date()
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   const start = new Date(end)
   start.setUTCDate(start.getUTCDate() - 364)
-  const mondayOffset = (start.getUTCDay() + 6) % 7
-  start.setUTCDate(start.getUTCDate() - mondayOffset)
+  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7))
   const cells: { date: string; count: number }[] = []
   for (let i = 0; i < 371; i += 1) {
     const date = new Date(start)
@@ -37,18 +38,20 @@ function buildHeatmap(activity: ProfileActivityDay[]) {
   return cells
 }
 
+const percent = (part: number, whole: number): number =>
+  whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0
+
 function Avatar({ profile, failed, onError }: {
   profile: ProfileData
   failed: boolean
   onError: () => void
 }) {
-  const initial = profile.user.username.slice(0, 1).toUpperCase()
   if (!profile.user.avatar || failed) {
-    return <span className="profile-avatar-fallback">{initial}</span>
+    return <span className="pf-avatar-fallback">{profile.user.username.slice(0, 1).toUpperCase()}</span>
   }
   return (
     <img
-      className="profile-avatar-image"
+      className="pf-avatar-image"
       src={`/api/users/${profile.user.id}/avatar?v=${encodeURIComponent(profile.user.avatar)}`}
       alt=""
       onError={onError}
@@ -56,42 +59,96 @@ function Avatar({ profile, failed, onError }: {
   )
 }
 
-function RecentSubmission({ item }: { item: SubmissionListItem }) {
+function RoleTag({ role }: { role: string }) {
+  if (role !== 'admin' && role !== 'teacher') return null
+  return <span className="badge badge-info">{role === 'admin' ? '管理员' : '教师'}</span>
+}
+
+function RecentSubmissionRow({ item }: { item: SubmissionListItem }) {
   return (
     <tr>
       <td>
-        <Link to={`/problem/${item.problem_id}`} className="problem-link">{item.problem_title}</Link>
+        <Link to={`/problem/${item.problem_id}`} className="pf-problem-link">{item.problem_title}</Link>
       </td>
       <td><StatusBadge status={item.status} /></td>
-      <td className="mono">{item.language}</td>
-      <td className="mono">{formatRunTime(item.time_ms)}</td>
-      <td className="mono profile-date-cell">{formatTime(item.created_at)}</td>
-      <td><Link to={`/submission/${item.id}`} className="link-button profile-detail-link">查看</Link></td>
+      <td className="pf-mono">{item.language}</td>
+      <td className="pf-mono">{formatRunTime(item.time_ms)}</td>
+      <td className="pf-mono pf-time-cell">{formatTime(item.created_at)}</td>
+      <td className="cell-actions">
+        <Link to={`/submission/${item.id}`} className="button button-ghost button-sm">查看</Link>
+      </td>
     </tr>
   )
 }
 
+/** 刷题进度：已解决 / 总数 + 按难度分布。数据来自 /api/problems/facets。 */
+function ProgressCard({ facets, attempted }: { facets: ProblemFacets; attempted: number }) {
+  const solved = facets.solved
+  const total = facets.total
+  const difficulties = facets.difficulties.filter((d) => d.total > 0)
+
+  if (total === 0) {
+    return (
+      <section className="side-card" aria-labelledby="pf-progress-title">
+        <h2 className="side-card-title" id="pf-progress-title">刷题进度</h2>
+        <p className="pf-muted">题库暂时还没有已发布题目。</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="side-card" aria-labelledby="pf-progress-title">
+      <h2 className="side-card-title" id="pf-progress-title">刷题进度</h2>
+      <p className="pf-progress-figure">
+        <strong>{solved}</strong>
+        <span className="pf-muted">/ {total} 题已通过</span>
+      </p>
+      <div className="progress" role="img" aria-label={`已通过 ${solved} 题，共 ${total} 题`}>
+        <div className="progress-bar accepted" style={{ width: `${percent(solved, total)}%` }} />
+      </div>
+      <p className="pf-progress-note">
+        完成度 {percent(solved, total)}% · 尝试过 {attempted} 题
+      </p>
+
+      <ul className="pf-difficulty-list">
+        {difficulties.map((item) => {
+          const info = getDifficulty(item.difficulty)
+          return (
+            <li className={`pf-difficulty-row ${info.className}`} key={item.difficulty}>
+              <span className="pf-difficulty-label">{info.label}</span>
+              <span className="pf-difficulty-bar" aria-hidden="true">
+                <span style={{ width: `${percent(item.solved, item.total)}%` }} />
+              </span>
+              <span className="pf-difficulty-count">{item.solved}/{item.total}</span>
+            </li>
+          )
+        })}
+      </ul>
+
+      <Link to="/problems?my_status=todo" className="button button-secondary button-sm button-block">
+        继续刷题
+      </Link>
+    </section>
+  )
+}
+
 export default function Profile() {
-  const { setUser, refresh } = useAuth()
-  const inputRef = useRef<HTMLInputElement>(null)
+  const { setUser } = useAuth()
   const [profile, setProfile] = useState<ProfileData | null>(null)
+  const [facets, setFacets] = useState<ProblemFacets | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [uploading, setUploading] = useState(false)
+  const [facetsError, setFacetsError] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
-  const [currentPassword, setCurrentPassword] = useState('')
-  const [newPassword, setNewPassword] = useState('')
-  const [passwordMessage, setPasswordMessage] = useState('')
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     getProfile()
       .then((data) => {
-        if (!cancelled) {
-          setProfile(data)
-          setUser(data.user)
-        }
+        if (cancelled) return
+        setProfile(data)
+        setUser(data.user)
       })
       .catch((err) => {
         if (!cancelled) setError(extractError(err))
@@ -102,169 +159,197 @@ export default function Profile() {
     return () => { cancelled = true }
   }, [setUser])
 
+  // 进度卡单独拉取，失败不影响页面其余部分
+  useEffect(() => {
+    let cancelled = false
+    getProblemFacets()
+      .then((data) => { if (!cancelled) setFacets(data) })
+      .catch((err) => { if (!cancelled) setFacetsError(extractError(err)) })
+    return () => { cancelled = true }
+  }, [])
+
   const heatmap = useMemo(() => buildHeatmap(profile?.activity ?? []), [profile?.activity])
   const activityTotal = useMemo(
-    () => (profile?.activity ?? []).reduce((total, item) => total + item.count, 0),
+    () => (profile?.activity ?? []).reduce((sum, item) => sum + item.count, 0),
     [profile?.activity],
   )
   const acceptedRate = profile && profile.stats.total_submissions > 0
-    ? Math.round(profile.stats.accepted_submissions / profile.stats.total_submissions * 100)
+    ? Math.round((profile.stats.accepted_submissions / profile.stats.total_submissions) * 100)
     : 0
-
-  const onAvatarChange = async (file: File | undefined) => {
-    if (!file) return
-    setUploading(true)
-    setError('')
-    try {
-      const result = await uploadProfileAvatar(file)
-      setProfile((current) => current
-        ? { ...current, user: { ...current.user, avatar: result.avatar } }
-        : current)
-      setAvatarFailed(false)
-      await refresh()
-    } catch (err) {
-      setError(extractError(err))
-    } finally {
-      setUploading(false)
-      if (inputRef.current) inputRef.current.value = ''
-    }
-  }
-
-  const updatePassword = async (event: React.FormEvent) => {
-    event.preventDefault()
-    setPasswordMessage('')
-    try {
-      await changePassword(currentPassword, newPassword)
-      setCurrentPassword(''); setNewPassword(''); setPasswordMessage('密码已更新')
-    } catch (err) { setPasswordMessage(extractError(err)) }
-  }
 
   if (loading) return <div className="page-loading">个人中心加载中…</div>
   if (error && !profile) return <div className="error-message">{error}</div>
   if (!profile) return null
 
+  const { user, stats, ranking } = profile
+  const isStudent = user.role === 'student' || user.role === 'user'
+
   return (
     <div className="profile-page">
-      <div className="profile-header-panel">
-        <div className="profile-identity">
-          <button
-            type="button"
-            className="profile-avatar-button"
-            onClick={() => inputRef.current?.click()}
-            title="更换头像"
-            disabled={uploading}
-          >
-            <Avatar profile={profile} failed={avatarFailed} onError={() => setAvatarFailed(true)} />
-            <span className="profile-avatar-edit">更换</span>
-          </button>
-          <div>
-            <div className="profile-name-line">
-            <h1 className={(profile.user.role === 'student' || profile.user.role === 'user') ? ratingClass(profile.user.rating) : ''}>
-                {profile.user.username}
-              </h1>
-              {profile.user.role === 'admin' && <span className="admin-tag">管理员</span>}
-              {profile.user.role === 'teacher' && <span className="teacher-tag">教师</span>}
-            </div>
-            <p className="muted">{profile.user.email}</p>
-            <p className="profile-meta">加入于 {formatTime(profile.user.created_at).slice(0, 10)}</p>
-          </div>
-        </div>
-        <div className="profile-header-actions">
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp"
-            hidden
-            onChange={(event) => void onAvatarChange(event.target.files?.[0])}
-          />
-          <button type="button" className="button button-secondary" onClick={() => inputRef.current?.click()} disabled={uploading}>
-            {uploading ? '上传中…' : '更换头像'}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title={user.username}
+        eyebrow="个人中心"
+        description={`${user.email} · 加入于 ${formatTime(user.created_at).slice(0, 10)}`}
+        actions={<RoleTag role={user.role} />}
+      />
 
       {error && <div className="error-message">{error}</div>}
 
-      <section className="profile-stat-grid" aria-label="训练统计">
-        <div className="profile-stat profile-stat-rating"><span>综合分</span><strong>{profile.user.rating || 1000}</strong></div>
-        <div className="profile-stat"><span>全站排名</span><strong>{profile.user.rank > 0 ? `#${profile.user.rank}` : '—'}</strong></div>
-        <div className="profile-stat"><span>提交次数</span><strong>{profile.stats.total_submissions}</strong></div>
-        <div className="profile-stat profile-stat-ac"><span>通过提交</span><strong>{profile.stats.accepted_submissions}</strong></div>
-        <div className="profile-stat"><span>做过题目</span><strong>{profile.stats.attempted_problems}</strong></div>
-        <div className="profile-stat"><span>参加比赛</span><strong>{profile.stats.contests}</strong></div>
-        <div className="profile-stat profile-stat-rate"><span>提交通过率</span><strong>{acceptedRate}%</strong></div>
-      </section>
-
-      <section className="profile-panel profile-activity-panel">
-        <div className="profile-panel-heading">
-          <div>
-            <h2>刷题活动</h2>
-            <p className="muted">最近一年提交记录</p>
-          </div>
-          <span className="profile-heatmap-total">{activityTotal} 次提交</span>
-        </div>
-        <div className="profile-heatmap-wrap">
-          <div className="profile-week-labels"><span>一</span><span>三</span><span>五</span></div>
-          <div className="profile-heatmap-grid">
-            {heatmap.map((cell) => (
-              <span
-                key={cell.date}
-                className={`profile-heatmap-cell ${heatLevel(cell.count)}`}
-                title={`${cell.date}：${cell.count} 次提交`}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="profile-heatmap-legend">
-          <span>少</span><i className="level-0" /><i className="level-1" /><i className="level-2" /><i className="level-3" /><i className="level-4" /><span>多</span>
-        </div>
-      </section>
-
-      <div className="profile-content-grid">
-        <section className="profile-panel">
-          <div className="profile-panel-heading">
-            <h2>最近提交</h2>
-            <Link to={`/status?user_id=${profile.user.id}`}>查看全部</Link>
-          </div>
-          <div className="profile-table-wrap">
-            <table className="data-table profile-table">
-              <thead><tr><th>题目</th><th>结果</th><th>语言</th><th>耗时</th><th>提交时间</th><th /></tr></thead>
-              <tbody>
-                {profile.recent_submissions.length === 0
-                  ? <tr><td colSpan={6} className="table-empty">暂无提交记录</td></tr>
-                  : profile.recent_submissions.map((item) => <RecentSubmission key={item.id} item={item} />)}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section className="profile-panel">
-          <div className="profile-panel-heading">
-            <h2>参加过的比赛</h2>
-            <Link to="/contests">浏览比赛</Link>
-          </div>
-          {profile.contests.length === 0 ? (
-            <p className="profile-empty">还没有参加过比赛</p>
-          ) : (
-            <div className="profile-contest-list">
-              {profile.contests.slice(0, 8).map((contest) => (
-                <Link className="profile-contest-item" key={contest.id} to={`/contest/${contest.id}`}>
-                  <span>
-                    <strong>{contest.title}</strong>
-                    <small>{contest.mode} · {contest.submission_count} 次提交</small>
-                  </span>
-                  <time>{formatTime(contest.last_submitted_at).slice(0, 10)}</time>
-                </Link>
-              ))}
+      <div className="layout-side">
+        <div className="pf-main">
+          <section aria-label="训练统计">
+            <div className="stat-grid">
+              <div className="stat-tile">
+                <span className="stat-tile-label">综合分</span>
+                <strong className={`stat-tile-value ${isStudent ? ratingClass(user.rating) : ''}`}>
+                  {user.rating || 1000}
+                </strong>
+                {ranking && <span className="stat-tile-sub">加权解题 {ranking.weighted_solved.toFixed(1)}</span>}
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile-label">全站排名</span>
+                <strong className="stat-tile-value">{user.rank > 0 ? `#${user.rank}` : '—'}</strong>
+                <span className="stat-tile-sub"><Link to="/ranking">查看排行榜</Link></span>
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile-label">提交次数</span>
+                <strong className="stat-tile-value">{stats.total_submissions}</strong>
+              </div>
+              <div className="stat-tile stat-tile-positive">
+                <span className="stat-tile-label">通过提交</span>
+                <strong className="stat-tile-value">{stats.accepted_submissions}</strong>
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile-label">做过题目</span>
+                <strong className="stat-tile-value">{stats.attempted_problems}</strong>
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile-label">参加比赛</span>
+                <strong className="stat-tile-value">{stats.contests}</strong>
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile-label">提交通过率</span>
+                <strong className="stat-tile-value">{acceptedRate}%</strong>
+              </div>
             </div>
-          )}
-        </section>
+          </section>
+
+          <section className="pf-panel" aria-labelledby="pf-activity-title">
+            <div className="pf-panel-head">
+              <div>
+                <h2 className="pf-panel-title" id="pf-activity-title">刷题活动</h2>
+                <p className="pf-panel-sub">最近一年提交记录</p>
+              </div>
+              <span className="pf-heatmap-total">{activityTotal} 次提交</span>
+            </div>
+            <div className="pf-heatmap-wrap">
+              <div className="pf-week-labels" aria-hidden="true"><span>一</span><span>三</span><span>五</span></div>
+              <div className="pf-heatmap-grid">
+                {heatmap.map((cell) => (
+                  <span
+                    key={cell.date}
+                    className={`pf-heatmap-cell ${heatLevel(cell.count)}`}
+                    title={`${cell.date}：${cell.count} 次提交`}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="pf-heatmap-legend">
+              <span className="pf-muted">少</span>
+              <i className="level-0" /><i className="level-1" /><i className="level-2" /><i className="level-3" /><i className="level-4" />
+              <span className="pf-muted">多</span>
+            </div>
+          </section>
+
+          <section className="pf-panel" aria-labelledby="pf-recent-title">
+            <div className="pf-panel-head">
+              <h2 className="pf-panel-title" id="pf-recent-title">最近提交</h2>
+              <Link to={`/status?user_id=${user.id}`} className="pf-link">查看全部</Link>
+            </div>
+            <div className="table-frame">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>题目</th>
+                    <th>结果</th>
+                    <th>语言</th>
+                    <th>CPU 耗时</th>
+                    <th>提交时间</th>
+                    <th><span className="visually-hidden">操作</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profile.recent_submissions.length === 0
+                    ? <tr><td colSpan={6} className="table-empty">暂无提交记录</td></tr>
+                    : profile.recent_submissions.map((item) => <RecentSubmissionRow key={item.id} item={item} />)}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="pf-panel" aria-labelledby="pf-contests-title">
+            <div className="pf-panel-head">
+              <h2 className="pf-panel-title" id="pf-contests-title">参加过的比赛</h2>
+              <Link to="/contests" className="pf-link">浏览比赛</Link>
+            </div>
+            {profile.contests.length === 0 ? (
+              <div className="empty-state">
+                <span className="empty-state-title">还没有参加过比赛</span>
+                <span className="empty-state-hint">报名一场比赛，用限时提交检验训练成果。</span>
+                <Link to="/contests" className="button button-primary button-sm">去看比赛</Link>
+              </div>
+            ) : (
+              <ul className="pf-contest-list">
+                {profile.contests.slice(0, 8).map((contest) => (
+                  <li key={contest.id}>
+                    <Link className="pf-contest-item" to={`/contest/${contest.id}`}>
+                      <span className="pf-contest-main">
+                        <strong>{contest.title}</strong>
+                        <small>{contest.mode} · {contest.submission_count} 次提交</small>
+                      </span>
+                      <time className="pf-mono">{formatTime(contest.last_submitted_at).slice(0, 10)}</time>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <aside className="pf-side" aria-label="账号与进度">
+          {/* 刷题进度是个人中心最该先看到的信息，放侧栏第一位（窄屏横排时也在最前） */}
+          {facetsError && <div className="error-message">{facetsError}</div>}
+          {facets
+            ? <ProgressCard facets={facets} attempted={stats.attempted_problems} />
+            : !facetsError && (
+              <section className="side-card" aria-label="刷题进度">
+                <div className="skeleton" style={{ height: 88 }} />
+              </section>
+            )}
+
+          <section className="side-card" aria-labelledby="pf-account-title">
+            <h2 className="side-card-title" id="pf-account-title">账号信息</h2>
+            <div className="pf-account-head">
+              <span className="pf-avatar">
+                <Avatar profile={profile} failed={avatarFailed} onError={() => setAvatarFailed(true)} />
+              </span>
+              <span className="pf-account-name">
+                <strong className={isStudent ? ratingClass(user.rating) : ''}>{user.username}</strong>
+                <RoleTag role={user.role} />
+              </span>
+            </div>
+            <dl className="kv-list">
+              <div><dt>邮箱</dt><dd>{user.email}</dd></div>
+              <div><dt>加入时间</dt><dd>{formatTime(user.created_at).slice(0, 10)}</dd></div>
+              <div><dt>综合分</dt><dd>{user.rating || 1000}</dd></div>
+              <div><dt>全站排名</dt><dd>{user.rank > 0 ? `#${user.rank}` : '—'}</dd></div>
+              {ranking && <div><dt>加权解题</dt><dd>{ranking.weighted_solved.toFixed(1)}</dd></div>}
+              {ranking && <div><dt>首次 AC</dt><dd>{ranking.first_bloods}</dd></div>}
+            </dl>
+            <Link to="/settings" className="button button-ghost button-sm button-block">账号设置</Link>
+          </section>
+        </aside>
       </div>
-      <section className="profile-panel profile-password-panel">
-        <div className="profile-panel-heading"><div><h2>账户安全</h2><p className="muted">修改登录密码</p></div></div>
-        <form className="form-row" onSubmit={updatePassword}><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="当前密码" autoComplete="current-password" /><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="新密码（6-72 位）" autoComplete="new-password" /><button className="button button-secondary" type="submit" disabled={!currentPassword || newPassword.length < 6}>更新密码</button></form>
-        {passwordMessage && <p className="muted">{passwordMessage}</p>}
-      </section>
     </div>
   )
 }

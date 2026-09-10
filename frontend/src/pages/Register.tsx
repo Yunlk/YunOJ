@@ -98,7 +98,7 @@ export default function Register() {
           />
         </div>
         {error && <div className="error-message">{error}</div>}
-        <button type="submit" className="button button-primary button-block" disabled={loading}>
+        <button type="submit" className="button button-primary button-block button-lg" disabled={loading}>
           {loading ? '注册中…' : '注册'}
         </button>
       </form>

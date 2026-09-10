@@ -105,25 +105,38 @@ export default function SubmitFile() {
 
   return (
     <div>
-      <div className="problem-header">
-        <h1 className="problem-title">
-          {problem ? (
-            <>
-              <Link to={`/problem/${problem.id}`} className="muted" style={{ marginRight: 8 }}>
-                ← 返回
-              </Link>
-              提交文件：{problem.id}. {problem.title}
-            </>
-          ) : (
-            '提交文件'
-          )}
-        </h1>
-      </div>
+      <nav className="breadcrumb" aria-label="当前位置">
+        <Link to="/problems">题库</Link>
+        <span className="breadcrumb-sep">/</span>
+        {problem ? (
+          <Link to={`/problem/${problem.id}`}>{problem.id}. {problem.title}</Link>
+        ) : (
+          <span>题目</span>
+        )}
+        <span className="breadcrumb-sep">/</span>
+        <span>提交文件</span>
+      </nav>
 
-      <div className="section">
-        <h2 className="section-title">选择代码文件</h2>
+      <header className="page-header page-header-standard">
+        <div className="page-heading">
+          <h1 className="page-title">
+            {problem ? `提交文件：${problem.id}. ${problem.title}` : '提交文件'}
+          </h1>
+        </div>
+        <div className="page-actions">
+          <Link to={problem ? `/problem/${problem.id}` : '/problems'} className="button button-secondary">
+            返回题目
+          </Link>
+        </div>
+      </header>
+
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">选择代码文件</h2>
+        </div>
         <div
-          className={dragging ? 'file-drop-zone dragging' : 'file-drop-zone'}
+          className="empty-state"
+          data-dragging={dragging || undefined}
           onDragOver={(e) => {
             e.preventDefault()
             setDragging(true)
@@ -131,61 +144,69 @@ export default function SubmitFile() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
         >
+          <span className="empty-state-title">将代码文件拖拽到此处</span>
+          <span className="empty-state-hint">支持 .c / .cpp / .cc / .cxx / .py，最大 64KB</span>
           <input
             ref={inputRef}
             type="file"
             hidden
             accept=".c,.cpp,.cc,.cxx,.py"
+            aria-label="选择代码文件"
             onChange={(e) => {
               const f = e.target.files?.[0]
               if (f) readFile(f)
               e.target.value = ''
             }}
           />
-          <div className="file-drop-text">
-            <p>将代码文件拖拽到此处，或</p>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => inputRef.current?.click()}
-            >
-              选择文件
-            </button>
-            <p className="muted">支持 .c / .cpp / .cc / .cxx / .py，最大 64KB</p>
-          </div>
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={() => inputRef.current?.click()}
+          >
+            选择文件
+          </button>
         </div>
         {fileName && (
           <div className="info-message">
-            已选择 <span className="mono">{fileName}</span>（{code.length} 字节）
+            已选择 <code>{fileName}</code>（{code.length} 字节）
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="section">
-        <h2 className="section-title">语言</h2>
-        <select
-          className="select-input"
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-        >
-          {languages.length === 0 && <option value="">加载语言中…</option>}
-          {languages.map((l) => (
-            <option key={l.key} value={l.key}>
-              {l.name} ({l.version})
-            </option>
-          ))}
-        </select>
-        <p className="muted">根据文件扩展名自动识别，可手动修改</p>
-      </div>
+      <section className="section">
+        <div className="section-head">
+          <h2 className="section-title">语言</h2>
+          <span className="section-hint">根据文件扩展名自动识别，可手动修改</span>
+        </div>
+        <div className="toolbar toolbar-plain">
+          <label className="toolbar-label" htmlFor="submit-language">评测语言</label>
+          <select
+            id="submit-language"
+            className="select-input"
+            value={language}
+            onChange={(e) => setLanguage(e.target.value)}
+          >
+            {languages.length === 0 && <option value="">加载语言中…</option>}
+            {languages.map((l) => (
+              <option key={l.key} value={l.key}>
+                {l.name} ({l.version})
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
 
       {code && (
-        <div className="section">
-          <h2 className="section-title">代码预览</h2>
-          <pre className="code-block file-preview">{code}</pre>
-        </div>
+        <section className="section">
+          <div className="section-head">
+            <h2 className="section-title">代码预览</h2>
+            <span className="section-hint">{code.length} 字节</span>
+          </div>
+          <pre className="card admin-code-preview">{code}</pre>
+        </section>
       )}
 
-      <div className="submit-footer">
+      <div className="toolbar">
         <button
           type="button"
           className="button button-primary"

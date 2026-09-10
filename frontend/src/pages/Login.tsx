@@ -62,7 +62,7 @@ export default function Login() {
           />
         </div>
         {error && <div className="error-message">{error}</div>}
-        <button type="submit" className="button button-primary button-block" disabled={loading}>
+        <button type="submit" className="button button-primary button-block button-lg" disabled={loading}>
           {loading ? '登录中…' : '登录'}
         </button>
       </form>

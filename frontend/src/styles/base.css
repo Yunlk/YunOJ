@@ -1,0 +1,180 @@
+/*
+ * 设计基座 · Base
+ * 全局排版、焦点、滚动条与无障碍基础设施。只放“全站级别”的规则，组件样式一律进 components.css。
+ */
+
+html {
+  background: var(--c-bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  padding: 0;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--c-text);
+  font-weight: 680;
+  line-height: var(--lh-tight);
+}
+
+p {
+  margin: 0 0 var(--space-4);
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+a {
+  color: var(--c-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--c-primary-hover);
+  text-decoration: none;
+}
+
+/* 链接式正文（题面、题解）保留下划线，便于在长文里识别可点击内容 */
+.prose a,
+.markdown-body a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--font-mono);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--c-border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  text-align: center;
+}
+
+hr {
+  height: 1px;
+  margin: var(--space-5) 0;
+  border: 0;
+  background: var(--c-border);
+}
+
+/* 统一焦点可见性：键盘用户永远看得见焦点，鼠标点击不产生多余描边 */
+:focus-visible {
+  outline: 2px solid var(--c-primary);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+::selection {
+  background: #cfe0ff;
+  color: #10203a;
+}
+
+/* 滚动条：细、低对比、悬停加深，避免抢视觉 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3ccd9 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: #c3ccd9;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #a7b3c4;
+  background-clip: content-box;
+}
+
+img,
+svg {
+  max-width: 100%;
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* ---------- 无障碍 ---------- */
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+/* 跳转到主内容：Tab 第一下就能跳过导航 */
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 12px;
+  z-index: var(--z-toast);
+  padding: 8px 14px;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--c-primary);
+  color: #ffffff;
+  font-size: var(--fs-13);
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 0;
+  color: #ffffff;
+}
+
+/* 尊重系统的“减少动态效果” */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,334 @@
+/*
+ * 设计基座 · Layout
+ * 页面骨架：内容宽度、页头、工具栏、分栏与信息栅格。
+ * 约定：
+ *   - 表格/榜单类页面用 .app-shell-wide，阅读类页面保持默认宽度；
+ *   - 页头只用 PageHeader 组件渲染（.page-header-standard）；
+ *   - 两栏布局统一走 .layout-split / .layout-side，不在页面里各写 flex。
+ */
+
+/* ---------- 应用外壳 ---------- */
+
+main.app-shell,
+main.container.app-shell {
+  width: min(calc(100% - 40px), var(--content-width));
+  min-height: calc(100vh - var(--h-nav));
+  margin: 0 auto;
+  padding: var(--space-7) 0 var(--space-8);
+}
+
+/* 宽表页（题库、提交记录、榜单、比赛题目）用满屏宽，减少横向滚动 */
+main.app-shell.app-shell-wide,
+main.container.app-shell.app-shell-wide {
+  width: min(calc(100% - 40px), var(--content-width-wide));
+  padding-top: var(--space-6);
+}
+
+/* 认证、404 等单卡片页面收窄，保持视觉重心 */
+main.app-shell.app-shell-narrow,
+main.container.app-shell.app-shell-narrow {
+  width: min(calc(100% - 40px), var(--content-width-narrow));
+}
+
+/* ---------- 页头 ---------- */
+
+.page-header-standard {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  margin: 0 0 var(--space-5);
+  padding: 0 0 var(--space-4);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.page-heading {
+  min-width: 0;
+}
+
+.page-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-22);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.page-eyebrow {
+  margin: 0 0 var(--space-1);
+  color: var(--c-primary);
+  font-size: var(--fs-12);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.page-description {
+  max-width: 760px;
+  margin: var(--space-2) 0 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.page-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* ---------- 工具栏 / 筛选条 ---------- */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--h-ctl-lg);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.toolbar-plain {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.toolbar .toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.toolbar-label {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* 分段筛选：状态、难度区间等“互斥或少量多选”的快捷筛选 */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+  gap: 2px;
+}
+
+.segmented button {
+  min-height: calc(var(--h-ctl) - 8px);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.segmented button[aria-pressed='true'],
+.segmented button.active {
+  background: var(--c-surface);
+  color: var(--c-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.segmented .segmented-count {
+  margin-left: 5px;
+  color: var(--c-text-3);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 区块 ---------- */
+
+.section {
+  margin: 0 0 var(--space-7);
+}
+
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.section-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-16);
+  font-weight: 680;
+}
+
+.section-hint {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+/* ---------- 两栏布局 ---------- */
+
+.layout-side {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: var(--space-6);
+}
+
+.layout-side-narrow {
+  grid-template-columns: minmax(0, 1fr) 280px;
+}
+
+.layout-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+@media (max-width: 1080px) {
+  .layout-side,
+  .layout-side-narrow,
+  .layout-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- 统计栅格 ---------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: var(--space-3);
+}
+
+.stat-tile {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.stat-tile-label {
+  display: block;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.stat-tile-value {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text);
+  font-size: var(--fs-18);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.stat-tile-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.stat-tile-positive .stat-tile-value {
+  color: var(--c-positive);
+}
+
+/* ---------- 工作台分栏（题目页） ---------- */
+
+.workbench-shell {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: calc(100vh - var(--h-nav));
+  min-height: 480px;
+  overflow: hidden;
+}
+
+.workbench-pane {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workbench-pane-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workbench-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: linear-gradient(90deg, transparent 45%, var(--c-border) 45%, var(--c-border) 55%, transparent 55%);
+}
+
+.workbench-divider:hover,
+.workbench-divider.dragging {
+  background: linear-gradient(90deg, transparent 40%, var(--c-primary) 40%, var(--c-primary) 60%, transparent 60%);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 1100px) {
+  main.app-shell,
+  main.container.app-shell,
+  main.app-shell.app-shell-wide,
+  main.container.app-shell.app-shell-wide {
+    width: calc(100% - 28px);
+  }
+}
+
+@media (max-width: 860px) {
+  .page-header-standard {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .page-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  main.app-shell,
+  main.container.app-shell,
+  main.app-shell.app-shell-wide,
+  main.container.app-shell.app-shell-wide {
+    width: calc(100% - 20px);
+    padding: var(--space-5) 0 var(--space-7);
+  }
+
+  .page-title {
+    font-size: var(--fs-18);
+  }
+
+  .page-actions > * {
+    flex: 1 1 auto;
+  }
+}

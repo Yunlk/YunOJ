@@ -29,7 +29,9 @@ import ProblemDetail from './pages/ProblemDetail'
 import ProblemForm from './pages/ProblemForm'
 import ProblemList from './pages/ProblemList'
 import Profile from './pages/Profile'
+import Settings from './pages/Settings'
 import Ranking from './pages/Ranking'
+import RollingDemoPage from './pages/RollingDemoPage'
 import Register from './pages/Register'
 import Status from './pages/Status'
 import SubmissionDetail from './pages/SubmissionDetail'
@@ -39,15 +41,28 @@ import TestcaseAdmin from './pages/TestcaseAdmin'
 /** 常规布局：导航栏 + 内容容器。 */
 function AppLayout() {
   const location = useLocation()
-  const dynamicStandings = location.pathname.endsWith('/standings/dynamic')
-  const immersiveContestProblem = /^\/contest\/\d+\/problem\/\d+\/?$/.test(location.pathname)
-  const contestMatch = location.pathname.match(/^\/contest\/(\d+)(?:\/|$)/)
+  const { pathname } = location
+  const dynamicStandings = pathname.endsWith('/standings/dynamic')
+  const immersiveContestProblem = /^\/contest\/\d+\/problem\/\d+\/?$/.test(pathname)
+  // 单题页是「题面 + 编辑器」工作台，需要满屏高度且不留页面内边距
+  const problemWorkspace = /^\/problem\/\d+\/?$/.test(pathname)
+  // 宽表页（题库/提交记录/比赛/榜单/管理列表）用 1600px 容器，减少横向滚动与列挤压；
+  // 阅读与表单页保持 1360px，避免正文行宽过长。
+  const wideShell =
+    /^\/(problems|status|ranking|contests|submission\/\d+)\/?$/.test(pathname) ||
+    /^\/contest\/\d+(\/submissions)?\/?$/.test(pathname) ||
+    pathname.startsWith('/admin/')
+  const contestMatch = pathname.match(/^\/contest\/(\d+)(?:\/|$)/)
   const contestId = contestMatch ? Number(contestMatch[1]) : 0
   const shellClass = dynamicStandings
     ? 'dynamic-standings-page'
     : immersiveContestProblem
       ? 'contest-immersive-shell'
-      : 'container'
+      : problemWorkspace
+        ? 'problem-workspace-shell'
+        : wideShell
+          ? 'container app-shell app-shell-wide'
+          : 'container app-shell'
 
   return (
     <>
@@ -60,12 +75,14 @@ function AppLayout() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/favorites" element={<ProtectedRoute><Favorites /></ProtectedRoute>} />
             <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="/groups" element={<ProtectedRoute><Groups /></ProtectedRoute>} />
             <Route path="/groups/:id" element={<ProtectedRoute><GroupDetail /></ProtectedRoute>} />
             <Route path="/assignments/:id" element={<ProtectedRoute><AssignmentDetail /></ProtectedRoute>} />
             <Route path="/ranking" element={<Ranking />} />
+            <Route path="/demo/rolling" element={<RollingDemoPage />} />
             <Route path="/status" element={<ProtectedRoute><Status /></ProtectedRoute>} />
             <Route path="/contests" element={<ContestList />} />
             <Route path="/contest/new" element={<AdminRoute><ContestForm /></AdminRoute>} />

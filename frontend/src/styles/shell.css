@@ -1,0 +1,433 @@
+/*
+ * 导航壳：顶部 appbar + 全局快速跳转（Ctrl/⌘+K）。
+ * 与旧 .navbar 并存（旧类保留给尚在迁移的页面），新导航全部使用 .appbar-*。
+ */
+
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: #16273f;
+  border-bottom: 1px solid #0e1b2c;
+}
+
+.appbar-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: min(calc(100% - 40px), var(--content-width-wide));
+  min-height: var(--h-nav);
+  margin: 0 auto;
+}
+
+.appbar-logo {
+  display: inline-flex;
+  align-items: baseline;
+  color: #ffffff;
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.appbar-logo span {
+  color: #6cb2ff;
+}
+
+.appbar-logo:hover {
+  color: #ffffff;
+}
+
+/* ---------- 全局搜索 ---------- */
+
+.appbar-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 240px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #33507a;
+  border-radius: var(--radius);
+  background: #1e3453;
+  color: #a9bcd6;
+  font-family: inherit;
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+.appbar-search:hover {
+  border-color: #4a6b9c;
+  background: #223c60;
+  color: #e6eefb;
+}
+
+.appbar-search-icon {
+  font-size: var(--fs-14);
+}
+
+.appbar-search-text {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.appbar-search kbd {
+  border-color: #40608f;
+  background: #16273f;
+  color: #a9bcd6;
+}
+
+/* ---------- 主导航 ---------- */
+
+.appbar-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+
+.appbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.appbar-nav > a,
+.appbar-nav > .appbar-dropdown > summary,
+.appbar-actions > a.appbar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 11px;
+  border-radius: var(--radius);
+  color: #d6e1f2;
+  font-size: var(--fs-13);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.appbar-nav > a:hover,
+.appbar-nav > .appbar-dropdown > summary:hover,
+.appbar-actions > a.appbar-link:hover {
+  background: #203959;
+  color: #ffffff;
+}
+
+.appbar-nav > a.active,
+.appbar-nav > .appbar-dropdown.active > summary {
+  background: #0f4da2;
+  color: #ffffff;
+}
+
+.appbar-dropdown {
+  position: relative;
+}
+
+.appbar-dropdown > summary {
+  list-style: none;
+}
+
+.appbar-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.appbar-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-dropdown);
+  min-width: 168px;
+}
+
+.appbar-panel-right {
+  left: auto;
+  right: 0;
+}
+
+.appbar-panel a.active {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-weight: 650;
+}
+
+.appbar-user-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--space-2) 10px var(--space-3);
+}
+
+.appbar-user-head strong {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+}
+
+.appbar-user-head span {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+/* ---------- 进行中比赛 ---------- */
+
+.appbar-contest {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 260px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #2f6b4a;
+  border-radius: var(--radius);
+  background: #17361f;
+  color: #b6f0c9;
+  font-size: var(--fs-12);
+}
+
+.appbar-contest:hover {
+  border-color: #3f8f63;
+  background: #1b4227;
+  color: #d8ffe6;
+}
+
+.appbar-contest-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+}
+
+.appbar-contest-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appbar-contest-time {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.appbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.appbar-user > summary {
+  color: #e4ebf6;
+}
+
+/* 深色导航条上不用 rating 的深色档位色（对比度不足）；档位色在白色菜单里展示 */
+.appbar .appbar-user > summary {
+  color: #e6eefb !important;
+}
+
+.appbar-role {
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: #0f4da2;
+  color: #ffffff;
+  font-size: var(--fs-11);
+}
+
+.appbar-menu-toggle {
+  display: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #40608f;
+  border-radius: var(--radius);
+  background: #1e3453;
+  color: #ffffff;
+  font-size: var(--fs-16);
+  cursor: pointer;
+}
+
+/* ---------- 命令面板 ---------- */
+
+.cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh var(--space-5) var(--space-5);
+  background: var(--c-overlay);
+}
+
+.cmdk {
+  width: min(100%, 620px);
+  border-radius: var(--radius-lg);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.cmdk-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.cmdk-icon {
+  color: var(--c-text-3);
+  font-size: var(--fs-16);
+}
+
+.cmdk-input {
+  flex: 1 1 auto;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-size: var(--fs-14);
+}
+
+.cmdk-input:focus {
+  outline: 0;
+  box-shadow: none;
+}
+
+.cmdk-list {
+  max-height: 52vh;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  padding: 9px var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cmdk-item.active {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.cmdk-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmdk-item-hint {
+  flex: 0 0 auto;
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.cmdk-empty {
+  padding: var(--space-6) var(--space-4);
+  color: var(--c-text-3);
+  font-size: var(--fs-13);
+  text-align: center;
+}
+
+.cmdk-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+/* ---------- 响应式 ---------- */
+
+@media (max-width: 1100px) {
+  .appbar-search {
+    min-width: 168px;
+  }
+
+  .appbar-search-text {
+    display: none;
+  }
+
+  .appbar-search {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 900px) {
+  .appbar-inner {
+    flex-wrap: wrap;
+    width: calc(100% - 24px);
+    padding: var(--space-2) 0;
+    gap: var(--space-3);
+  }
+
+  .appbar-menu-toggle {
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .appbar-search {
+    order: 3;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .appbar-search-text {
+    display: block;
+  }
+
+  .appbar-body {
+    display: none;
+    order: 4;
+    width: 100%;
+    margin-left: 0;
+    padding-top: var(--space-3);
+    border-top: 1px solid #314966;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-3);
+  }
+
+  .appbar-body.open {
+    display: flex;
+  }
+
+  .appbar-nav {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .appbar-nav > a,
+  .appbar-nav > .appbar-dropdown > summary {
+    height: 36px;
+  }
+
+  .appbar-panel {
+    position: static;
+    min-width: 0;
+    box-shadow: none;
+  }
+
+  .appbar-contest {
+    max-width: none;
+  }
+
+  .appbar-actions {
+    justify-content: flex-end;
+  }
+}

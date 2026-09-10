@@ -1,0 +1,152 @@
+/*
+ * 设计基座 · Design tokens
+ *
+ * 三层结构：
+ *   1. 语义层（--c-* / --space-* / --fs-* / --h-*）：新代码只使用这一层；
+ *   2. 兼容层（--bg/--primary… 与 --app-*）：把历史样式表里的变量名映射到语义层，
+ *      让尚未重建的页面（管理端等）自动继承新配色与新密度；
+ *   3. 语义色板：判定结论、难度、rating 分档统一在这里定义，页面不再各写一套颜色。
+ *
+ * 基调：浅色蓝调 + 高信息密度（缩小控件与行高、收紧留白、提高对比度）。
+ */
+
+:root {
+  /* ---------- 品牌与颜色 ---------- */
+  --c-primary: #2563d8;
+  --c-primary-hover: #1d4fb7;
+  --c-primary-active: #1a459e;
+  --c-primary-soft: #eaf2ff;
+  --c-primary-border: #bcd4f7;
+
+  --c-bg: #f2f5f9;
+  --c-surface: #ffffff;
+  --c-surface-2: #f7f9fc;
+  --c-surface-3: #eef2f7;
+  --c-surface-hover: #f5f8fc;
+
+  --c-border: #e2e8f0;
+  --c-border-strong: #cfd8e3;
+  --c-border-focus: #2563d8;
+
+  --c-text: #16233a;
+  --c-text-2: #55677f;
+  /* 弱化文字在白底/浅底上的对比度需 ≥ 4.5:1（WCAG AA），因此取比 slate-500 更深一档 */
+  --c-text-3: #5b6b7f;
+  --c-text-inverse: #ffffff;
+  --c-positive: #15803d;
+  --c-positive-soft: #e9f6ee;
+  --c-positive-border: #bbe3c9;
+  --c-danger: #dc2626;
+  --c-danger-soft: #fdeced;
+  --c-danger-border: #f4c4c6;
+  --c-warning: #b45309;
+  --c-warning-soft: #fdf3e4;
+  --c-warning-border: #f2d9ac;
+  --c-info: #2563d8;
+  --c-info-soft: #eaf2ff;
+  --c-info-border: #bcd4f7;
+
+  --c-focus-ring: rgba(37, 99, 216, 0.22);
+  --c-overlay: rgba(17, 28, 45, 0.42);
+
+  /* ---------- 判定结论色（与 utils/status.ts 的 color 名一一对应） ---------- */
+  --verdict-green: #15803d;
+  --verdict-red: #dc2626;
+  --verdict-orange: #ea580c;
+  --verdict-indigo: #4f46e5;
+  --verdict-purple: #7c3aed;
+  --verdict-blue: #2563d8;
+  --verdict-yellow: #b45309;
+  --verdict-cyan: #0891b2;
+  --verdict-rose: #db2777;
+  --verdict-darkgray: #475569;
+  --verdict-gray: #8593a6;
+
+  /* ---------- 排版 ---------- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-22: 22px;
+  --fs-26: 26px;
+  --fs-base: var(--fs-14);
+
+  --lh-tight: 1.35;
+  --lh-base: 1.6;
+  --lh-prose: 1.75;
+
+  /* ---------- 尺寸与密度 ---------- */
+  --h-ctl: 34px;
+  --h-ctl-sm: 28px;
+  --h-ctl-lg: 40px;
+  --h-row: 44px;
+  --h-row-head: 38px;
+  --h-nav: 54px;
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 35, 58, 0.06);
+  --shadow: 0 4px 14px rgba(20, 35, 58, 0.09);
+  --shadow-lg: 0 14px 36px rgba(20, 35, 58, 0.16);
+
+  --content-width: 1360px;
+  --content-width-wide: 1600px;
+  --content-width-narrow: 920px;
+
+  --z-dropdown: 40;
+  --z-sticky: 50;
+  --z-overlay: 60;
+  --z-modal: 70;
+  --z-toast: 90;
+
+  /* ---------- 兼容层：历史变量名 ---------- */
+  --bg: var(--c-bg);
+  --surface: var(--c-surface);
+  --border: var(--c-border);
+  --text: var(--c-text);
+  --text-secondary: var(--c-text-2);
+  --primary: var(--c-primary);
+  --primary-hover: var(--c-primary-hover);
+  --green: var(--c-positive);
+  --red: var(--c-danger);
+  --orange: var(--verdict-orange);
+  --blue: var(--c-primary);
+  --yellow: var(--c-warning);
+  --gray: var(--c-text-3);
+  --mono: var(--font-mono);
+
+  --app-bg: var(--c-bg);
+  --app-surface: var(--c-surface);
+  --app-surface-muted: var(--c-surface-2);
+  --app-text: var(--c-text);
+  --app-text-muted: var(--c-text-2);
+  --app-border: var(--c-border);
+  --app-border-strong: var(--c-border-strong);
+  --app-primary: var(--c-primary);
+  --app-primary-hover: var(--c-primary-hover);
+  --app-primary-soft: var(--c-primary-soft);
+  --app-focus: var(--c-focus-ring);
+  --app-positive: var(--c-positive);
+  --app-danger: var(--c-danger);
+  --app-radius: var(--radius);
+  --app-content-width: var(--content-width);
+  --app-control-height: var(--h-ctl);
+}

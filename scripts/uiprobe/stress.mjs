@@ -1,14 +1,15 @@
 // 表格鲁棒性压力审计：向单元格注入超长文本，检查行高是否仍为 44px。
 // 真实数据都很短时普通审计是绿的，但长标题/多标签会把「操作列」挤扁导致行高爆炸。
-// 用法：node .tools/uiprobe/stress.mjs [--user e2eadmin --pass 'Yunoj#2026'] [--only /a,/b]
+// 用法：node scripts/uiprobe/stress.mjs [--user <管理员> --pass <口令>]（默认取 .env 的 UI_ADMIN_*） [--only /a,/b]
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 
 const args = process.argv.slice(2)
 const argOf = (n, d = '') => (args.indexOf(`--${n}`) >= 0 ? args[args.indexOf(`--${n}`) + 1] : d)
 const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
-const USER = argOf('user', 'e2eadmin')
-const PASS = argOf('pass', 'Yunoj#2026')
+const USER = argOf('user', ADMIN_USER)
+const PASS = argOf('pass', ADMIN_PASS)
 const ONLY = argOf('only')
 
 const LONG_TITLE = '一个非常非常长的题目名称用来测试表格在极端内容下的稳定性'.repeat(2)

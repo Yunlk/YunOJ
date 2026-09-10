@@ -1,9 +1,10 @@
 // 验证：收藏列表自带 my_status、通知批量已读接口。
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 
 const API = process.env.YUNOJ_API ?? 'http://127.0.0.1:8090/api'
 const student = await getToken('demo01', 'demo123')
-const admin = await getToken('e2eadmin', 'Yunoj#2026')
+const admin = await getToken(ADMIN_USER, ADMIN_PASS)
 
 const api = async (path, token, method = 'GET') => {
   const r = await fetch(`${API}${path}`, { method, headers: { Authorization: `Bearer ${token}` } })

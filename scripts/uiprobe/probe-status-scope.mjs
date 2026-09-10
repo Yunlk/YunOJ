@@ -10,13 +10,14 @@
 //   node scripts/uiprobe/probe-status-scope.mjs --user demo05 --pass demo123
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 
 const args = process.argv.slice(2)
 const argOf = (n, d = '') => (args.indexOf(`--${n}`) >= 0 ? args[args.indexOf(`--${n}`) + 1] : d)
 const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
 const API = process.env.YUNOJ_API ?? 'http://127.0.0.1:8090/api'
-const USER = argOf('user', 'e2eadmin')
-const PASS = argOf('pass', 'Yunoj#2026')
+const USER = argOf('user', ADMIN_USER)
+const PASS = argOf('pass', ADMIN_PASS)
 const DETAIL_ID = argOf('id', '2686')
 
 let pass = 0

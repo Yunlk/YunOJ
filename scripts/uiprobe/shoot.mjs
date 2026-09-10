@@ -1,13 +1,14 @@
 // UI 侦察/验收工具：用系统安装的 Chrome 打开 YunOJ 并截图（不下载浏览器）。
 //
 // 用法：
-//   node .tools/uiprobe/shoot.mjs                 # 默认用户名 demo01 截取公开+选手页面
-//   node .tools/uiprobe/shoot.mjs --user e2eadmin --pass 'Yunoj#2026' --tag admin
-//   node .tools/uiprobe/shoot.mjs --only /problems,/problem/437
+//   node scripts/uiprobe/shoot.mjs                 # 默认学生账号（.env 的 UI_STUDENT_*，缺省 demo05/demo123）
+//   node scripts/uiprobe/shoot.mjs --user <管理员> --pass <口令> --tag admin   # 截管理端页面
+//   node scripts/uiprobe/shoot.mjs --only /problems,/problem/437
 //
-// 产物：.tools/uiprobe/shots/<tag>-<序号>-<路由名>.png
+// 产物：scripts/uiprobe/shots/<tag>-<序号>-<路由名>.png
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { readFileSync, existsSync } from 'node:fs'
 
@@ -20,6 +21,8 @@ const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
 const API = process.env.YUNOJ_API ?? 'http://127.0.0.1:8090/api'
 const USER = argOf('user', 'demo01')
 const PASS = argOf('pass', 'demo123')
+// 提示文案里给出管理员凭据来源（凭据本身不再写死在脚本里）
+const ADMIN_HINT = ADMIN_USER ? `--user ${ADMIN_USER} --pass '<见 .env 的 UI_ADMIN_PASS>'` : `--user <管理员> --pass <口令>（在 .env 配置 UI_ADMIN_*）`
 const TAG = argOf('tag', 'user')
 const ONLY = argOf('only')
 const OUT = new URL('./shots/', import.meta.url).pathname.replace(/^\//, '')
@@ -92,7 +95,7 @@ for (const [name, route] of ROUTES) {
   if (wanted && !wanted.some((w) => route === w || name === w)) continue
   i += 1
   if (ADMIN_ROUTE.test(route) && !isAdminUser) {
-    console.log(`   ⚠ ${route} 是管理员专属页面，当前账号 ${USER} 只会截到「无权限」；请加 --user e2eadmin --pass 'Yunoj#2026'`)
+    console.log(`   ⚠ ${route} 是管理员专属页面，当前账号 ${USER} 只会截到「无权限」；请加 ${ADMIN_HINT}`)
   }
   const url = `${BASE}${route}`
   const before = errors.length

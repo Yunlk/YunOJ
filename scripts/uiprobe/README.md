@@ -100,9 +100,14 @@ cd D:\git\YunOJ; node scripts/uiprobe/shoot.mjs --tag <你的标签> --only <你
 - `node scripts/uiprobe/audit.mjs --verbose`：布局指标 + 首屏文本 + a11y + HTTP 错误
 - `node scripts/uiprobe/shoot.mjs --tag x --only /a,/b`：整页截图到 `scripts/uiprobe/shots/`
 - `node scripts/uiprobe/probe.mjs` / `probe-problem.mjs` / `probe-shell.mjs`：题库存题/工作台/导航交互断言（可仿写自己的）
-- **登录统一走 `scripts/uiprobe/auth.mjs` 的 `getToken(user, pass)`**：30 分钟磁盘缓存。
+- **登录统一走 `scripts/uiprobe/auth.mjs` 的 `getToken(user, pass)`**：30 分钟磁盘缓存（写入 `.cache/`，已 gitignore）。
   后端登录有速率限制（同用户名 5 分钟 12 次），直接 fetch 登录很容易触发 `429`，遇到就等 3-5 分钟或换账号。
+- **凭据一律不写进受版本控制的文件**（`scripts/uiprobe/env.mjs` 负责读取）：
+  - 管理员：仓库根目录 `.env` 里的 `UI_ADMIN_USER` / `UI_ADMIN_PASS`（`.env` 已被 gitignore）
+  - 学生：`UI_STUDENT_USER` / `UI_STUDENT_PASS`，缺省用种子账号 `demo05/demo123`
+  - 缺失管理员凭据时工具会直接报错并指路，而不是回落到某个默认口令
 - 快捷键约定：`/` 由导航层分发——页面内存在带 `data-search-shortcut` 属性的输入框时聚焦它，否则打开命令面板（`Ctrl/⌘+K` 永远打开面板）。
-- 登录账号：`demo01/demo123`（学生，有提交数据）、`demo05..demo20/demo123`（种子学生）、`e2eadmin/Yunoj#2026`（管理员）
+- 种子账号：`demo01/demo123`（学生，有提交数据）、`demo05..demo20/demo123`（种子学生，口令见 `cmd/seedcontests`）
 - 前端 dev server：http://127.0.0.1:5173 （已运行，HMR 生效）；后端：http://127.0.0.1:8090
+  后端由 `pwsh -File scripts/dev-server.ps1` 启动（会加载 `.env`；`go run` 直接跑不会加载，只会用内置开发默认值）
 - 顶部导航已重构为 `.appbar`（旧 `.navbar` 不再渲染）；倒计时统一用 `utils/clock.ts` 的 `useClock()` + `formatRemaining()`

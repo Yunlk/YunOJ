@@ -8,13 +8,16 @@
 #   2) 本目录已执行过 npm install（提供 playwright-core，用于驱动系统 Chrome）。
 # 判定标准：类型检查 0 错、构建成功、审计无「无标签控件/横向溢出/HTTP 4xx-5xx」、
 #           表格行高 44px、对比度 0 违规、各 probe 全绿。
+#
+# 管理员凭据来自仓库根目录的 .env（UI_ADMIN_USER / UI_ADMIN_PASS，该文件已被 gitignore），
+# 受版本控制的脚本里不写死口令；也可用参数临时覆盖。
 
 param(
   [switch]$SkipBuild,
   [string]$Student = 'demo05',
   [string]$StudentPass = 'demo123',
-  [string]$Admin = 'e2eadmin',
-  [string]$AdminPass = 'Yunoj#2026'
+  [string]$Admin = '',
+  [string]$AdminPass = ''
 )
 
 $ErrorActionPreference = 'Continue'
@@ -23,6 +26,27 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 # 必须写 $script:failures，否则汇总会把失败报成通过。
 $script:failures = @()
 $results = [ordered]@{}
+
+function Get-DotEnv([string]$path) {
+  $map = @{}
+  if (-not (Test-Path $path)) { return $map }
+  foreach ($line in Get-Content $path) {
+    $t = $line.Trim()
+    if (-not $t -or $t.StartsWith('#')) { continue }
+    $i = $t.IndexOf('=')
+    if ($i -le 0) { continue }
+    $map[$t.Substring(0, $i).Trim()] = $t.Substring($i + 1).Trim().Trim('"').Trim("'")
+  }
+  return $map
+}
+
+$envFile = Get-DotEnv (Join-Path $root '.env')
+if (-not $Admin) { $Admin = $envFile['UI_ADMIN_USER'] }
+if (-not $AdminPass) { $AdminPass = $envFile['UI_ADMIN_PASS'] }
+if (-not $Admin -or -not $AdminPass) {
+  Write-Host "缺少管理员凭据：请在 $root\.env 里配置 UI_ADMIN_USER 与 UI_ADMIN_PASS（该文件已被 gitignore）" -ForegroundColor Red
+  exit 2
+}
 
 function Step($name, [scriptblock]$body, [string]$expectFailMarker = '') {
   Write-Host "`n=== $name ===" -ForegroundColor Cyan

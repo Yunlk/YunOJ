@@ -6,6 +6,7 @@
 // 用法：node scripts/uiprobe/probe-contest.mjs
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 
 const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
 const API = process.env.YUNOJ_API ?? 'http://127.0.0.1:8090/api'
@@ -36,7 +37,7 @@ const check = (name, ok, detail = '') => {
 // ---------------- 夹具 ----------------
 // 约定：夹具比赛用 `[E2E临时]` 前缀 + visibility=private，避免被其它组的审计/截图拍到，
 // 也让导航栏的「进行中比赛」胶囊不出现假数据；脚本结束时（finally）必删。
-const adminToken = await getToken('e2eadmin', 'Yunoj#2026')
+const adminToken = await getToken(ADMIN_USER, ADMIN_PASS)
 const cleanup = async () => {
   const r = await fetch(`${API}/contests?page=1&size=200`, {
     headers: { Authorization: `Bearer ${adminToken}` },

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/yunoj/yunoj/internal/contest"
 	"github.com/yunoj/yunoj/internal/data"
 	"github.com/yunoj/yunoj/internal/langs"
 	"github.com/yunoj/yunoj/internal/model"
@@ -57,6 +58,20 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 		return err
 	}
 
+	// 被 Hack 成功的提交判定已作废（CF 规则），任何来源的重判都不得让它复活：
+	// 保留原有结果写回，仅把状态/分数固定为「未通过、零分」。
+	if sub.IsHacked {
+		logger.Info("跳过被 Hack 提交的重判")
+		if sub.ContestID != nil {
+			return r.Store.SetJudgedFullClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
+				model.StatusWrongAnswer, sub.CompileError, sub.CaseResults, sub.CaseScores,
+				sub.TimeMs, sub.WallTimeMs, sub.MemoryKb, 0, sub.IsFrozen)
+		}
+		return r.Store.SetJudgedClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
+			model.StatusWrongAnswer, sub.CompileError, sub.CaseResults,
+			sub.TimeMs, sub.WallTimeMs, sub.MemoryKb)
+	}
+
 	problem, err := r.Store.GetProblem(ctx, sub.ProblemID)
 	if err != nil {
 		return err
@@ -76,20 +91,62 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 	var results []model.CaseResult
 	var scores []int
 	timeMs, memoryKb := 0, 0
+	// contestInfo 比赛上下文（无比赛时为 nil），写回阶段还要用它判断计分模式。
+	var contestInfo *model.Contest
 
 	if err := r.Sandbox.InitBox(ctx, r.BoxID); err != nil {
 		compileError = "沙箱初始化失败"
 		logger.Error("sandbox init", "err", err)
 	} else {
-		// 测试点与分值：权威来源为 manifest；比赛单题分值覆盖在此等比例缩放
-		judgeCases, errMsg := r.loadJudgeCases(ctx, problem)
+		// Codeforces 风格 Hack 使用选手提交的数据作为唯一测试输入，不要求题目上传测试点。
+		var judgeCases []judgeCase
+		var errMsg string
+		if problem.Type == model.ProblemTypeHack && problem.HackTargetSource != "" {
+			judgeCases = []judgeCase{{Ordinal: 1, Score: 100}}
+		} else {
+			// 测试点与分值：权威来源为 manifest；比赛单题分值覆盖在此等比例缩放
+			judgeCases, errMsg = r.loadJudgeCases(ctx, problem)
+		}
 		if errMsg != "" {
 			compileError = errMsg
 		} else {
+			// 比赛上下文：单题分值覆盖 + CF 赛制的分值衰减都在这里应用到测试点满分上
 			if sub.ContestID != nil {
+				if c, err := r.Store.GetContest(ctx, *sub.ContestID); err == nil {
+					contestInfo = &c
+				}
 				if cp, err := r.Store.GetContestProblem(ctx, *sub.ContestID, sub.ProblemID); err == nil &&
 					cp.Score != nil && *cp.Score > 0 {
 					judgeCases = scaleJudgeCases(judgeCases, *cp.Score)
+				}
+			}
+			// Codeforces 风格：分值随比赛进行线性衰减，按「提交时刻」确定本次得分，
+			// 因此这里把测试点满分整体缩放到该时刻的分值（AC 即得到当时的分数）。
+			if contestInfo != nil && contestInfo.Mode == model.ContestModeCF {
+				initial := 0
+				for _, jc := range judgeCases {
+					initial += jc.Score
+				}
+				if initial > 0 {
+					decayed := contest.CFDecayScore(initial, sub.CreatedAt,
+						contestInfo.StartTime, contestInfo.EndTime)
+					judgeCases = scaleJudgeCases(judgeCases, decayed)
+				}
+			}
+			// 预测试模式（Codeforces 两阶段判定）：比赛进行中的提交只跑预测试点；
+			// 赛后系统测试重判（system_test_pending）才跑完整数据。
+			pretestRun := false
+			systemTestRun := false
+			if contestInfo != nil && contestInfo.PretestOnly {
+				systemPending, _ := r.Store.IsSystemTestPending(ctx, submissionID)
+				switch {
+				case systemPending:
+					systemTestRun = true
+				case sub.CreatedAt.Before(contestInfo.EndTime):
+					if filtered, ok := r.filterPretestCases(ctx, problem.ID, judgeCases); ok {
+						judgeCases = filtered
+						pretestRun = true
+					}
 				}
 			}
 			// 调度器：按题目类型分发到对应评测流水线
@@ -98,16 +155,29 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeSPJInBox(ctx, sub, problem, lang, judgeCases)
 			case model.ProblemTypeInteractive:
 				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeInteractiveInBox(ctx, sub, problem, lang, judgeCases)
+			case model.ProblemTypeHack:
+				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeHackInBox(ctx, sub, problem, lang, judgeCases)
 			case model.ProblemTypeStandard, "":
 				verdict, compileError, results, timeMs, memoryKb = r.judgeInBox(ctx, sub, problem, lang, judgeCases)
 				scores = computeStandardScores(judgeCases, results)
 			default:
 				compileError = "暂不支持的题目类型: " + problem.Type
 			}
+			// 记录本次判定阶段（预测试 / 系统测试），供榜单与详情展示。
+			if contestInfo != nil && contestInfo.PretestOnly {
+				if err := r.Store.SetSubmissionJudgePhase(ctx, submissionID, pretestRun, systemTestRun); err != nil {
+					logger.Error("写入判定阶段失败", "err", err)
+				}
+			}
 		}
 	}
+	wallTimeMs := maxCaseWallTime(results)
 
 	if sub.ContestID != nil {
+		// 计分模式：整题通过才计分（ACM/CF 及显式选择该模式的 OI 比赛）时，
+		// 未通过的提交不得留下部分分——否则「Wrong Answer 243 分」这类自相矛盾的结果
+		// 会出现在提交列表与比赛提交页里（榜单本身不受影响，但分数列会误导选手）。
+		applyAllOrNothing(scores, verdict, contestScoreMode(contestInfo))
 		// 比赛提交：计算总分与冻结标记，并推送排行榜更新事件
 		total := 0
 		for _, s := range scores {
@@ -118,17 +188,17 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 			freezeAt := c.EndTime.Add(-time.Duration(c.FreezeDurationMinutes) * time.Minute)
 			frozen = !sub.CreatedAt.Before(freezeAt)
 		}
-		if err := r.Store.SetJudgedFullClaimed(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
+		if err := r.Store.SetJudgedFullClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
 			verdict, compileError, results, scores,
-			timeMs, memoryKb, total, frozen); err != nil {
+			timeMs, wallTimeMs, memoryKb, total, frozen); err != nil {
 			return err
 		}
 		if r.Queue != nil {
 			_ = r.Queue.PublishContestUpdate(ctx, *sub.ContestID)
 		}
 	} else {
-		if err := r.Store.SetJudgedClaimed(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
-			verdict, compileError, results, timeMs, memoryKb); err != nil {
+		if err := r.Store.SetJudgedClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
+			verdict, compileError, results, timeMs, wallTimeMs, memoryKb); err != nil {
 			return err
 		}
 	}
@@ -138,8 +208,69 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 			logger.Error("update problem counters", "err", err)
 		}
 	}
-	logger.Info("judged", "verdict", verdict, "score", sumInts(scores), "time_ms", timeMs, "memory_kb", memoryKb)
+	logger.Info("judged", "verdict", verdict, "score", sumInts(scores), "time_ms", timeMs, "wall_time_ms", wallTimeMs, "memory_kb", memoryKb)
 	return nil
+}
+
+// contestScoreMode 返回比赛的计分模式（无比赛时为空字符串）。
+func contestScoreMode(c *model.Contest) string {
+	if c == nil {
+		return ""
+	}
+	return c.ScoreMode
+}
+
+// applyAllOrNothing 实现「整题通过才计分」：该模式下未通过的提交逐点得分清零。
+// 其它模式（partial）保留逐点部分分，供 OI/IOI 赛制使用。
+func applyAllOrNothing(scores []int, verdict, scoreMode string) {
+	if scoreMode != model.ScoreModeAllOrNothing || verdict == model.StatusAccepted {
+		return
+	}
+	for i := range scores {
+		scores[i] = 0
+	}
+}
+
+func maxCaseWallTime(results []model.CaseResult) int {
+	maxWall := 0
+	for _, result := range results {
+		if result.WallTimeMs > maxWall {
+			maxWall = result.WallTimeMs
+		}
+	}
+	return maxWall
+}
+
+// filterPretestCases 从测试点集合中挑出预测试点（is_pretest 标记）。
+// 管理员未标记任何预测试点时回退为「第一个测试点」，保证预测试模式可用。
+// 返回 ok=false 表示无法构造预测试集合（此时按完整数据评测）。
+func (r *Runner) filterPretestCases(ctx context.Context, problemID int64, cases []judgeCase) ([]judgeCase, bool) {
+	if len(cases) == 0 {
+		return cases, false
+	}
+	tcs, err := r.Store.ListTestcases(ctx, problemID)
+	if err != nil {
+		return cases, false
+	}
+	pretest := map[int]bool{}
+	for _, t := range tcs {
+		if t.IsPretest {
+			pretest[t.Ordinal] = true
+		}
+	}
+	if len(pretest) == 0 {
+		return cases[:1], true // 回退：只用第一个测试点
+	}
+	out := make([]judgeCase, 0, len(pretest))
+	for _, jc := range cases {
+		if pretest[jc.Ordinal] {
+			out = append(out, jc)
+		}
+	}
+	if len(out) == 0 {
+		return cases[:1], true
+	}
+	return out, true
 }
 
 // judgeCase 单个待评测测试点（含分值）。
@@ -198,18 +329,19 @@ func (r *Runner) loadJudgeCases(ctx context.Context, problem model.Problem) ([]j
 // scaleJudgeCases 按比赛单题分值覆盖等比例缩放各测试点满分。
 // 除不尽的余数补给最后一个测试点，保证总分精确等于 target。
 func scaleJudgeCases(cases []judgeCase, target int) []judgeCase {
-	sum := 0
+	// Keep intermediate arithmetic wide enough for large custom contest scores.
+	var sum int64
 	for _, c := range cases {
-		sum += c.Score
+		sum += int64(c.Score)
 	}
-	if sum <= 0 || sum == target || len(cases) == 0 {
+	if sum <= 0 || sum == int64(target) || len(cases) == 0 {
 		return cases
 	}
 	out := make([]judgeCase, len(cases))
 	copy(out, cases)
 	acc := 0
 	for i := 0; i < len(out)-1; i++ {
-		scaled := out[i].Score * target / sum // 向下取整
+		scaled := int(int64(out[i].Score) * int64(target) / sum) // 向下取整
 		out[i].Score = scaled
 		acc += scaled
 	}
@@ -377,10 +509,10 @@ func (r *Runner) runCase(ctx context.Context, boxDir string, tc data.TestCase, c
 		cr.Status = model.StatusSystemError
 		return cr
 	}
-	cr.TimeMs, cr.MemoryKb = res.TimeMs, res.MemoryKb
+	cr.TimeMs, cr.WallTimeMs, cr.MemoryKb = res.TimeMs, res.WallTimeMs, res.MemoryKb
 
-	if v := verdictFromRun(res, limits); v != verdictOK {
-		cr.Status = v
+	if v, source := verdictFromRunWithSource(res, limits); v != verdictOK {
+		cr.Status, cr.TimeoutSource = v, source
 		return cr
 	}
 
@@ -394,11 +526,7 @@ func (r *Runner) runCase(ctx context.Context, boxDir string, tc data.TestCase, c
 		cr.Status = model.StatusSystemError
 		return cr
 	}
-	if TokenCompare(string(expData), string(outData)) {
-		cr.Status = model.StatusAccepted
-	} else {
-		cr.Status = model.StatusWrongAnswer
-	}
+	cr.Status = CompareOutput(problem.CheckerMode, string(expData), string(outData))
 	return cr
 }
 
@@ -435,6 +563,19 @@ func verdictFromRun(res RunResult, limits Limits) string {
 		return model.StatusTimeLimitExceeded
 	}
 	return verdictOK
+}
+
+// verdictFromRunWithSource 在 TLE 时补充 CPU/墙钟来源。
+// isolate 仅返回统一的 TO 状态，因此按 CPU 是否接近软限制推断来源。
+func verdictFromRunWithSource(res RunResult, limits Limits) (string, string) {
+	verdict := verdictFromRun(res, limits)
+	if verdict != model.StatusTimeLimitExceeded {
+		return verdict, ""
+	}
+	if limits.TimeMs > 0 && res.TimeMs >= int(float64(limits.TimeMs)*0.95) {
+		return verdict, "cpu"
+	}
+	return verdict, "wall"
 }
 
 // prepareRunFiles 准备一次运行所需的文件：写入 stdin（nil 表示空），

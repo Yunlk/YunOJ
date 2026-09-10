@@ -25,7 +25,7 @@ func (s *Store) JudgeStatusCounts(ctx context.Context) (map[string]int64, error)
 func (s *Store) ResetStaleRunning(ctx context.Context, ageSeconds int) ([]int64, error) {
 	rows, err := s.pool.Query(ctx, `
 		UPDATE submissions SET status = 'pending', compile_error = '', case_results = '[]',
-			time_ms = 0, memory_kb = 0, judged_at = NULL,
+			time_ms = 0, wall_time_ms = 0, memory_kb = 0, judged_at = NULL,
 			judge_node_id = NULL, judge_worker_id = NULL,
 			judge_started_at = NULL, judge_lease_until = NULL
 		WHERE status = 'running' AND (

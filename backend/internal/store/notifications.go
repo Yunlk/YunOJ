@@ -55,6 +55,20 @@ func (s *Store) MarkNotificationRead(ctx context.Context, userID, notificationID
 	return err
 }
 
+// MarkAllNotificationsRead 把当前用户可见的全部通知标记为已读，返回新标记的条数。
+// 单条接口需要前端并发 N 次请求；批量接口一次 SQL 完成，避免「全部标为已读」打成请求风暴。
+func (s *Store) MarkAllNotificationsRead(ctx context.Context, userID int64) (int64, error) {
+	ct, err := s.pool.Exec(ctx, `
+		INSERT INTO notification_reads (notification_id, user_id)
+		SELECT n.id, $1 FROM notifications n
+		WHERE n.recipient_id IS NULL OR n.recipient_id = $1
+		ON CONFLICT DO NOTHING`, userID)
+	if err != nil {
+		return 0, err
+	}
+	return ct.RowsAffected(), nil
+}
+
 // GetNotification 检查通知是否存在。
 func (s *Store) GetNotification(ctx context.Context, id int64) (model.Notification, error) {
 	var item model.Notification

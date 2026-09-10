@@ -27,7 +27,7 @@ import (
 // ListTestcases 列出题目的全部测试点（按 ordinal 升序）。
 func (s *Store) ListTestcases(ctx context.Context, problemID int64) ([]model.ProblemTestCase, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT problem_id, ordinal, score, size_bytes, input_sha, output_sha, updated_at
+		`SELECT problem_id, ordinal, score, size_bytes, input_sha, output_sha, is_pretest, updated_at
 		 FROM problem_testcases WHERE problem_id = $1 ORDER BY ordinal`, problemID)
 	if err != nil {
 		return nil, err
@@ -37,12 +37,35 @@ func (s *Store) ListTestcases(ctx context.Context, problemID int64) ([]model.Pro
 	for rows.Next() {
 		var t model.ProblemTestCase
 		if err := rows.Scan(&t.ProblemID, &t.Ordinal, &t.Score, &t.SizeBytes,
-			&t.InputSHA, &t.OutputSHA, &t.UpdatedAt); err != nil {
+			&t.InputSHA, &t.OutputSHA, &t.IsPretest, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, t)
 	}
 	return items, rows.Err()
+}
+
+// SetTestcasePretest 设置单个测试点是否属于预测试集合。
+func (s *Store) SetTestcasePretest(ctx context.Context, problemID int64, ordinal int, isPretest bool) error {
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE problem_testcases SET is_pretest = $3, updated_at = now()
+		 WHERE problem_id = $1 AND ordinal = $2`, problemID, ordinal, isPretest)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CountPretests 统计题目的预测试点数量。
+func (s *Store) CountPretests(ctx context.Context, problemID int64) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM problem_testcases WHERE problem_id = $1 AND is_pretest`,
+		problemID).Scan(&n)
+	return n, err
 }
 
 // HasTestcases 判断题目是否已有 manifest 记录。
@@ -57,11 +80,11 @@ func (s *Store) HasTestcases(ctx context.Context, problemID int64) (bool, error)
 // UpsertTestcase 插入或更新单个测试点（分值/大小/摘要，以 ordinal 为键）。
 func (s *Store) UpsertTestcase(ctx context.Context, t model.ProblemTestCase) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO problem_testcases (problem_id, ordinal, score, size_bytes, input_sha, output_sha)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO problem_testcases (problem_id, ordinal, score, size_bytes, input_sha, output_sha, is_pretest)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
 		 ON CONFLICT (problem_id, ordinal) DO UPDATE SET
-			score = $3, size_bytes = $4, input_sha = $5, output_sha = $6, updated_at = now()`,
-		t.ProblemID, t.Ordinal, t.Score, t.SizeBytes, t.InputSHA, t.OutputSHA)
+			score = $3, size_bytes = $4, input_sha = $5, output_sha = $6, is_pretest = $7, updated_at = now()`,
+		t.ProblemID, t.Ordinal, t.Score, t.SizeBytes, t.InputSHA, t.OutputSHA, t.IsPretest)
 	return err
 }
 
@@ -87,10 +110,10 @@ func (s *Store) ReplaceAllTestcases(ctx context.Context, problemID int64, tcs []
 	for i := range tcs {
 		tcs[i].ProblemID = problemID
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO problem_testcases (problem_id, ordinal, score, size_bytes, input_sha, output_sha)
-			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			`INSERT INTO problem_testcases (problem_id, ordinal, score, size_bytes, input_sha, output_sha, is_pretest)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			tcs[i].ProblemID, tcs[i].Ordinal, tcs[i].Score,
-			tcs[i].SizeBytes, tcs[i].InputSHA, tcs[i].OutputSHA); err != nil {
+			tcs[i].SizeBytes, tcs[i].InputSHA, tcs[i].OutputSHA, tcs[i].IsPretest); err != nil {
 			return err
 		}
 	}

@@ -128,6 +128,9 @@ type HomeProblem struct {
 	SubmissionCount int64     `json:"submission_count"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// MyStatus 当前用户对该题的作答状态：accepted / wrong_answer / 空字符串（未做）。
+	// 仅收藏列表等带用户上下文的接口填充；字段始终存在，便于前端区分「未做」与「未加载」。
+	MyStatus string `json:"my_status"`
 }
 
 // ProblemDiscussion 题目讨论。
@@ -200,12 +203,20 @@ type Problem struct {
 	Tags            []string `json:"tags"`
 	AcceptedCount   int64    `json:"accepted_count"`
 	SubmissionCount int64    `json:"submission_count"`
-	// Type 题目类型：standard | spj | interactive | output_only
+	// Type 题目类型：standard | hack | spj | interactive | output_only
 	Type string `json:"type"`
+	// CheckerMode 标准题输出判定：token | exact。
+	CheckerMode string `json:"checker_mode"`
 	// SPJSource 特殊评测器源码（Type=spj 时使用，沙箱内编译运行）
 	SPJSource string `json:"spj_source"`
 	// InteractorSource 交互器源码（Type=interactive 时使用）
 	InteractorSource string `json:"interactor_source"`
+	// HackGeneratorSource Hack 测试生成器源码（Type=hack 时由管理员维护）
+	HackGeneratorSource string `json:"hack_generator_source"`
+	// HackReferenceSource Hack 参考解源码（Type=hack 时由管理员维护）
+	HackReferenceSource string `json:"hack_reference_source"`
+	// HackTargetSource Hack 题待攻击的目标程序源码（Type=hack 时公开展示）
+	HackTargetSource string `json:"hack_target_source"`
 	// TestcaseScores 各测试点分数（与排序后的测试点对齐；空 = 平均分配）。
 	// 自迁移 5 起弃用：权威分值存于 problem_testcases，本列仅保留用于回填。
 	TestcaseScores []int `json:"testcase_scores"`
@@ -223,9 +234,16 @@ type Problem struct {
 // 题目类型。
 const (
 	ProblemTypeStandard    = "standard"
+	ProblemTypeHack        = "hack"
 	ProblemTypeSPJ         = "spj"
 	ProblemTypeInteractive = "interactive"
 	ProblemTypeOutputOnly  = "output_only"
+)
+
+// 标准题输出判定模式。SPJ/交互题使用各自的评测器协议。
+const (
+	CheckerModeToken = "token"
+	CheckerModeExact = "exact"
 )
 
 // 题目状态。
@@ -238,21 +256,27 @@ const (
 // ProblemTestCase 测试点 manifest 行：分值/编号稳定关联的权威来源。
 // 数据文件为 {DataDir}/problems/{problemID}/tests/{ordinal}.in/.out。
 type ProblemTestCase struct {
-	ProblemID int64     `json:"problem_id"`
-	Ordinal   int       `json:"ordinal"`
-	Score     int       `json:"score"`
-	SizeBytes int64     `json:"size_bytes"`
-	InputSHA  string    `json:"input_sha"`
-	OutputSHA string    `json:"output_sha"`
+	ProblemID int64  `json:"problem_id"`
+	Ordinal   int    `json:"ordinal"`
+	Score     int    `json:"score"`
+	SizeBytes int64  `json:"size_bytes"`
+	InputSHA  string `json:"input_sha"`
+	OutputSHA string `json:"output_sha"`
+	// IsPretest 是否属于预测试集合（Codeforces 风格两阶段判定：比赛中只跑预测试）
+	IsPretest bool      `json:"is_pretest"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CaseResult 单个测试点的评测结果。
 type CaseResult struct {
-	CaseID   int    `json:"case_id"`
-	Status   string `json:"status"`
-	TimeMs   int    `json:"time_ms"`
-	MemoryKb int    `json:"memory_kb"`
+	CaseID        int    `json:"case_id"`
+	Status        string `json:"status"`
+	TimeMs        int    `json:"time_ms"`
+	WallTimeMs    int    `json:"wall_time_ms,omitempty"`
+	MemoryKb      int    `json:"memory_kb"`
+	TimeoutSource string `json:"timeout_source,omitempty"`
+	// HackStatus 为 Codeforces 风格 Hack 中目标程序的原始状态；Status 表示本次 Hack 结果。
+	HackStatus string `json:"hack_status,omitempty"`
 }
 
 // Submission 提交记录。Code/CompileError/CaseResults 仅评测机与
@@ -269,7 +293,10 @@ type Submission struct {
 	CompileError string       `json:"compile_error"`
 	CaseResults  []CaseResult `json:"case_results"`
 	TimeMs       int          `json:"time_ms"`
+	WallTimeMs   int          `json:"wall_time_ms"`
 	MemoryKb     int          `json:"memory_kb"`
+	// TimeoutSource 表示 TLE 的主要来源：cpu 或 wall。
+	TimeoutSource string `json:"timeout_source,omitempty"`
 	// Optimize 是否开启 -O2 编译优化（C/C++）
 	Optimize  bool       `json:"optimize"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -279,6 +306,56 @@ type Submission struct {
 	Score      int    `json:"score"`
 	CaseScores []int  `json:"case_scores"`
 	IsFrozen   bool   `json:"is_frozen"`
+	// PretestOnly 当前判定只跑了预测试（比赛进行中、赛后系统测试前）
+	PretestOnly bool `json:"pretest_only"`
+	// SystemTested 已完成赛后系统测试（用完整测试数据重判）
+	SystemTested bool `json:"system_tested"`
+	// IsHacked 已被他人 Hack 成功，判定已降级、分数作废
+	IsHacked bool `json:"is_hacked"`
+}
+
+// ---------- Open Hacking（Codeforces 风格选手间 Hack） ----------
+
+// Hack 判定结果。
+const (
+	HackPending = "pending" // 排队中
+	HackSuccess = "success" // Hack 成功：目标程序在该数据上未通过
+	HackFail    = "fail"    // Hack 失败：目标程序通过
+	HackError   = "error"   // 评测异常（编译失败/系统错误）
+)
+
+// Hack 计分（Codeforces 惯例）：成功 +100，失败 -50。
+const (
+	HackSuccessPoints = 100
+	HackFailPenalty   = 50
+)
+
+// ContestProblemLock 队伍在比赛中锁定某题（锁定后不能再提交，但可查看并攻击他人提交）。
+type ContestProblemLock struct {
+	ContestID int64     `json:"contest_id"`
+	TeamID    int64     `json:"team_id"`
+	ProblemID int64     `json:"problem_id"`
+	LockedAt  time.Time `json:"locked_at"`
+}
+
+// ContestHack 一次选手间的 Hack：hacker 提交输入数据攻击 target 的提交。
+type ContestHack struct {
+	ID                 int64      `json:"id"`
+	ContestID          int64      `json:"contest_id"`
+	ProblemID          int64      `json:"problem_id"`
+	DisplayID          string     `json:"display_id"`
+	HackerID           int64      `json:"hacker_id"`
+	HackerName         string     `json:"hacker_name"`
+	TargetSubmissionID int64      `json:"target_submission_id"`
+	TargetTeamID       int64      `json:"target_team_id"`
+	TargetTeamName     string     `json:"target_team_name"`
+	Input              string     `json:"input"`
+	ExpectedOutput     string     `json:"expected_output"`
+	Verdict            string     `json:"verdict"`
+	TargetStatus       string     `json:"target_status"`
+	JudgeNote          string     `json:"judge_note"`
+	CreatedAt          time.Time  `json:"created_at"`
+	JudgedAt           *time.Time `json:"judged_at"`
 }
 
 // JudgeNode 是一台评测节点的运行状态。节点通过心跳上报实际并发与语言能力，
@@ -330,6 +407,9 @@ const (
 	ContestModeACM = "ACM"
 	ContestModeOI  = "OI"
 	ContestModeIOI = "IOI"
+	// ContestModeCF Codeforces 风格：单题分值随比赛进行线性衰减（下限 30%），
+	// 按总分排名，通过前的错误提交按罚时分钟计入罚时。
+	ContestModeCF = "CF"
 )
 
 // 比赛可见性。
@@ -361,16 +441,18 @@ var ContestThemeColors = []string{"blue", "green", "orange", "purple", "cyan", "
 
 // Contest 比赛。
 type Contest struct {
-	ID                    int64     `json:"id"`
-	Title                 string    `json:"title"`
-	Mode                  string    `json:"mode"`
-	Feedback              string    `json:"feedback"`
-	ScoreMode             string    `json:"score_mode"`
-	PenaltyMinutes        int       `json:"penalty_minutes"`
-	FreezeDurationMinutes int       `json:"freeze_duration_minutes"`
-	RankKeys              []string  `json:"rank_keys"`
-	StartTime             time.Time `json:"start_time"`
-	EndTime               time.Time `json:"end_time"`
+	ID                    int64  `json:"id"`
+	Title                 string `json:"title"`
+	Mode                  string `json:"mode"`
+	Feedback              string `json:"feedback"`
+	ScoreMode             string `json:"score_mode"`
+	PenaltyMinutes        int    `json:"penalty_minutes"`
+	FreezeDurationMinutes int    `json:"freeze_duration_minutes"`
+	// DynamicDelayMinutes 动态大屏延迟开启分钟数；0 = 按比赛时长的 20% 自动计算。
+	DynamicDelayMinutes int       `json:"dynamic_delay_minutes"`
+	RankKeys            []string  `json:"rank_keys"`
+	StartTime           time.Time `json:"start_time"`
+	EndTime             time.Time `json:"end_time"`
 	// Description 比赛说明/公告（Markdown）
 	Description string `json:"description"`
 	CoverImage  string `json:"cover_image"`
@@ -380,11 +462,15 @@ type Contest struct {
 	RegStartTime *time.Time `json:"reg_start_time,omitempty"`
 	RegEndTime   *time.Time `json:"reg_end_time,omitempty"`
 	// SubmissionLimit 比赛默认单题提交上限（0 = 不限）
-	SubmissionLimit  int       `json:"submission_limit"`
-	RegistrationMode string    `json:"registration_mode"`
-	MaxTeamSize      int       `json:"max_team_size"`
-	AllowTeamEdit    bool      `json:"allow_team_edit"`
-	CreatedAt        time.Time `json:"created_at"`
+	SubmissionLimit  int    `json:"submission_limit"`
+	RegistrationMode string `json:"registration_mode"`
+	MaxTeamSize      int    `json:"max_team_size"`
+	AllowTeamEdit    bool   `json:"allow_team_edit"`
+	// PretestOnly 比赛中只评测预测试，赛后自动用完整数据系统测试（CF 两阶段判定）
+	PretestOnly bool `json:"pretest_only"`
+	// HackingEnabled 开放 Hack：锁定已通过的题目后可查看并攻击他人提交
+	HackingEnabled bool      `json:"hacking_enabled"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // ContestProblem 比赛与题目的关联（含展示编号与排序）。

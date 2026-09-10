@@ -1,11 +1,15 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yunoj/yunoj/internal/auth"
@@ -47,6 +51,9 @@ func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "密码长度需在 6-72 位之间")
 		return
 	}
+	if !a.allowAuthAttempt(w, r, "register", username, 30, 10*time.Minute, 6) {
+		return
+	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -54,11 +61,7 @@ func (a *API) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role := model.RoleUser
-	if n, err := a.store.CountUsers(r.Context()); err == nil && n == 0 {
-		role = model.RoleAdmin
-	}
-	u, err := a.store.CreateUser(r.Context(), username, email, hash, role)
+	u, err := a.store.CreateRegisteredUser(r.Context(), username, email, hash)
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "用户名或邮箱已被使用")
 		return
@@ -77,7 +80,11 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	u, hash, err := a.store.GetUserByUsername(r.Context(), strings.TrimSpace(req.Username))
+	username := strings.TrimSpace(req.Username)
+	if !a.allowAuthAttempt(w, r, "login", username, 60, 5*time.Minute, 12) {
+		return
+	}
+	u, hash, err := a.store.GetUserByUsername(r.Context(), username)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		slogError(r, "登录", err)
 		writeError(w, http.StatusInternalServerError, "登录失败")
@@ -112,6 +119,9 @@ func (a *API) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "新密码长度需在 6-72 位之间")
 		return
 	}
+	if !a.allowAuthAttempt(w, r, "change-password", u.Username, 30, 10*time.Minute, 10) {
+		return
+	}
 	_, hash, err := a.store.GetUserByUsername(r.Context(), u.Username)
 	if err != nil || !auth.CheckPassword(hash, req.CurrentPassword) {
 		writeError(w, http.StatusUnauthorized, "当前密码不正确")
@@ -137,5 +147,37 @@ func (a *API) issueToken(w http.ResponseWriter, r *http.Request, u model.User, s
 		writeError(w, http.StatusInternalServerError, "登录失败")
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, status, map[string]any{"token": token, "user": a.decorateUserRanking(r, u)})
+}
+
+// allowAuthAttempt 同时限制单一来源的总请求量与来源+账号组合的请求量。
+// 键只保存摘要，避免在 Redis 中留下用户名或 IP 明文。
+func (a *API) allowAuthAttempt(w http.ResponseWriter, r *http.Request, action, identity string,
+	sourceLimit int64, window time.Duration, identityLimit int64,
+) bool {
+	source := a.clientIP(r)
+	keys := []struct {
+		value string
+		limit int64
+	}{
+		{value: action + ":source:" + source, limit: sourceLimit},
+		{value: action + ":identity:" + source + ":" + strings.ToLower(identity), limit: identityLimit},
+	}
+	for _, item := range keys {
+		sum := sha256.Sum256([]byte(item.value))
+		key := "oj:ratelimit:auth:" + hex.EncodeToString(sum[:16])
+		allowed, err := a.queue.AllowRate(r.Context(), key, item.limit, window)
+		if err != nil {
+			slogError(r, "认证限流", err)
+			writeError(w, http.StatusServiceUnavailable, "认证服务暂不可用，请稍后重试")
+			return false
+		}
+		if !allowed {
+			w.Header().Set("Retry-After", fmt.Sprintf("%d", int(window.Seconds())))
+			writeError(w, http.StatusTooManyRequests, "请求过于频繁，请稍后再试")
+			return false
+		}
+	}
+	return true
 }

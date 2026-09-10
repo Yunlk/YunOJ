@@ -33,22 +33,25 @@ func (a *API) handleCopyProblem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dst := model.Problem{
-		Title:            src.Title + "（副本）",
-		Statement:        src.Statement,
-		InputFormat:      src.InputFormat,
-		OutputFormat:     src.OutputFormat,
-		Hint:             src.Hint,
-		Samples:          src.Samples,
-		TimeLimitMs:      src.TimeLimitMs,
-		MemoryLimitKb:    src.MemoryLimitKb,
-		Difficulty:       src.Difficulty,
-		Tags:             src.Tags,
-		Type:             src.Type,
-		SPJSource:        src.SPJSource,
-		InteractorSource: src.InteractorSource,
-		TestcaseScores:   src.TestcaseScores,
-		SubmissionLimit:  src.SubmissionLimit,
-		Status:           model.ProblemStatusDraft,
+		Title:               src.Title + "（副本）",
+		Statement:           src.Statement,
+		InputFormat:         src.InputFormat,
+		OutputFormat:        src.OutputFormat,
+		Hint:                src.Hint,
+		Samples:             src.Samples,
+		TimeLimitMs:         src.TimeLimitMs,
+		MemoryLimitKb:       src.MemoryLimitKb,
+		Difficulty:          src.Difficulty,
+		Tags:                src.Tags,
+		Type:                src.Type,
+		SPJSource:           src.SPJSource,
+		InteractorSource:    src.InteractorSource,
+		HackGeneratorSource: src.HackGeneratorSource,
+		HackReferenceSource: src.HackReferenceSource,
+		HackTargetSource:    src.HackTargetSource,
+		TestcaseScores:      src.TestcaseScores,
+		SubmissionLimit:     src.SubmissionLimit,
+		Status:              model.ProblemStatusDraft,
 	}
 	if err := a.store.CreateProblem(r.Context(), &dst); err != nil {
 		slogError(r, "复制题目", err)
@@ -71,7 +74,7 @@ func (a *API) handleCopyProblem(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdateProblemStatus 修改题目状态（草稿/发布/停用）。
-// 发布 standard/spj/interactive 题目前校验测试点完整性（≥1 个且总分 100）。
+// 发布 standard/hack/spj/interactive 题目前校验测试点完整性（≥1 个且总分 100）。
 func (a *API) handleUpdateProblemStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r)
 	if err != nil {
@@ -122,7 +125,8 @@ type publishError struct {
 
 func (e *publishError) Error() string { return e.message }
 
-// validatePublishProblem 发布前校验：standard/spj/interactive 需 ≥1 个测试点且总分 100。
+// validatePublishProblem 发布前校验：标准 Hack 目标程序模式不需要上传测试点，
+// 其余 standard/hack/spj/interactive 题需 ≥1 个测试点且总分 100。
 func (a *API) validatePublishProblem(r *http.Request, id int64) error {
 	p, err := a.store.GetProblem(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -131,7 +135,7 @@ func (a *API) validatePublishProblem(r *http.Request, id int64) error {
 	if err != nil {
 		return err
 	}
-	if p.Type == model.ProblemTypeOutputOnly {
+	if p.Type == model.ProblemTypeOutputOnly || (p.Type == model.ProblemTypeHack && strings.TrimSpace(p.HackTargetSource) != "") {
 		return nil
 	}
 	tcs, err := a.store.ListTestcases(r.Context(), id)

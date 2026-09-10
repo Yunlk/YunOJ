@@ -27,10 +27,12 @@ type TestTask struct {
 	Cases    []TestInput `json:"cases"`
 }
 
-// TestInput 单个运行用例。Expected 非空表示需要比较输出（样例测试）。
+// TestInput 单个运行用例。Compare=true 表示需要比较输出（样例测试）。
+// 独立字段可正确表达期望输出本身为空的样例。
 type TestInput struct {
 	Input    string `json:"input"`
 	Expected string `json:"expected,omitempty"`
+	Compare  bool   `json:"compare,omitempty"`
 }
 
 // TestResult 测试运行结果。
@@ -42,11 +44,13 @@ type TestResult struct {
 
 // TestCaseResult 单个用例的运行结果。
 type TestCaseResult struct {
-	Status   string `json:"status"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr,omitempty"`
-	TimeMs   int    `json:"time_ms"`
-	MemoryKb int    `json:"memory_kb"`
+	Status        string `json:"status"`
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr,omitempty"`
+	TimeMs        int    `json:"time_ms"`
+	WallTimeMs    int    `json:"wall_time_ms"`
+	MemoryKb      int    `json:"memory_kb"`
+	TimeoutSource string `json:"timeout_source,omitempty"`
 	// Passed 仅在提供期望输出（样例测试）时非 nil
 	Passed *bool `json:"passed,omitempty"`
 }
@@ -97,7 +101,7 @@ func (r *Runner) Test(ctx context.Context, task TestTask) TestResult {
 	return res
 }
 
-// runTestInput 运行单个用例。tc.Expected 非空时与输出做 token 比较。
+// runTestInput 运行单个用例。tc.Compare=true 时按题目配置比较输出。
 func (r *Runner) runTestInput(ctx context.Context, boxDir string, tc TestInput,
 	problem model.Problem, lang langs.Language) TestCaseResult {
 
@@ -121,10 +125,11 @@ func (r *Runner) runTestInput(ctx context.Context, boxDir string, tc TestInput,
 		slog.Error("测试用例沙箱运行失败", "err", err)
 		return cr
 	}
-	cr.TimeMs, cr.MemoryKb = run.TimeMs, run.MemoryKb
+	cr.TimeMs, cr.WallTimeMs, cr.MemoryKb = run.TimeMs, run.WallTimeMs, run.MemoryKb
 
-	if v := verdictFromRun(run, limits); v != verdictOK {
+	if v, source := verdictFromRunWithSource(run, limits); v != verdictOK {
 		cr.Status = v
+		cr.TimeoutSource = source
 		return cr
 	}
 
@@ -140,14 +145,10 @@ func (r *Runner) runTestInput(ctx context.Context, boxDir string, tc TestInput,
 		cr.Stderr = stderr
 	}
 
-	if tc.Expected != "" {
-		passed := TokenCompare(tc.Expected, cr.Stdout)
+	if tc.Compare {
+		cr.Status = CompareOutput(problem.CheckerMode, tc.Expected, cr.Stdout)
+		passed := cr.Status == model.StatusAccepted
 		cr.Passed = &passed
-		if passed {
-			cr.Status = model.StatusAccepted
-		} else {
-			cr.Status = model.StatusWrongAnswer
-		}
 	} else {
 		cr.Status = model.StatusAccepted
 	}

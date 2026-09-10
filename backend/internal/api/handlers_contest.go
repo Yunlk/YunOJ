@@ -29,6 +29,7 @@ type contestPayload struct {
 	ScoreMode             string     `json:"score_mode"`
 	PenaltyMinutes        int        `json:"penalty_minutes"`
 	FreezeDurationMinutes int        `json:"freeze_duration_minutes"`
+	DynamicDelayMinutes   int        `json:"dynamic_delay_minutes"`
 	RankKeys              []string   `json:"rank_keys"`
 	StartTime             time.Time  `json:"start_time"`
 	EndTime               time.Time  `json:"end_time"`
@@ -41,6 +42,10 @@ type contestPayload struct {
 	RegistrationMode      string     `json:"registration_mode"`
 	MaxTeamSize           int        `json:"max_team_size"`
 	AllowTeamEdit         bool       `json:"allow_team_edit"`
+	// PretestOnly 比赛中只评测预测试，赛后自动用完整数据系统测试
+	PretestOnly bool `json:"pretest_only"`
+	// HackingEnabled 开放 Hack（锁定已通过题目后可攻击他人提交）
+	HackingEnabled bool `json:"hacking_enabled"`
 }
 
 func validateContestPayload(p *contestPayload) string {
@@ -48,9 +53,9 @@ func validateContestPayload(p *contestPayload) string {
 		return "比赛名称长度需在 1-128 字符之间"
 	}
 	switch p.Mode {
-	case model.ContestModeACM, model.ContestModeOI, model.ContestModeIOI:
+	case model.ContestModeACM, model.ContestModeOI, model.ContestModeIOI, model.ContestModeCF:
 	default:
-		return "无效的比赛模式（ACM/OI/IOI）"
+		return "无效的比赛模式（ACM/OI/IOI/CF）"
 	}
 	switch p.Feedback {
 	case model.FeedbackRealtime, model.FeedbackBlind:
@@ -67,6 +72,9 @@ func validateContestPayload(p *contestPayload) string {
 	}
 	if p.FreezeDurationMinutes < 0 || p.FreezeDurationMinutes > 720 {
 		return "封榜时长需在 0-720 分钟之间"
+	}
+	if p.DynamicDelayMinutes < 0 || p.DynamicDelayMinutes > 720 {
+		return "动态大屏延迟需在 0-720 分钟之间（0 = 自动按比赛时长的 20%）"
 	}
 	if !p.EndTime.After(p.StartTime) {
 		return "结束时间必须晚于开始时间"
@@ -121,6 +129,7 @@ func payloadToContest(p *contestPayload) model.Contest {
 		ScoreMode:             p.ScoreMode,
 		PenaltyMinutes:        p.PenaltyMinutes,
 		FreezeDurationMinutes: p.FreezeDurationMinutes,
+		DynamicDelayMinutes:   p.DynamicDelayMinutes,
 		RankKeys:              p.RankKeys,
 		StartTime:             p.StartTime,
 		EndTime:               p.EndTime,
@@ -133,6 +142,8 @@ func payloadToContest(p *contestPayload) model.Contest {
 		RegistrationMode:      p.RegistrationMode,
 		MaxTeamSize:           p.MaxTeamSize,
 		AllowTeamEdit:         p.AllowTeamEdit,
+		PretestOnly:           p.PretestOnly,
+		HackingEnabled:        p.HackingEnabled,
 	}
 	if c.RankKeys == nil {
 		c.RankKeys = []string{}
@@ -220,7 +231,45 @@ func (a *API) handleListContests(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "查询失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+	// 一次查出「我报名了哪些比赛」，让列表直接带 is_registered，
+	// 避免前端对每一行再请求一次 /contests/{id}/registration（N+1）。
+	registered := map[int64]bool{}
+	if loggedIn && len(items) > 0 {
+		ids := make([]int64, 0, len(items))
+		for _, c := range items {
+			ids = append(ids, c.ID)
+		}
+		if m, err := a.store.ListRegisteredContestIDs(r.Context(), u.ID, ids); err == nil {
+			registered = m
+		} else {
+			slogError(r, "比赛报名状态", err)
+		}
+	}
+	type contestListItem struct {
+		model.Contest
+		IsRegistered bool `json:"is_registered"`
+	}
+	list := make([]contestListItem, 0, len(items))
+	for _, c := range items {
+		list = append(list, contestListItem{Contest: c, IsRegistered: registered[c.ID]})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
+}
+
+// handleActiveContest 返回当前进行中的那一场比赛（没有则 contest 为 null）。
+// 导航栏只需要一个倒计时，不该为此拉整份首页数据。
+func (a *API) handleActiveContest(w http.ResponseWriter, r *http.Request) {
+	c, err := a.store.GetActiveContest(r.Context())
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeJSON(w, http.StatusOK, map[string]any{"contest": nil})
+			return
+		}
+		slogError(r, "进行中比赛", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"contest": c})
 }
 
 // contestProblemDTO 比赛题目视图（含标题与分值/上限覆盖）。
@@ -870,7 +919,14 @@ func (a *API) handleContestSubmit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "该题目已停用，无法提交")
 		return
 	}
-	// 5. 提交次数限制：单题覆盖值（NULL=继承比赛默认，0=不限）
+	// 5. Hack 锁定：锁定后不能再向该题提交（Codeforces 规则）
+	if c.HackingEnabled {
+		if locked, err := a.store.IsProblemLocked(r.Context(), cid, u.ID, req.ProblemID); err == nil && locked {
+			writeError(w, http.StatusForbidden, "该题已锁定（用于 Hack），不能再提交")
+			return
+		}
+	}
+	// 6. 提交次数限制：单题覆盖值（NULL=继承比赛默认，0=不限）
 	limit := c.SubmissionLimit
 	if cp.SubmissionLimit != nil {
 		limit = *cp.SubmissionLimit
@@ -921,12 +977,24 @@ func (a *API) buildContestContext(ctx context.Context, c model.Contest) (contest
 	for _, p := range problems {
 		ids = append(ids, p.ProblemID)
 	}
+	// Hack 得分与统计（CF 赛制计入总分；其他赛制仅用于展示）
+	hackPoints := map[int64]int{}
+	hackStats := map[int64][2]int{}
+	if scores, err := a.store.ListContestHackScores(ctx, c.ID); err == nil {
+		for teamID, hs := range scores {
+			hackPoints[teamID] = hs.Points
+			hackStats[teamID] = [2]int{hs.Success, hs.Fail}
+		}
+	}
 	return contest.ContestContext{
 		StartTime:      c.StartTime,
+		EndTime:        c.EndTime,
 		PenaltyMinutes: c.PenaltyMinutes,
 		Problems:       ids,
 		Teams:          teamMap,
 		RankKeys:       c.RankKeys,
+		HackPoints:     hackPoints,
+		HackStats:      hackStats,
 	}, problems, avatarMap, nil
 }
 
@@ -936,6 +1004,43 @@ func freezeAt(c model.Contest) time.Time {
 		return time.Time{}
 	}
 	return c.EndTime.Add(-time.Duration(c.FreezeDurationMinutes) * time.Minute)
+}
+
+// dynamicBoardStartAt 返回动态大屏开始接收实时事件的时间。
+// 固定榜单不调用此规则；delay=0 时按比赛时长的 20% 自动开启。
+func dynamicBoardStartAt(c model.Contest) time.Time {
+	delay := time.Duration(c.DynamicDelayMinutes) * time.Minute
+	if c.DynamicDelayMinutes <= 0 {
+		delay = c.EndTime.Sub(c.StartTime) / 5
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	// 延迟不能越过比赛结束，否则比赛结束后动态页会永久处于锁定状态。
+	duration := c.EndTime.Sub(c.StartTime)
+	if duration > 0 && delay > duration {
+		delay = duration
+	}
+	return c.StartTime.Add(delay)
+}
+
+// dynamicLiveSubmissions 为动态大屏选择实时事件。
+// 固定榜单直接使用完整提交集合；大屏开启前不返回任何事件，开启后只返回
+// 开启时刻及之后的提交。返回新切片，避免对数据库查询结果的底层数组做原地重排。
+func dynamicLiveSubmissions(subs []model.Submission, dynamicView, dynamicLocked bool, startAt time.Time) []model.Submission {
+	if !dynamicView {
+		return subs
+	}
+	if dynamicLocked {
+		return []model.Submission{}
+	}
+	selected := make([]model.Submission, 0, len(subs))
+	for _, sub := range subs {
+		if !sub.CreatedAt.Before(startAt) {
+			selected = append(selected, sub)
+		}
+	}
+	return selected
 }
 
 func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
@@ -970,6 +1075,7 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	dynamicView := r.URL.Query().Get("view") == "dynamic"
 	cctx, problems, avatars, err := a.buildContestContext(ctx, c)
 	if err != nil {
 		slogError(r, "排行榜上下文", err)
@@ -999,6 +1105,12 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		"problems": problems,
 		"mode":     c.Mode,
 	}
+	dynamicStartAt := dynamicBoardStartAt(c)
+	dynamicLocked := dynamicView && c.Mode == model.ContestModeACM && now.Before(dynamicStartAt)
+	if dynamicView && c.Mode == model.ContestModeACM {
+		resp["dynamic_start_at"] = dynamicStartAt
+		resp["dynamic_locked"] = dynamicLocked
+	}
 	// 趣味统计只在比赛结束后向参赛者公开；管理员可在比赛进行中预览。
 	// 统计使用全部提交，因此包含封榜期间的提交。
 	if c.Mode == model.ContestModeACM && (isAdmin || !time.Now().Before(c.EndTime)) {
@@ -1020,9 +1132,11 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		resp["standings"] = dtos
 		// 封榜前公开最近提交的生命周期，供统一榜单聚焦 pending/running/终态。
 		// 进入封榜后立即停止返回，避免泄露冻结提交与判定。
-		if !frozenActive && !now.Before(c.StartTime) {
+		if !frozenActive && !now.Before(c.StartTime) && !dynamicLocked {
 			snapshots := contest.ReplayACMSubmissionSnapshots(cctx, subs)
-			live := liveSubmissionDTOs(subs, problems, cctx.Teams, avatars, snapshots)
+			// 大屏开启前产生的提交已经进入固定榜单，不在大屏开启后补播。
+			liveSubs := dynamicLiveSubmissions(subs, dynamicView, dynamicLocked, dynamicStartAt)
+			live := liveSubmissionDTOs(liveSubs, problems, cctx.Teams, avatars, snapshots)
 			resp["live_submissions"] = live
 			if len(live) > 0 {
 				resp["latest_submission"] = live[len(live)-1]
@@ -1064,6 +1178,25 @@ func (a *API) handleContestStandings(w http.ResponseWriter, r *http.Request) {
 		modeA := c.Mode == model.ContestModeOI
 		standings := contest.BuildOIStandings(cctx, subs, scores, modeA)
 		resp["standings"] = oiStandingsDTO(standings, problems, avatars)
+	case model.ContestModeCF:
+		// Codeforces 风格：每题初始满分（比赛题目覆盖值 ?? 题目 manifest 总分），
+		// 分值随比赛进行线性衰减，按总分排名、罚时升序。
+		initialScores := map[int64]int{}
+		for _, p := range problems {
+			initialScores[p.ProblemID] = a.effectiveProblemScore(ctx, p)
+		}
+		fa := freezeAt(c)
+		fb := time.Time{}
+		frozenActive := !fa.IsZero() && !now.Before(fa)
+		if frozenActive {
+			fb = fa
+		}
+		standings, frozenSubs := contest.BuildCFStandings(cctx, subs, initialScores, c.PenaltyMinutes, fb)
+		resp["standings"] = cfStandingsDTO(standings, problems, avatars, initialScores, cctx)
+		if frozenActive {
+			resp["freeze_at"] = fa
+			resp["frozen_submissions"] = len(frozenSubs)
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1118,6 +1251,7 @@ type rollEventDTO struct {
 	TeamID       int64            `json:"team_id"`
 	TeamName     string           `json:"team_name"`
 	TeamAvatar   string           `json:"team_avatar"`
+	CreatedAt    time.Time        `json:"created_at"`
 	Standings    []acmStandingDTO `json:"standings"`
 }
 
@@ -1319,6 +1453,7 @@ func rollEventDTOs(events []contest.RollEvent, problems []contestProblemDTO, ava
 			TeamID:       e.TeamID,
 			TeamName:     e.TeamName,
 			TeamAvatar:   avatars[e.TeamID],
+			CreatedAt:    e.CreatedAt,
 			Standings:    sd,
 		})
 	}
@@ -1380,6 +1515,78 @@ type acmStandingDTO struct {
 	Penalty  int                      `json:"penalty"`
 	LastAC   string                   `json:"last_ac,omitempty"`
 	Problems map[string]acmProblemDTO `json:"problems"`
+}
+
+// ---------- CF（Codeforces 风格）DTO ----------
+
+type cfProblemDTO struct {
+	// Score 该题已得分数（0 = 未通过）
+	Score          int    `json:"score"`
+	FailedAttempts int    `json:"failed_attempts"`
+	SolvedAt       string `json:"solved_at,omitempty"`
+	// MaxScore 当前时刻的满分（随比赛线性衰减到 30%），仅用于展示
+	MaxScore int `json:"max_score"`
+}
+
+type cfStandingDTO struct {
+	Rank     int                     `json:"rank"`
+	TeamID   int64                   `json:"team_id"`
+	TeamName string                  `json:"team_name"`
+	Avatar   string                  `json:"avatar"`
+	Score    int                     `json:"score"`
+	Penalty  int                     `json:"penalty"`
+	Solved   int                     `json:"solved"`
+	LastAC   string                  `json:"last_ac,omitempty"`
+	Problems map[string]cfProblemDTO `json:"problems"`
+	// Hack 统计（成功 / 失败 / 得分）
+	HackSuccess int `json:"hack_success"`
+	HackFail    int `json:"hack_fail"`
+	HackPoints  int `json:"hack_points"`
+}
+
+// cfStandingsDTO 转换 CF 榜单；max_score 按查询时刻的衰减值给出，
+// 让前端能显示"当前分值"而不需要自己实现衰减公式。
+func cfStandingsDTO(standings []contest.CFStanding, problems []contestProblemDTO,
+	avatars map[int64]string, initialScores map[int64]int, cctx contest.ContestContext) []cfStandingDTO {
+
+	display := make(map[int64]string, len(problems))
+	for _, p := range problems {
+		display[p.ProblemID] = p.DisplayID
+	}
+	now := time.Now()
+	dtos := make([]cfStandingDTO, 0, len(standings))
+	for _, s := range standings {
+		dto := cfStandingDTO{
+			Rank: s.Rank, TeamID: s.TeamID, TeamName: s.TeamName, Avatar: avatars[s.TeamID],
+			Score: s.Score, Penalty: s.Penalty, Solved: s.Solved, Problems: map[string]cfProblemDTO{},
+		}
+		if !s.LastAC.IsZero() {
+			dto.LastAC = s.LastAC.Format(time.RFC3339)
+		}
+		if cctx.HackStats != nil {
+			if st, ok := cctx.HackStats[s.TeamID]; ok {
+				dto.HackSuccess, dto.HackFail = st[0], st[1]
+				dto.HackPoints = st[0]*model.HackSuccessPoints - st[1]*model.HackFailPenalty
+			}
+		}
+		for pid, ps := range s.Problems {
+			key := display[pid]
+			if key == "" {
+				key = strconv.FormatInt(pid, 10)
+			}
+			item := cfProblemDTO{
+				Score:          ps.Score,
+				FailedAttempts: ps.FailedAttempts,
+				MaxScore:       contest.CFDecayScore(initialScores[pid], now, cctx.StartTime, cctx.EndTime),
+			}
+			if !ps.SolvedAt.IsZero() {
+				item.SolvedAt = ps.SolvedAt.Format(time.RFC3339)
+			}
+			dto.Problems[key] = item
+		}
+		dtos = append(dtos, dto)
+	}
+	return dtos
 }
 
 func acmStandingsDTO(standings []contest.ACMStanding, problems []contestProblemDTO, avatars map[int64]string) []acmStandingDTO {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/yunoj/yunoj/internal/langs"
@@ -51,29 +52,39 @@ type submissionListItem struct {
 	Language     string    `json:"language"`
 	Status       string    `json:"status"`
 	TimeMs       int       `json:"time_ms"`
+	WallTimeMs   int       `json:"wall_time_ms"`
 	MemoryKb     int       `json:"memory_kb"`
 	Score        int       `json:"score"`
 	CreatedAt    time.Time `json:"created_at"`
+	// 比赛阶段标记：只跑过预测试 / 已完成系统测试 / 已被 Hack
+	PretestOnly  bool `json:"pretest_only"`
+	SystemTested bool `json:"system_tested"`
+	IsHacked     bool `json:"is_hacked"`
 }
 
 // submissionDetail 提交详情。代码/编译错误/逐点结果仅本人与管理员
 // 可见，其余用户这三个字段为 null。
 type submissionDetail struct {
-	ID           int64               `json:"id"`
-	ProblemID    int64               `json:"problem_id"`
-	ProblemTitle string              `json:"problem_title"`
-	UserID       int64               `json:"user_id"`
-	Username     string              `json:"username"`
-	Language     string              `json:"language"`
-	Status       string              `json:"status"`
-	TimeMs       int                 `json:"time_ms"`
-	MemoryKb     int                 `json:"memory_kb"`
-	Score        int                 `json:"score"`
-	CreatedAt    time.Time           `json:"created_at"`
-	Code         *string             `json:"code"`
-	CompileError *string             `json:"compile_error"`
-	CaseResults  *[]model.CaseResult `json:"case_results"`
-	CaseScores   *[]int              `json:"case_scores"`
+	ID            int64               `json:"id"`
+	ProblemID     int64               `json:"problem_id"`
+	ProblemTitle  string              `json:"problem_title"`
+	UserID        int64               `json:"user_id"`
+	Username      string              `json:"username"`
+	Language      string              `json:"language"`
+	Status        string              `json:"status"`
+	TimeMs        int                 `json:"time_ms"`
+	WallTimeMs    int                 `json:"wall_time_ms"`
+	MemoryKb      int                 `json:"memory_kb"`
+	TimeoutSource string              `json:"timeout_source,omitempty"`
+	Score         int                 `json:"score"`
+	CreatedAt     time.Time           `json:"created_at"`
+	PretestOnly   bool                `json:"pretest_only"`
+	SystemTested  bool                `json:"system_tested"`
+	IsHacked      bool                `json:"is_hacked"`
+	Code          *string             `json:"code"`
+	CompileError  *string             `json:"compile_error"`
+	CaseResults   *[]model.CaseResult `json:"case_results"`
+	CaseScores    *[]int              `json:"case_scores"`
 }
 
 // handleSubmit 创建提交并入队评测。做三层防护：
@@ -219,6 +230,17 @@ func (a *API) handleListSubmissions(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Status = s
 	}
+	// 语言筛选：只接受非空短字符串，具体合法性交给数据本身判定
+	if lang := strings.TrimSpace(r.URL.Query().Get("language")); lang != "" && len(lang) <= 32 {
+		f.Language = lang
+	}
+	// 时间范围：接受 RFC3339 或 Unix 秒（「今天」「近 7 天」等场景由前端换算）
+	if t, ok := parseQueryTime(r.URL.Query().Get("created_after")); ok {
+		f.CreatedAfter = &t
+	}
+	if t, ok := parseQueryTime(r.URL.Query().Get("created_before")); ok {
+		f.CreatedBefore = &t
+	}
 
 	items, total, err := a.store.ListSubmissions(r.Context(), f)
 	if err != nil {
@@ -231,8 +253,9 @@ func (a *API) handleListSubmissions(w http.ResponseWriter, r *http.Request) {
 		list = append(list, submissionListItem{
 			ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 			UserID: s.UserID, Username: s.Username, Language: s.Language,
-			Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
+			Status: s.Status, TimeMs: s.TimeMs, WallTimeMs: s.WallTimeMs, MemoryKb: s.MemoryKb,
 			Score: s.Score, CreatedAt: s.CreatedAt,
+			PretestOnly: s.PretestOnly, SystemTested: s.SystemTested, IsHacked: s.IsHacked,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
@@ -271,8 +294,10 @@ func (a *API) handleGetSubmission(w http.ResponseWriter, r *http.Request) {
 	detail := submissionDetail{
 		ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 		UserID: s.UserID, Username: s.Username, Language: s.Language,
-		Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
-		Score: s.Score, CreatedAt: s.CreatedAt,
+		Status: s.Status, TimeMs: s.TimeMs, WallTimeMs: s.WallTimeMs, MemoryKb: s.MemoryKb,
+		TimeoutSource: s.TimeoutSource,
+		Score:         s.Score, CreatedAt: s.CreatedAt,
+		PretestOnly: s.PretestOnly, SystemTested: s.SystemTested, IsHacked: s.IsHacked,
 	}
 	if blindActive && model.IsFinal(s.Status) {
 		redactBlindSubmissionDetail(&detail)
@@ -304,6 +329,7 @@ func redactBlindSubmissionListItem(item *submissionListItem) {
 	}
 	item.Status = "hidden"
 	item.TimeMs = 0
+	item.WallTimeMs = 0
 	item.MemoryKb = 0
 	item.Score = 0
 }
@@ -311,7 +337,9 @@ func redactBlindSubmissionListItem(item *submissionListItem) {
 func redactBlindSubmissionDetail(detail *submissionDetail) {
 	detail.Status = "hidden"
 	detail.TimeMs = 0
+	detail.WallTimeMs = 0
 	detail.MemoryKb = 0
+	detail.TimeoutSource = ""
 	detail.Score = 0
 	detail.CompileError = nil
 	detail.CaseResults = nil

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,18 +16,69 @@ type ctxKey int
 
 const ctxUserKey ctxKey = iota
 
-// cors 跨域中间件。前后端同源部署时无副作用；本地前后端分离开发需要。
+// securityHeaders 为 API 与公开文件响应设置不依赖页面内容的安全头。
+func (a *API) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// cors 仅向配置白名单内的来源开放直接跨域 API 访问。
+// 同源前端经反向代理访问时不依赖这些响应头。
 func (a *API) cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		origin := strings.TrimRight(strings.TrimSpace(r.Header.Get("Origin")), "/")
+		allowed := origin == ""
+		for _, candidate := range a.cfg.CORSAllowedOrigins {
+			if origin == candidate {
+				allowed = true
+				break
+			}
+		}
+		if origin != "" {
+			w.Header().Add("Vary", "Origin")
+		}
+		if allowed && origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "600")
+		}
 		if r.Method == http.MethodOptions {
+			if !allowed {
+				writeError(w, http.StatusForbidden, "不允许的跨域来源")
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// clientIP 返回用于安全审计与限流的客户端地址。只有显式信任反向代理时
+// 才读取代理头，避免直连部署被伪造的 X-Forwarded-For 绕过。
+func (a *API) clientIP(r *http.Request) string {
+	if a.cfg.TrustProxy {
+		if raw := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]); net.ParseIP(raw) != nil {
+			return raw
+		}
+		if raw := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(raw) != nil {
+			return raw
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && net.ParseIP(host) != nil {
+		return host
+	}
+	if net.ParseIP(r.RemoteAddr) != nil {
+		return r.RemoteAddr
+	}
+	return "unknown"
 }
 
 // statusWriter 记录响应状态码供日志使用。

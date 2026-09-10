@@ -11,7 +11,9 @@ import (
 
 // ContestContext 排行榜计算所需的比赛上下文。
 type ContestContext struct {
-	StartTime      time.Time
+	StartTime time.Time
+	// EndTime 比赛结束时间（CF 赛制的分值衰减需要；其他赛制可不用）
+	EndTime        time.Time
 	PenaltyMinutes int
 	// Problems 比赛题目 ID 列表（按展示顺序）
 	Problems []int64
@@ -19,6 +21,10 @@ type ContestContext struct {
 	Teams map[int64]string
 	// RankKeys 同分排序键（OI 赛制使用，如 "last_problem_score"）
 	RankKeys []string
+	// HackPoints 队伍 ID → Hack 得分（CF 赛制：成功 +100 / 失败 -50）
+	HackPoints map[int64]int
+	// HackStats 队伍 ID → (成功数, 失败数)，仅用于榜单展示
+	HackStats map[int64][2]int
 }
 
 // ACMProblemState 一支队伍在单题上的状态。
@@ -151,6 +157,7 @@ type RollEvent struct {
 	Submission model.Submission
 	TeamID     int64
 	TeamName   string
+	CreatedAt  time.Time
 	RankBefore int
 	RankAfter  int
 	Standings  []ACMStanding
@@ -254,6 +261,7 @@ func RollBoard(ctx ContestContext, base []ACMStanding, frozen []model.Submission
 				Submission: sub,
 				TeamID:     tid,
 				TeamName:   standings[index[tid]].TeamName,
+				CreatedAt:  sub.CreatedAt,
 				RankBefore: rankBefore,
 				RankAfter:  standings[index[tid]].Rank,
 				Standings:  CloneACMStandings(standings),

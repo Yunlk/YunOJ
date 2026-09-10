@@ -30,6 +30,8 @@ type testcaseDTO struct {
 	InputExists  bool   `json:"input_exists"`
 	OutputExists bool   `json:"output_exists"`
 	Valid        bool   `json:"valid"` // .in/.out 成对存在
+	// IsPretest 是否属于预测试集合（比赛开启预测试模式时，比赛中只跑这些点）
+	IsPretest bool `json:"is_pretest"`
 }
 
 // handleListTestcases 测试点列表（编号/分值/大小/摘要/校验状态 + 总分）。
@@ -67,7 +69,7 @@ func (a *API) handleListTestcases(w http.ResponseWriter, r *http.Request) {
 			Ordinal: t.Ordinal, Score: t.Score, SizeBytes: t.SizeBytes,
 			InputSHA: t.InputSHA, OutputSHA: t.OutputSHA,
 			InputExists: inExists, OutputExists: outExists,
-			Valid: inExists && outExists,
+			Valid: inExists && outExists, IsPretest: t.IsPretest,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -179,7 +181,7 @@ func (a *API) handlePreviewTestsZIP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleImportTestsZIP 确认导入 ZIP：replace=整体替换（文件+manifest），append=追加。
-// 校验：.in/.out 成对、编号可解析且不重复、分值合法、总分=100（standard/spj/interactive）。
+// 校验：.in/.out 成对、编号可解析且不重复、分值合法、总分=100（standard/hack/spj/interactive）。
 func (a *API) handleImportTestsZIP(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r)
 	if err != nil {
@@ -358,7 +360,14 @@ func (a *API) handleAddTestcase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
+	// 两个文件各最多 64MB，额外预留 2MB 给 multipart 边界和表单字段。
+	r.Body = http.MaxBytesReader(w, r.Body, 130<<20)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "上传内容过大（最大 130MB）")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "解析上传内容失败")
 		return
 	}
@@ -453,6 +462,8 @@ func (a *API) handleUpdateTestcase(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Score int `json:"score"`
+		// 可选：同时切换预测试标记
+		IsPretest *bool `json:"is_pretest"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -479,6 +490,9 @@ func (a *API) handleUpdateTestcase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tcs[idx].Score = req.Score
+	if req.IsPretest != nil {
+		tcs[idx].IsPretest = *req.IsPretest
+	}
 	if msg := enforceScoreInvariant(p, tcs); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
@@ -488,7 +502,9 @@ func (a *API) handleUpdateTestcase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "更新失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ordinal": ordinal, "score": req.Score})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ordinal": ordinal, "score": req.Score, "is_pretest": tcs[idx].IsPretest,
+	})
 }
 
 // handleDeleteTestcase 删除单个测试点（manifest 行 + 文件）。其余编号保持不变。
@@ -627,13 +643,13 @@ func (a *API) handleReorderTestcases(w http.ResponseWriter, r *http.Request) {
 
 // enforceScoreInvariant 分值完整性约束：
 //   - 草稿/停用题目：允许任意中间状态（总分不要求 100）；
-//   - 已发布题目：standard/spj/interactive 必须 ≥1 个测试点且总分恰好 100
-//     （防止线上题目被改坏；发布校验见 handleUpdateProblemStatus）。
+//   - 已发布题目：standard/hack/spj/interactive 必须 ≥1 个测试点且总分恰好 100
+//     （Codeforces 风格 Hack 目标程序模式例外，不依赖题目测试点；发布校验见 handleUpdateProblemStatus）。
 func enforceScoreInvariant(p model.Problem, tcs []model.ProblemTestCase) string {
 	if p.Status != model.ProblemStatusPublished {
 		return ""
 	}
-	if p.Type == model.ProblemTypeOutputOnly {
+	if p.Type == model.ProblemTypeOutputOnly || (p.Type == model.ProblemTypeHack && strings.TrimSpace(p.HackTargetSource) != "") {
 		return ""
 	}
 	if len(tcs) == 0 {
@@ -703,7 +719,7 @@ func checkTestcaseAllowed(ptype string) string {
 	return ""
 }
 
-// validateTotalScore 校验总分恰好 100（standard/spj/interactive）。
+// validateTotalScore 校验总分恰好 100（standard/hack/spj/interactive）。
 func validateTotalScore(tcs []model.ProblemTestCase, ptype string) string {
 	if msg := checkTestcaseAllowed(ptype); msg != "" {
 		return msg

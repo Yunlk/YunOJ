@@ -165,7 +165,7 @@ func (a *API) handleExportContestDataPackage(w http.ResponseWriter, r *http.Requ
 	}
 	var submissionBuf bytes.Buffer
 	sw := csv.NewWriter(&submissionBuf)
-	_ = sw.Write([]string{"submission_id", "problem_id", "problem_title", "team_id", "user", "language", "status", "time_ms", "memory_kb", "score", "created_at", "judged_at"})
+	_ = sw.Write([]string{"submission_id", "problem_id", "problem_title", "team_id", "user", "language", "status", "time_ms", "wall_time_ms", "timeout_source", "memory_kb", "score", "created_at", "judged_at"})
 	var timeline bytes.Buffer
 	for _, sub := range subs {
 		judged := ""
@@ -174,13 +174,13 @@ func (a *API) handleExportContestDataPackage(w http.ResponseWriter, r *http.Requ
 		}
 		_ = sw.Write([]string{strconv.FormatInt(sub.ID, 10), strconv.FormatInt(sub.ProblemID, 10), sub.ProblemTitle,
 			strconv.FormatInt(sub.UserID, 10), sub.Username, sub.Language, sub.Status, strconv.Itoa(sub.TimeMs),
-			strconv.Itoa(sub.MemoryKb), strconv.Itoa(sub.Score), sub.CreatedAt.Format(time.RFC3339), judged})
+			strconv.Itoa(sub.WallTimeMs), sub.TimeoutSource, strconv.Itoa(sub.MemoryKb), strconv.Itoa(sub.Score), sub.CreatedAt.Format(time.RFC3339), judged})
 		writeTimelineEvent(&timeline, map[string]any{"type": "submission_created", "submission_id": sub.ID, "team_id": sub.UserID, "problem_id": sub.ProblemID, "status": "pending", "at": sub.CreatedAt})
 		if sub.JudgedAt != nil {
-			writeTimelineEvent(&timeline, map[string]any{"type": "judge_finished", "submission_id": sub.ID, "team_id": sub.UserID, "problem_id": sub.ProblemID, "status": sub.Status, "score": sub.Score, "at": sub.JudgedAt})
+			writeTimelineEvent(&timeline, map[string]any{"type": "judge_finished", "submission_id": sub.ID, "team_id": sub.UserID, "problem_id": sub.ProblemID, "status": sub.Status, "score": sub.Score, "time_ms": sub.TimeMs, "wall_time_ms": sub.WallTimeMs, "timeout_source": sub.TimeoutSource, "at": sub.JudgedAt})
 		}
 		for _, result := range sub.CaseResults {
-			writeTimelineEvent(&timeline, map[string]any{"type": "case_result", "submission_id": sub.ID, "case_id": result.CaseID, "status": result.Status, "time_ms": result.TimeMs, "memory_kb": result.MemoryKb})
+			writeTimelineEvent(&timeline, map[string]any{"type": "case_result", "submission_id": sub.ID, "case_id": result.CaseID, "status": result.Status, "hack_status": result.HackStatus, "time_ms": result.TimeMs, "wall_time_ms": result.WallTimeMs, "timeout_source": result.TimeoutSource, "memory_kb": result.MemoryKb})
 		}
 	}
 	sw.Flush()

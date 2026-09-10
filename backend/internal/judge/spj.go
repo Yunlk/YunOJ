@@ -122,9 +122,10 @@ func (r *Runner) runSPJCase(ctx context.Context, boxDir string, tc data.TestCase
 		cr.Status = model.StatusSystemError
 		return cr, 0
 	}
-	cr.TimeMs, cr.MemoryKb = res.TimeMs, res.MemoryKb
-	if v := verdictFromRun(res, runLimits); v != verdictOK {
+	cr.TimeMs, cr.WallTimeMs, cr.MemoryKb = res.TimeMs, res.WallTimeMs, res.MemoryKb
+	if v, source := verdictFromRunWithSource(res, runLimits); v != verdictOK {
 		cr.Status = v
+		cr.TimeoutSource = source
 		return cr, 0
 	}
 
@@ -154,7 +155,7 @@ func (r *Runner) runSPJCase(ctx context.Context, boxDir string, tc data.TestCase
 	_ = os.Remove(filepath.Join(boxDir, "spj_err.txt"))
 	spjRes, err := r.Sandbox.Run(ctx, r.BoxID, spjLimits(),
 		"spj_in.txt", "spj_out.txt", "spj_err.txt", "./spj", "case.in", "stdout.txt", "case.ans")
-	if err != nil || spjRes.Status == "SE" {
+	if err != nil || spjRes.Status == "SE" || spjRes.Status == "TO" || spjRes.Status == "XX" {
 		slog.Error("SPJ 运行失败", "case_id", caseID, "err", err)
 		cr.Status = model.StatusSystemError
 		return cr, 0

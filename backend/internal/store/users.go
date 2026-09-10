@@ -37,6 +37,46 @@ func (s *Store) CreateUser(ctx context.Context, username, email, passwordHash, r
 	return u, nil
 }
 
+// CreateRegisteredUser 创建自助注册用户。事务级 advisory lock 保证并发首次注册时
+// 只有一个用户会获得管理员角色。
+func (s *Store) CreateRegisteredUser(ctx context.Context, username, email, passwordHash string) (model.User, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return model.User{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	const registrationLockID int64 = 0x59756e4f4a
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, registrationLockID); err != nil {
+		return model.User{}, err
+	}
+	var count int64
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&count); err != nil {
+		return model.User{}, err
+	}
+	role := model.RoleUser
+	if count == 0 {
+		role = model.RoleAdmin
+	}
+	var u model.User
+	err = tx.QueryRow(ctx,
+		`INSERT INTO users (username, email, password_hash, role)
+		 VALUES ($1, $2, $3, $4)
+		 RETURNING id, username, email, role, disabled, avatar, created_at`,
+		username, email, passwordHash, role,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.Disabled, &u.Avatar, &u.CreatedAt)
+	if isUniqueViolation(err) {
+		return model.User{}, ErrConflict
+	}
+	if err != nil {
+		return model.User{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.User{}, err
+	}
+	return u, nil
+}
+
 // GetUserByUsername 按用户名查找用户，同时返回密码哈希供登录校验。
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (model.User, string, error) {
 	var u model.User
@@ -145,6 +185,19 @@ func (s *Store) UpdateUserPassword(ctx context.Context, id int64, passwordHash s
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UpdateUserProfile 更新用户可编辑的基本资料。数据库唯一约束冲突统一转换为 ErrConflict，
+// 这样 API 层不会泄露底层 PostgreSQL 错误细节。
+func (s *Store) UpdateUserProfile(ctx context.Context, id int64, username, email string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE users SET username = $2, email = $3 WHERE id = $1`,
+		id, username, email,
+	)
+	if isUniqueViolation(err) {
+		return ErrConflict
+	}
+	return err
 }
 
 // CountActiveUsers 返回未禁用用户数。

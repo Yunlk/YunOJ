@@ -11,6 +11,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+var dummyPasswordHash = func() string {
+	b, err := bcrypt.GenerateFromPassword([]byte("yunoj-dummy-password"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}()
+
 // HashPassword 生成 bcrypt 密码哈希（默认成本 10）。
 func HashPassword(password string) (string, error) {
 	b, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -19,6 +27,10 @@ func HashPassword(password string) (string, error) {
 
 // CheckPassword 校验明文密码与哈希是否匹配。
 func CheckPassword(hash, password string) bool {
+	// 用户不存在时也执行同等成本的 bcrypt，避免通过响应时间枚举用户名。
+	if hash == "" {
+		hash = dummyPasswordHash
+	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
@@ -48,11 +60,12 @@ var ErrInvalidToken = errors.New("invalid token")
 // ParseToken 校验并解析令牌，返回用户 ID 与角色。
 func ParseToken(secret, tokenString string) (int64, string, error) {
 	tok, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return []byte(secret), nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithIssuer("yunoj"), jwt.WithExpirationRequired(), jwt.WithIssuedAt())
 	if err != nil || !tok.Valid {
 		return 0, "", ErrInvalidToken
 	}

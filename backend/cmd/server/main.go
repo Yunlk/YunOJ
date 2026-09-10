@@ -22,6 +22,13 @@ import (
 func main() {
 	cfg := config.Load()
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	if err := cfg.ValidateServer(); err != nil {
+		slog.Error("服务配置不安全", "err", err)
+		os.Exit(1)
+	}
+	if cfg.JWTSecret == "dev-secret-change-me" {
+		slog.Warn("正在使用开发 JWT 密钥；部署前必须设置 JWT_SECRET")
+	}
 	if err := langs.LoadExternal(cfg.LanguageConfigPath); err != nil {
 		slog.Error("加载语言配置失败", "path", cfg.LanguageConfigPath, "err", err)
 		os.Exit(1)

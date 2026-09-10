@@ -198,16 +198,24 @@ func (r *Runner) runInteractiveCase(ctx context.Context, boxDir string, interBox
 	_ = r.Sandbox.Cleanup(context.Background(), r.BoxID)
 	userOutcome := <-userCh
 
+	cr.TimeMs, cr.WallTimeMs, cr.MemoryKb = userOutcome.res.TimeMs, userOutcome.res.WallTimeMs, userOutcome.res.MemoryKb
+	if interRes.Status == "TO" || caseCtx.Err() == context.DeadlineExceeded {
+		cr.Status = model.StatusTimeLimitExceeded
+		cr.TimeoutSource = "wall"
+		return cr, 0
+	}
 	if interErr != nil || interRes.Status == "SE" {
 		slog.Error("交互器运行失败", "case_id", caseID, "err", interErr)
 		cr.Status = model.StatusSystemError
 		return cr, 0
 	}
-	cr.TimeMs, cr.MemoryKb = userOutcome.res.TimeMs, userOutcome.res.MemoryKb
 
 	// 4. 判定：交互器退出码为主；选手超时优先判 TLE
 	if userOutcome.res.Status == "TO" {
-		cr.Status = model.StatusTimeLimitExceeded
+		cr.Status, cr.TimeoutSource = verdictFromRunWithSource(userOutcome.res, limits)
+		if cr.TimeoutSource == "" {
+			cr.TimeoutSource = "wall"
+		}
 		return cr, 0
 	}
 	cr.Status = verdictInteractive(interRes)

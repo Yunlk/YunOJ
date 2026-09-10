@@ -19,8 +19,13 @@ type SubmissionFilter struct {
 	ContestID      *int64
 	ExcludeContest bool
 	Status         string
-	Page           int
-	Size           int
+	// Language 按语言键过滤（如 cpp / python）。
+	Language string
+	// CreatedAfter / CreatedBefore 按提交时间过滤（闭区间下界、开区间上界）。
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	Page          int
+	Size          int
 }
 
 // ListUserProblemStatuses 返回用户在指定题目上的简化状态。
@@ -57,13 +62,14 @@ func (s *Store) ListUserProblemStatuses(ctx context.Context, userID int64, probl
 }
 
 const submissionListColumns = `s.id, s.problem_id, p.title, s.user_id, u.username,
-	s.language, s.status, s.time_ms, s.memory_kb, s.score, s.created_at`
+	s.language, s.status, s.time_ms, s.wall_time_ms, s.memory_kb, s.score,
+	s.pretest_only, s.system_tested, s.is_hacked, s.created_at`
 
 func scanSubmissionList(row rowScanner) (model.Submission, error) {
 	var sub model.Submission
 	err := row.Scan(&sub.ID, &sub.ProblemID, &sub.ProblemTitle, &sub.UserID,
-		&sub.Username, &sub.Language, &sub.Status, &sub.TimeMs, &sub.MemoryKb,
-		&sub.Score, &sub.CreatedAt)
+		&sub.Username, &sub.Language, &sub.Status, &sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb,
+		&sub.Score, &sub.PretestOnly, &sub.SystemTested, &sub.IsHacked, &sub.CreatedAt)
 	return sub, err
 }
 
@@ -111,6 +117,18 @@ func (s *Store) ListSubmissions(ctx context.Context, f SubmissionFilter) ([]mode
 		args = append(args, f.Status)
 		conds = append(conds, fmt.Sprintf("s.status = $%d", len(args)))
 	}
+	if f.Language != "" {
+		args = append(args, f.Language)
+		conds = append(conds, fmt.Sprintf("s.language = $%d", len(args)))
+	}
+	if f.CreatedAfter != nil {
+		args = append(args, *f.CreatedAfter)
+		conds = append(conds, fmt.Sprintf("s.created_at >= $%d", len(args)))
+	}
+	if f.CreatedBefore != nil {
+		args = append(args, *f.CreatedBefore)
+		conds = append(conds, fmt.Sprintf("s.created_at < $%d", len(args)))
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")
@@ -152,16 +170,18 @@ func (s *Store) GetSubmission(ctx context.Context, id int64) (model.Submission, 
 	err := s.pool.QueryRow(ctx,
 		`SELECT s.id, s.problem_id, p.title, s.user_id, u.username, s.language,
 			s.code, s.status, s.compile_error, s.case_results,
-			s.time_ms, s.memory_kb, s.optimize, s.contest_id, s.score,
-			s.case_scores, s.is_frozen, s.created_at, s.judged_at
+			s.time_ms, s.wall_time_ms, s.memory_kb, s.optimize, s.contest_id, s.score,
+			s.case_scores, s.is_frozen, s.pretest_only, s.system_tested, s.is_hacked,
+			s.created_at, s.judged_at
 		 FROM submissions s
 		 JOIN problems p ON p.id = s.problem_id
 		 JOIN users u ON u.id = s.user_id
 		 WHERE s.id = $1`, id,
 	).Scan(&sub.ID, &sub.ProblemID, &sub.ProblemTitle, &sub.UserID, &sub.Username,
 		&sub.Language, &sub.Code, &sub.Status, &sub.CompileError, &caseResults,
-		&sub.TimeMs, &sub.MemoryKb, &sub.Optimize, &sub.ContestID, &sub.Score,
-		&caseScores, &sub.IsFrozen, &sub.CreatedAt, &sub.JudgedAt)
+		&sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb, &sub.Optimize, &sub.ContestID, &sub.Score,
+		&caseScores, &sub.IsFrozen, &sub.PretestOnly, &sub.SystemTested, &sub.IsHacked,
+		&sub.CreatedAt, &sub.JudgedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Submission{}, ErrNotFound
 	}
@@ -171,6 +191,12 @@ func (s *Store) GetSubmission(ctx context.Context, id int64) (model.Submission, 
 	if len(caseResults) > 0 {
 		if err := json.Unmarshal(caseResults, &sub.CaseResults); err != nil {
 			return model.Submission{}, err
+		}
+		for _, result := range sub.CaseResults {
+			if result.TimeoutSource != "" {
+				sub.TimeoutSource = result.TimeoutSource
+				break
+			}
 		}
 	}
 	if len(caseScores) > 0 {
@@ -236,34 +262,62 @@ func (s *Store) IsFirstJudge(ctx context.Context, id int64) (bool, error) {
 // SetJudged 写入最终判定结果（无比赛计分）。
 func (s *Store) SetJudged(ctx context.Context, id int64, status, compileError string,
 	caseResults []model.CaseResult, timeMs, memoryKb int) error {
-	return s.SetJudgedFull(ctx, id, status, compileError, caseResults, nil,
-		timeMs, memoryKb, 0, false)
+	return s.SetJudgedWithWall(ctx, id, status, compileError, caseResults, timeMs, 0, memoryKb)
+}
+
+// SetJudgedWithWall 写入最终判定结果，并保存墙钟耗时。
+func (s *Store) SetJudgedWithWall(ctx context.Context, id int64, status, compileError string,
+	caseResults []model.CaseResult, timeMs, wallTimeMs, memoryKb int) error {
+	return s.setJudgedFull(ctx, id, status, compileError, caseResults, nil,
+		timeMs, wallTimeMs, memoryKb, 0, false, "", "", 0, false)
 }
 
 // SetJudgedClaimed 仅允许当前评测租约写回结果。
 func (s *Store) SetJudgedClaimed(ctx context.Context, id int64, nodeID, workerID string, attempt int,
 	status, compileError string, caseResults []model.CaseResult, timeMs, memoryKb int) error {
+	return s.SetJudgedClaimedWithWall(ctx, id, nodeID, workerID, attempt,
+		status, compileError, caseResults, timeMs, 0, memoryKb)
+}
+
+// SetJudgedClaimedWithWall 仅允许当前评测租约写回结果，并保存墙钟耗时。
+func (s *Store) SetJudgedClaimedWithWall(ctx context.Context, id int64, nodeID, workerID string, attempt int,
+	status, compileError string, caseResults []model.CaseResult, timeMs, wallTimeMs, memoryKb int) error {
 	return s.setJudgedFull(ctx, id, status, compileError, caseResults, nil,
-		timeMs, memoryKb, 0, false, nodeID, workerID, attempt, true)
+		timeMs, wallTimeMs, memoryKb, 0, false, nodeID, workerID, attempt, true)
 }
 
 // SetJudgedFull 写入最终判定结果，支持比赛计分（逐点分数、总分与冻结标记）。
 func (s *Store) SetJudgedFull(ctx context.Context, id int64, status, compileError string,
 	caseResults []model.CaseResult, caseScores []int, timeMs, memoryKb, score int, isFrozen bool) error {
+	return s.SetJudgedFullWithWall(ctx, id, status, compileError, caseResults, caseScores,
+		timeMs, 0, memoryKb, score, isFrozen)
+}
+
+// SetJudgedFullWithWall 写入最终判定结果、比赛计分与墙钟耗时。
+func (s *Store) SetJudgedFullWithWall(ctx context.Context, id int64, status, compileError string,
+	caseResults []model.CaseResult, caseScores []int, timeMs, wallTimeMs, memoryKb, score int, isFrozen bool) error {
 	return s.setJudgedFull(ctx, id, status, compileError, caseResults, caseScores,
-		timeMs, memoryKb, score, isFrozen, "", "", 0, false)
+		timeMs, wallTimeMs, memoryKb, score, isFrozen, "", "", 0, false)
 }
 
 // SetJudgedFullClaimed 是比赛提交的带租约最终写回。
 func (s *Store) SetJudgedFullClaimed(ctx context.Context, id int64, nodeID, workerID string, attempt int,
 	status, compileError string, caseResults []model.CaseResult, caseScores []int,
 	timeMs, memoryKb, score int, isFrozen bool) error {
+	return s.SetJudgedFullClaimedWithWall(ctx, id, nodeID, workerID, attempt,
+		status, compileError, caseResults, caseScores, timeMs, 0, memoryKb, score, isFrozen)
+}
+
+// SetJudgedFullClaimedWithWall 是比赛提交的带租约最终写回，并保存墙钟耗时。
+func (s *Store) SetJudgedFullClaimedWithWall(ctx context.Context, id int64, nodeID, workerID string, attempt int,
+	status, compileError string, caseResults []model.CaseResult, caseScores []int,
+	timeMs, wallTimeMs, memoryKb, score int, isFrozen bool) error {
 	return s.setJudgedFull(ctx, id, status, compileError, caseResults, caseScores,
-		timeMs, memoryKb, score, isFrozen, nodeID, workerID, attempt, true)
+		timeMs, wallTimeMs, memoryKb, score, isFrozen, nodeID, workerID, attempt, true)
 }
 
 func (s *Store) setJudgedFull(ctx context.Context, id int64, status, compileError string,
-	caseResults []model.CaseResult, caseScores []int, timeMs, memoryKb, score int, isFrozen bool,
+	caseResults []model.CaseResult, caseScores []int, timeMs, wallTimeMs, memoryKb, score int, isFrozen bool,
 	nodeID, workerID string, attempt int, requireLease bool) error {
 	cr, err := json.Marshal(caseResults)
 	if err != nil {
@@ -278,13 +332,13 @@ func (s *Store) setJudgedFull(ctx context.Context, id int64, status, compileErro
 	}
 	query := `UPDATE submissions SET
 			status = $2, compile_error = $3, case_results = $4::jsonb,
-			time_ms = $5, memory_kb = $6, score = $7, case_scores = $8::jsonb,
-			is_frozen = $9, judged_at = now(), judge_lease_until = NULL
+			time_ms = $5, wall_time_ms = $6, memory_kb = $7, score = $8, case_scores = $9::jsonb,
+			is_frozen = $10, judged_at = now(), judge_lease_until = NULL
 		 WHERE id = $1`
-	args := []any{id, status, compileError, string(cr), timeMs, memoryKb, score, string(cs), isFrozen}
+	args := []any{id, status, compileError, string(cr), timeMs, wallTimeMs, memoryKb, score, string(cs), isFrozen}
 	if requireLease {
-		query += ` AND status = 'running' AND judge_node_id = $10
-			AND judge_worker_id = $11 AND judge_attempt = $12`
+		query += ` AND status = 'running' AND judge_node_id = $11
+			AND judge_worker_id = $12 AND judge_attempt = $13`
 		args = append(args, nodeID, workerID, attempt)
 	}
 	ct, err := s.pool.Exec(ctx, query, args...)
@@ -302,7 +356,7 @@ func (s *Store) ResetForRejudge(ctx context.Context, id int64) error {
 	ct, err := s.pool.Exec(ctx,
 		`UPDATE submissions SET
 			status = 'pending', compile_error = '', case_results = '[]',
-			time_ms = 0, memory_kb = 0, judged_at = NULL,
+			time_ms = 0, wall_time_ms = 0, memory_kb = 0, judged_at = NULL,
 			judge_node_id = NULL, judge_worker_id = NULL,
 			judge_started_at = NULL, judge_lease_until = NULL
 		 WHERE id = $1`, id)
@@ -325,5 +379,87 @@ func (s *Store) ResetRunningByIDs(ctx context.Context, ids []int64) error {
 			judge_node_id = NULL, judge_worker_id = NULL,
 			judge_started_at = NULL, judge_lease_until = NULL
 		 WHERE id = ANY($1) AND status = 'running'`, ids)
+	return err
+}
+
+// ---------- 预测试 / 系统测试 ----------
+
+// SetSubmissionJudgePhase 记录本次判定所用阶段：是否只跑预测试、是否已完成系统测试。
+func (s *Store) SetSubmissionJudgePhase(ctx context.Context, id int64, pretestOnly, systemTested bool) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE submissions SET pretest_only = $2, system_tested = $3, system_test_pending = false
+		 WHERE id = $1`, id, pretestOnly, systemTested)
+	return err
+}
+
+// ListSubmissionsNeedingSystemTest 找出需要赛后系统测试的提交：
+// 比赛开启了 pretest_only、比赛已结束、提交此前只跑过预测试且尚未系统测试。
+// 被 Hack 成功的提交判定已作废，不再重判（否则会把 Hack 结果「洗白」）。
+func (s *Store) ListSubmissionsNeedingSystemTest(ctx context.Context, limit int) ([]int64, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT s.id FROM submissions s
+		JOIN contests c ON c.id = s.contest_id
+		WHERE c.pretest_only
+		  AND s.pretest_only
+		  AND NOT s.system_tested
+		  AND NOT s.is_hacked
+		  AND s.judged_at IS NOT NULL
+		  AND c.end_time < now()
+		ORDER BY s.id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// PrepareSystemTest 把提交重置为待评测并标记为系统测试排队（用完整测试数据重判）。
+// 被 Hack 成功的提交不在重判范围内。
+func (s *Store) PrepareSystemTest(ctx context.Context, id int64) error {
+	ct, err := s.pool.Exec(ctx, `
+		UPDATE submissions SET
+			status = 'pending', compile_error = '', case_results = '[]',
+			time_ms = 0, wall_time_ms = 0, memory_kb = 0, judged_at = NULL,
+			system_test_pending = true,
+			judge_node_id = NULL, judge_worker_id = NULL,
+			judge_started_at = NULL, judge_lease_until = NULL
+		 WHERE id = $1 AND NOT system_tested AND NOT is_hacked`, id)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// IsSystemTestPending 判断该提交是否为系统测试重判（需要跑完整测试数据）。
+func (s *Store) IsSystemTestPending(ctx context.Context, id int64) (bool, error) {
+	var pending bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT system_test_pending FROM submissions WHERE id = $1`, id).Scan(&pending)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	return pending, err
+}
+
+// MarkSubmissionHacked 标记提交被 Hack 成功：判定降级（分数作废），保留被 Hack 标记。
+func (s *Store) MarkSubmissionHacked(ctx context.Context, id int64, status string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE submissions SET is_hacked = true, status = $2, score = 0 WHERE id = $1`,
+		id, status)
 	return err
 }

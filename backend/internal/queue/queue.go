@@ -20,6 +20,10 @@ import (
 const (
 	mainKey          = "oj:queue:submissions"
 	processingPrefix = "oj:queue:processing:"
+	// testQueueKey 临时测试运行（自测/样例测试），非可靠队列
+	testQueueKey = "oj:queue:tests"
+	// hackQueueKey 选手间 Hack 评测任务（记录 ID），可重试
+	hackQueueKey = "oj:queue:hacks"
 )
 
 // ErrEmpty 队列在阻塞等待时间内没有新任务。
@@ -168,10 +172,29 @@ func (q *Queue) TryLock(ctx context.Context, key string, ttl time.Duration) (boo
 	return ok, err
 }
 
+var rateLimitScript = redis.NewScript(`
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`)
+
+// AllowRate 使用 Redis 原子计数器实现固定窗口限流。
+func (q *Queue) AllowRate(ctx context.Context, key string, limit int64, window time.Duration) (bool, error) {
+	if limit < 1 || window <= 0 {
+		return false, fmt.Errorf("invalid rate limit")
+	}
+	current, err := rateLimitScript.Run(ctx, q.rdb, []string{key}, window.Milliseconds()).Int64()
+	if err != nil {
+		return false, err
+	}
+	return current <= limit, nil
+}
+
 // ---------- 临时测试运行（自测/样例测试，不落库） ----------
 
 const (
-	testQueueKey     = "oj:queue:tests"
 	testResultPrefix = "oj:test:result:"
 )
 
@@ -225,4 +248,36 @@ func (q *Queue) GetTestResult(ctx context.Context, runID string) (result string,
 		return "", false, err
 	}
 	return result, true, nil
+}
+
+// ---------- 选手间 Hack（Open Hacking） ----------
+
+// PushHack 将一条 Hack 记录加入 Hack 队列等待评测。
+// 与测试运行一样属于可重试任务：评测机崩溃时 Hack 仍保持 pending，可重新入队。
+func (q *Queue) PushHack(ctx context.Context, hackID int64) error {
+	return q.rdb.RPush(ctx, hackQueueKey, hackID).Err()
+}
+
+// PopHack 阻塞等待一个 Hack 任务，超时返回 ErrEmpty。
+func (q *Queue) PopHack(ctx context.Context, block time.Duration) (int64, error) {
+	vals, err := q.rdb.BLPop(ctx, block, hackQueueKey).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, ErrEmpty
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(vals) < 2 {
+		return 0, fmt.Errorf("Hack 队列返回异常: %v", vals)
+	}
+	id, err := strconv.ParseInt(vals[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("Hack 队列数据非法 %q: %w", vals[1], err)
+	}
+	return id, nil
+}
+
+// HackQueueLength 返回待处理 Hack 数量（用于集群页展示）。
+func (q *Queue) HackQueueLength(ctx context.Context) (int64, error) {
+	return q.rdb.LLen(ctx, hackQueueKey).Result()
 }

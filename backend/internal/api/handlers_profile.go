@@ -5,14 +5,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/mail"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/yunoj/yunoj/internal/auth"
 	"github.com/yunoj/yunoj/internal/model"
 	"github.com/yunoj/yunoj/internal/store"
 )
+
+type updateProfileRequest struct {
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	CurrentPassword string `json:"current_password"`
+}
 
 // handleProfile 返回当前用户的个人中心聚合数据。
 func (a *API) handleProfile(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +69,7 @@ func (a *API) handleProfile(w http.ResponseWriter, r *http.Request) {
 		recentItems = append(recentItems, submissionListItem{
 			ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 			UserID: s.UserID, Username: s.Username, Language: s.Language,
-			Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
+			Status: s.Status, TimeMs: s.TimeMs, WallTimeMs: s.WallTimeMs, MemoryKb: s.MemoryKb,
 			Score: s.Score, CreatedAt: s.CreatedAt,
 		})
 	}
@@ -123,6 +133,54 @@ func (a *API) handleUploadUserAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"avatar": filename})
+}
+
+// handleUpdateProfile 更新用户名和邮箱。两项资料都要求当前密码确认，避免登录会话
+// 被意外留下时发生身份资料劫持；头像仍由独立上传接口处理。
+func (a *API) handleUpdateProfile(w http.ResponseWriter, r *http.Request) {
+	u, _ := userFromCtx(r.Context())
+	var req updateProfileRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	username := strings.TrimSpace(req.Username)
+	email := strings.TrimSpace(req.Email)
+	if !usernamePattern.MatchString(username) {
+		writeError(w, http.StatusBadRequest, "用户名需为 3-20 位字母、数字或下划线")
+		return
+	}
+	if addr, err := mail.ParseAddress(email); err != nil || addr.Address != email {
+		writeError(w, http.StatusBadRequest, "邮箱格式不正确")
+		return
+	}
+	if utf8.RuneCountInString(req.CurrentPassword) == 0 {
+		writeError(w, http.StatusBadRequest, "修改用户名或邮箱时必须验证当前密码")
+		return
+	}
+	if !a.allowAuthAttempt(w, r, "update-profile", u.Username, 30, 10*time.Minute, 10) {
+		return
+	}
+	_, hash, err := a.store.GetUserByUsername(r.Context(), u.Username)
+	if err != nil || !auth.CheckPassword(hash, req.CurrentPassword) {
+		writeError(w, http.StatusUnauthorized, "当前密码不正确")
+		return
+	}
+	if err := a.store.UpdateUserProfile(r.Context(), u.ID, username, email); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "用户名或邮箱已被使用")
+			return
+		}
+		slogError(r, "更新个人资料", err)
+		writeError(w, http.StatusInternalServerError, "更新个人资料失败")
+		return
+	}
+	updated, err := a.store.GetUserByID(r.Context(), u.ID)
+	if err != nil {
+		slogError(r, "读取更新后的个人资料", err)
+		writeError(w, http.StatusInternalServerError, "读取个人资料失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"user": a.decorateUserRanking(r, updated)})
 }
 
 // handleServeUserAvatar 提供用户头像文件。头像本身不包含敏感信息，可公开读取。

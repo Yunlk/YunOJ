@@ -206,6 +206,25 @@ func (a *API) myStandingSummary(ctx context.Context, c model.Contest, userID int
 				}, true
 			}
 		}
+	case model.ContestModeCF:
+		initialScores := map[int64]int{}
+		for _, p := range problems {
+			initialScores[p.ProblemID] = a.effectiveProblemScore(ctx, p)
+		}
+		fb := time.Time{}
+		fa := freezeAt(c)
+		if !fa.IsZero() && !now.Before(fa) {
+			fb = fa
+		}
+		standings, _ := contest.BuildCFStandings(cctx, subs, initialScores, c.PenaltyMinutes, fb)
+		for _, s := range standings {
+			if s.TeamID == userID {
+				return map[string]any{
+					"rank": s.Rank, "total_score": s.Score, "penalty": s.Penalty,
+					"solved": s.Solved, "visible": visible,
+				}, true
+			}
+		}
 	}
 	return nil, false
 }
@@ -222,7 +241,7 @@ func myProblemStatus(c model.Contest, my store.UserProblemStat) (string, int) {
 		if c.Mode == model.ContestModeOI {
 			return "passed", my.LastScore
 		}
-		if c.Mode == model.ContestModeIOI {
+		if c.Mode == model.ContestModeIOI || c.Mode == model.ContestModeCF {
 			return "passed", my.BestScore
 		}
 		return "passed", 0
@@ -230,7 +249,7 @@ func myProblemStatus(c model.Contest, my store.UserProblemStat) (string, int) {
 	if c.Mode == model.ContestModeOI {
 		return "failed", my.LastScore
 	}
-	if c.Mode == model.ContestModeIOI {
+	if c.Mode == model.ContestModeIOI || c.Mode == model.ContestModeCF {
 		return "failed", my.BestScore
 	}
 	return "failed", 0
@@ -362,7 +381,12 @@ func (a *API) handleContestProblem(w http.ResponseWriter, r *http.Request) {
 	if isAdmin {
 		dto.SPJSource = p.SPJSource
 		dto.InteractorSource = p.InteractorSource
+		dto.HackGeneratorSource = p.HackGeneratorSource
+		dto.HackReferenceSource = p.HackReferenceSource
 		dto.TestcaseCount = p.TestcaseCount
+	}
+	if p.Type == model.ProblemTypeHack {
+		dto.HackTargetSource = p.HackTargetSource
 	}
 
 	resp := map[string]any{
@@ -477,8 +501,9 @@ func (a *API) handleContestMySubmissions(w http.ResponseWriter, r *http.Request)
 		item := submissionListItem{
 			ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 			UserID: s.UserID, Username: s.Username, Language: s.Language,
-			Status: s.Status, TimeMs: s.TimeMs, MemoryKb: s.MemoryKb,
+			Status: s.Status, TimeMs: s.TimeMs, WallTimeMs: s.WallTimeMs, MemoryKb: s.MemoryKb,
 			Score: s.Score, CreatedAt: s.CreatedAt,
+			PretestOnly: s.PretestOnly, SystemTested: s.SystemTested, IsHacked: s.IsHacked,
 		}
 		if blindActive {
 			redactBlindSubmissionListItem(&item)

@@ -12,23 +12,24 @@ import (
 // ---------- 比赛 CRUD ----------
 
 const contestColumns = `id, title, mode, feedback, score_mode,
-	penalty_minutes, freeze_duration_minutes, rank_keys,
+	penalty_minutes, freeze_duration_minutes, dynamic_delay_minutes, rank_keys,
 	start_time, end_time, description, cover_image, visibility, reg_start_time, reg_end_time,
-	submission_limit, registration_mode, max_team_size, allow_team_edit, created_at`
+	submission_limit, registration_mode, max_team_size, allow_team_edit,
+	pretest_only, hacking_enabled, created_at`
 
 // CreateContest 创建比赛，成功后填充 ID/CreatedAt。
 func (s *Store) CreateContest(ctx context.Context, c *model.Contest) error {
 	return s.pool.QueryRow(ctx,
 		`INSERT INTO contests (title, mode, feedback, score_mode,
-			penalty_minutes, freeze_duration_minutes, rank_keys, start_time, end_time,
+			penalty_minutes, freeze_duration_minutes, dynamic_delay_minutes, rank_keys, start_time, end_time,
 			 description, cover_image, visibility, reg_start_time, reg_end_time, submission_limit,
-			registration_mode, max_team_size, allow_team_edit)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			registration_mode, max_team_size, allow_team_edit, pretest_only, hacking_enabled)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 			 RETURNING id, created_at`,
 		c.Title, c.Mode, c.Feedback, c.ScoreMode,
-		c.PenaltyMinutes, c.FreezeDurationMinutes, c.RankKeys, c.StartTime, c.EndTime,
+		c.PenaltyMinutes, c.FreezeDurationMinutes, c.DynamicDelayMinutes, c.RankKeys, c.StartTime, c.EndTime,
 		c.Description, c.CoverImage, c.Visibility, c.RegStartTime, c.RegEndTime, c.SubmissionLimit,
-		c.RegistrationMode, c.MaxTeamSize, c.AllowTeamEdit,
+		c.RegistrationMode, c.MaxTeamSize, c.AllowTeamEdit, c.PretestOnly, c.HackingEnabled,
 	).Scan(&c.ID, &c.CreatedAt)
 }
 
@@ -38,10 +39,11 @@ func (s *Store) GetContest(ctx context.Context, id int64) (model.Contest, error)
 	err := s.pool.QueryRow(ctx,
 		`SELECT `+contestColumns+` FROM contests WHERE id = $1`, id,
 	).Scan(&c.ID, &c.Title, &c.Mode, &c.Feedback, &c.ScoreMode,
-		&c.PenaltyMinutes, &c.FreezeDurationMinutes, &c.RankKeys,
+		&c.PenaltyMinutes, &c.FreezeDurationMinutes, &c.DynamicDelayMinutes, &c.RankKeys,
 		&c.StartTime, &c.EndTime, &c.Description, &c.CoverImage, &c.Visibility,
 		&c.RegStartTime, &c.RegEndTime, &c.SubmissionLimit,
-		&c.RegistrationMode, &c.MaxTeamSize, &c.AllowTeamEdit, &c.CreatedAt)
+		&c.RegistrationMode, &c.MaxTeamSize, &c.AllowTeamEdit,
+		&c.PretestOnly, &c.HackingEnabled, &c.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Contest{}, ErrNotFound
 	}
@@ -69,10 +71,11 @@ func (s *Store) ListContests(ctx context.Context, page, size int, includePrivate
 	for rows.Next() {
 		var c model.Contest
 		if err := rows.Scan(&c.ID, &c.Title, &c.Mode, &c.Feedback, &c.ScoreMode,
-			&c.PenaltyMinutes, &c.FreezeDurationMinutes, &c.RankKeys,
+			&c.PenaltyMinutes, &c.FreezeDurationMinutes, &c.DynamicDelayMinutes, &c.RankKeys,
 			&c.StartTime, &c.EndTime, &c.Description, &c.CoverImage, &c.Visibility,
 			&c.RegStartTime, &c.RegEndTime, &c.SubmissionLimit,
-			&c.RegistrationMode, &c.MaxTeamSize, &c.AllowTeamEdit, &c.CreatedAt); err != nil {
+			&c.RegistrationMode, &c.MaxTeamSize, &c.AllowTeamEdit,
+			&c.PretestOnly, &c.HackingEnabled, &c.CreatedAt); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, c)
@@ -84,15 +87,16 @@ func (s *Store) ListContests(ctx context.Context, page, size int, includePrivate
 func (s *Store) UpdateContest(ctx context.Context, c *model.Contest) error {
 	ct, err := s.pool.Exec(ctx,
 		`UPDATE contests SET title = $2, mode = $3, feedback = $4, score_mode = $5,
-			penalty_minutes = $6, freeze_duration_minutes = $7, rank_keys = $8,
-			start_time = $9, end_time = $10, description = $11, visibility = $12,
-			reg_start_time = $13, reg_end_time = $14, submission_limit = $15,
-			registration_mode = $16, max_team_size = $17, allow_team_edit = $18
+			penalty_minutes = $6, freeze_duration_minutes = $7, dynamic_delay_minutes = $8, rank_keys = $9,
+			start_time = $10, end_time = $11, description = $12, visibility = $13,
+			reg_start_time = $14, reg_end_time = $15, submission_limit = $16,
+			registration_mode = $17, max_team_size = $18, allow_team_edit = $19,
+			pretest_only = $20, hacking_enabled = $21
 			 WHERE id = $1`,
 		c.ID, c.Title, c.Mode, c.Feedback, c.ScoreMode,
-		c.PenaltyMinutes, c.FreezeDurationMinutes, c.RankKeys, c.StartTime, c.EndTime,
+		c.PenaltyMinutes, c.FreezeDurationMinutes, c.DynamicDelayMinutes, c.RankKeys, c.StartTime, c.EndTime,
 		c.Description, c.Visibility, c.RegStartTime, c.RegEndTime, c.SubmissionLimit,
-		c.RegistrationMode, c.MaxTeamSize, c.AllowTeamEdit)
+		c.RegistrationMode, c.MaxTeamSize, c.AllowTeamEdit, c.PretestOnly, c.HackingEnabled)
 	if err != nil {
 		return err
 	}
@@ -343,6 +347,54 @@ func (s *Store) IsContestTeam(ctx context.Context, contestID, teamID int64) (boo
 	return exists, err
 }
 
+// GetActiveContest 返回当前正在进行的一场比赛（供导航栏倒计时使用）。
+func (s *Store) GetActiveContest(ctx context.Context) (model.Contest, error) {
+	var c model.Contest
+	err := s.pool.QueryRow(ctx,
+		`SELECT `+contestColumns+` FROM contests
+		 WHERE start_time <= now() AND end_time > now() AND visibility = 'public'
+		 ORDER BY end_time ASC LIMIT 1`,
+	).Scan(&c.ID, &c.Title, &c.Mode, &c.Feedback, &c.ScoreMode,
+		&c.PenaltyMinutes, &c.FreezeDurationMinutes, &c.DynamicDelayMinutes, &c.RankKeys,
+		&c.StartTime, &c.EndTime, &c.Description, &c.CoverImage, &c.Visibility,
+		&c.RegStartTime, &c.RegEndTime, &c.SubmissionLimit,
+		&c.RegistrationMode, &c.MaxTeamSize, &c.AllowTeamEdit,
+		&c.PretestOnly, &c.HackingEnabled, &c.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return model.Contest{}, ErrNotFound
+	}
+	return c, err
+}
+
+// ListRegisteredContestIDs 返回用户在给定比赛中已报名的那些比赛 ID。
+// 供比赛列表一次带上「我是否已报名」，避免前端对每场比赛各发一次报名查询（N+1）。
+func (s *Store) ListRegisteredContestIDs(ctx context.Context, userID int64, contestIDs []int64) (map[int64]bool, error) {
+	out := map[int64]bool{}
+	if userID <= 0 || len(contestIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT t.contest_id
+		FROM contest_teams t
+		WHERE t.contest_id = ANY($2)
+		  AND (t.team_id = $1 OR EXISTS (
+		      SELECT 1 FROM contest_team_members m
+		      WHERE m.contest_id = t.contest_id AND m.team_id = t.team_id AND m.user_id = $1))`,
+		userID, contestIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // FindContestTeamForUser 返回用户作为队长或成员加入的队伍。
 func (s *Store) FindContestTeamForUser(ctx context.Context, contestID, userID int64) (model.ContestTeam, error) {
 	return s.GetContestTeam(ctx, contestID, userID)
@@ -573,8 +625,8 @@ func (s *Store) UserContestProblemStats(ctx context.Context, contestID, userID i
 // 返回全部提交，包含分数/逐点得分/冻结标记；不含代码等大字段。
 func (s *Store) ListContestSubmissions(ctx context.Context, contestID int64) ([]model.Submission, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT s.id, s.problem_id, COALESCE(tm.team_id, s.user_id), s.language, s.status, s.time_ms, s.memory_kb,
-			score, case_scores, is_frozen, created_at, judged_at
+		`SELECT s.id, s.problem_id, COALESCE(tm.team_id, s.user_id), s.language, s.status, s.time_ms, s.wall_time_ms, s.memory_kb,
+			score, case_scores, is_frozen, s.is_hacked, created_at, judged_at
 		 FROM submissions s
 		 LEFT JOIN contest_team_members tm ON tm.contest_id = s.contest_id AND tm.user_id = s.user_id
 		 WHERE s.contest_id = $1
@@ -588,8 +640,8 @@ func (s *Store) ListContestSubmissions(ctx context.Context, contestID int64) ([]
 		var sub model.Submission
 		var caseScores []byte
 		if err := rows.Scan(&sub.ID, &sub.ProblemID, &sub.UserID, &sub.Language,
-			&sub.Status, &sub.TimeMs, &sub.MemoryKb,
-			&sub.Score, &caseScores, &sub.IsFrozen, &sub.CreatedAt, &sub.JudgedAt); err != nil {
+			&sub.Status, &sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb,
+			&sub.Score, &caseScores, &sub.IsFrozen, &sub.IsHacked, &sub.CreatedAt, &sub.JudgedAt); err != nil {
 			return nil, err
 		}
 		if len(caseScores) > 0 {
@@ -608,8 +660,8 @@ func (s *Store) ListContestSubmissionsDetailed(ctx context.Context, contestID in
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.id, s.problem_id, COALESCE(p.title, ''), COALESCE(tm.team_id, s.user_id),
 		       COALESCE(u.username, ''), s.language, s.code, s.status, s.compile_error,
-		       s.case_results, s.time_ms, s.memory_kb, s.score, s.case_scores,
-		       s.is_frozen, s.created_at, s.judged_at
+		       s.case_results, s.time_ms, s.wall_time_ms, s.memory_kb, s.score, s.case_scores,
+		       s.is_frozen, s.is_hacked, s.created_at, s.judged_at
 		FROM submissions s
 		LEFT JOIN contest_team_members tm ON tm.contest_id = s.contest_id AND tm.user_id = s.user_id
 		LEFT JOIN problems p ON p.id = s.problem_id
@@ -626,14 +678,20 @@ func (s *Store) ListContestSubmissionsDetailed(ctx context.Context, contestID in
 		var caseResults, caseScores []byte
 		if err := rows.Scan(&sub.ID, &sub.ProblemID, &sub.ProblemTitle, &sub.UserID,
 			&sub.Username, &sub.Language, &sub.Code, &sub.Status, &sub.CompileError,
-			&caseResults, &sub.TimeMs, &sub.MemoryKb, &sub.Score, &caseScores,
-			&sub.IsFrozen, &sub.CreatedAt, &sub.JudgedAt); err != nil {
+			&caseResults, &sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb, &sub.Score, &caseScores,
+			&sub.IsFrozen, &sub.IsHacked, &sub.CreatedAt, &sub.JudgedAt); err != nil {
 			return nil, err
 		}
 		sub.ContestID = &contestIDCopy
 		if len(caseResults) > 0 {
 			if err := json.Unmarshal(caseResults, &sub.CaseResults); err != nil {
 				return nil, err
+			}
+			for _, result := range sub.CaseResults {
+				if result.TimeoutSource != "" {
+					sub.TimeoutSource = result.TimeoutSource
+					break
+				}
 			}
 		}
 		if len(caseScores) > 0 {

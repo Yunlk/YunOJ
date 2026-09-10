@@ -78,7 +78,7 @@ var migrations = []migration{
 		name:    "contest_system",
 		stmts: []string{
 			// ---- 题目类型与特殊评测 ----
-			// type: standard | spj | interactive | output_only
+			// type: standard | hack | spj | interactive | output_only
 			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'standard'`,
 			// spj_source/interactor_source: 特殊评测器/交互器源码（在沙箱内编译运行）
 			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS spj_source TEXT NOT NULL DEFAULT ''`,
@@ -401,6 +401,96 @@ var migrations = []migration{
 			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS judge_attempt INTEGER NOT NULL DEFAULT 0`,
 			`CREATE INDEX IF NOT EXISTS idx_submissions_judge_lease
 			 ON submissions (judge_lease_until) WHERE status = 'running'`,
+		},
+	},
+	{
+		version: 16,
+		name:    "problem_checker_mode",
+		stmts: []string{
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS checker_mode TEXT NOT NULL DEFAULT 'token'`,
+			`ALTER TABLE problems DROP CONSTRAINT IF EXISTS problems_checker_mode_check`,
+			`ALTER TABLE problems ADD CONSTRAINT problems_checker_mode_check CHECK (checker_mode IN ('token', 'exact'))`,
+		},
+	},
+	{
+		version: 17,
+		name:    "submission_wall_time",
+		stmts: []string{
+			// CPU 时间与墙钟时间分别保存；旧提交默认墙钟时间未知。
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS wall_time_ms INTEGER NOT NULL DEFAULT 0`,
+		},
+	},
+	{
+		version: 18,
+		name:    "contest_dynamic_board_delay",
+		stmts: []string{
+			// 动态大屏独立于固定榜单；0 表示按比赛时长的 20% 自动开启。
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS dynamic_delay_minutes INTEGER NOT NULL DEFAULT 0`,
+		},
+	},
+	{
+		version: 19,
+		name:    "hack_judge_sources",
+		stmts: []string{
+			// Hack 题由受信任的生成器生成测试输入，参考解生成期望输出。
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS hack_generator_source TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS hack_reference_source TEXT NOT NULL DEFAULT ''`,
+		},
+	},
+	{
+		version: 20,
+		name:    "hack_target_source",
+		stmts: []string{
+			// Codeforces 风格 Hack 题的待攻击程序，仅公开给参赛者查看。
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS hack_target_source TEXT NOT NULL DEFAULT ''`,
+		},
+	},
+	{
+		version: 21,
+		name:    "pretests_system_test_and_open_hacking",
+		stmts: []string{
+			// ---- 预测试 / 系统测试（Codeforces 两阶段判定）----
+			// 比赛开关：比赛中只跑预测试，赛后再用完整数据系统测试
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS pretest_only BOOLEAN NOT NULL DEFAULT false`,
+			// 比赛开关：开放 Hack（锁定已通过的题目后可攻击他人提交）
+			`ALTER TABLE contests ADD COLUMN IF NOT EXISTS hacking_enabled BOOLEAN NOT NULL DEFAULT false`,
+			// 测试点级别：是否属于预测试集合
+			`ALTER TABLE problem_testcases ADD COLUMN IF NOT EXISTS is_pretest BOOLEAN NOT NULL DEFAULT false`,
+			// 提交：当前判定是否只跑了预测试、是否已完成系统测试、系统测试是否在排队
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS pretest_only BOOLEAN NOT NULL DEFAULT false`,
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS system_tested BOOLEAN NOT NULL DEFAULT false`,
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS system_test_pending BOOLEAN NOT NULL DEFAULT false`,
+			// 提交：是否已被他人 Hack 成功（成功后判定降级，分数作废）
+			`ALTER TABLE submissions ADD COLUMN IF NOT EXISTS is_hacked BOOLEAN NOT NULL DEFAULT false`,
+			`CREATE INDEX IF NOT EXISTS idx_submissions_system_test
+				ON submissions (contest_id, pretest_only, system_tested)`,
+			// ---- Open Hacking：题目锁定 ----
+			`CREATE TABLE IF NOT EXISTS contest_problem_locks (
+				contest_id BIGINT NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+				team_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				problem_id BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				locked_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (contest_id, team_id, problem_id)
+			)`,
+			// ---- Open Hacking：Hack 记录 ----
+			`CREATE TABLE IF NOT EXISTS contest_hacks (
+				id                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				contest_id           BIGINT NOT NULL REFERENCES contests(id) ON DELETE CASCADE,
+				problem_id           BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				hacker_id            BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				target_submission_id BIGINT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+				target_team_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				input                TEXT NOT NULL DEFAULT '',
+				expected_output      TEXT NOT NULL DEFAULT '',
+				verdict              TEXT NOT NULL DEFAULT 'pending',
+				target_status        TEXT NOT NULL DEFAULT '',
+				judge_note           TEXT NOT NULL DEFAULT '',
+				created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+				judged_at            TIMESTAMPTZ
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_hacks_contest ON contest_hacks (contest_id, id DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_hacks_hacker ON contest_hacks (hacker_id, id DESC)`,
+			`CREATE INDEX IF NOT EXISTS idx_contest_hacks_target ON contest_hacks (target_submission_id)`,
 		},
 	},
 }

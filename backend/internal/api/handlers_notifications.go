@@ -41,6 +41,17 @@ func (a *API) handleReadNotification(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleReadAllNotifications 一键把当前用户的全部可见通知标为已读。
+func (a *API) handleReadAllNotifications(w http.ResponseWriter, r *http.Request) {
+	u, _ := userFromCtx(r.Context())
+	marked, err := a.store.MarkAllNotificationsRead(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "标记失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"marked": marked})
+}
+
 // handleCreateNotification 发布全站通知。
 func (a *API) handleCreateNotification(w http.ResponseWriter, r *http.Request) {
 	u, _ := userFromCtx(r.Context())

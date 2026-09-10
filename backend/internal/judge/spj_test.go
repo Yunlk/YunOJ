@@ -93,6 +93,13 @@ func TestScaleJudgeCases(t *testing.T) {
 	if got := scaleJudgeCases(zero, 100); got[0].Score != 0 {
 		t.Fatalf("总分 0 时应保持原样")
 	}
+	// 大分值配置使用 64 位中间计算，避免 Score * target 溢出。
+	large := scaleJudgeCases([]judgeCase{
+		{Ordinal: 1, Score: 30}, {Ordinal: 2, Score: 70},
+	}, 2_000_000_000)
+	if large[0].Score != 600_000_000 || large[1].Score != 1_400_000_000 {
+		t.Fatalf("大分值缩放错误: %#v", large)
+	}
 }
 
 func TestVerdictInteractive(t *testing.T) {

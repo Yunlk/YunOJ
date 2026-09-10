@@ -34,6 +34,33 @@ func TestVerdictFromRunResourceLimits(t *testing.T) {
 	}
 }
 
+func TestVerdictFromRunWithSource(t *testing.T) {
+	limits := Limits{TimeMs: 1000, MemoryKb: 65536}
+	tests := []struct {
+		name   string
+		res    RunResult
+		source string
+	}{
+		{"CPU 达到限制", RunResult{Status: "TO", TimeMs: 1000, WallTimeMs: 1004}, "cpu"},
+		{"墙钟达到限制但 CPU 很低", RunResult{Status: "TO", TimeMs: 12, WallTimeMs: 2000}, "wall"},
+		{"MLE 不应带超时来源", RunResult{Status: "TO", TimeMs: 1000, MemoryKb: 65537}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			verdict, source := verdictFromRunWithSource(tc.res, limits)
+			if verdict == model.StatusMemoryLimitExceeded && source != "" {
+				t.Fatalf("MLE 不应标记超时来源，实际 %q", source)
+			}
+			if tc.name != "MLE 不应带超时来源" && verdict != model.StatusTimeLimitExceeded {
+				t.Fatalf("期望 TLE，实际 %s", verdict)
+			}
+			if source != tc.source {
+				t.Fatalf("期望来源 %q，实际 %q", tc.source, source)
+			}
+		})
+	}
+}
+
 func TestApplyCaseVerdict(t *testing.T) {
 	tests := []struct {
 		name        string

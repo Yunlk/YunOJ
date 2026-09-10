@@ -30,6 +30,8 @@ type testRequest struct {
 	Language string `json:"language"`
 	Code     string `json:"code"`
 	Input    string `json:"input"`
+	// SampleIndex 可选；提供时由服务端读取对应样例的输入与输出，避免信任客户端答案。
+	SampleIndex *int `json:"sample_index,omitempty"`
 	// Optimize 可选；缺省视为 true（默认开启 O2）
 	Optimize *bool `json:"optimize"`
 }
@@ -44,12 +46,14 @@ func optimizeOrDefault(v *bool) bool {
 
 // singleTestResponse 自测（单个用例）响应，扁平化字段。
 type singleTestResponse struct {
-	Status       string `json:"status"`
-	Stdout       string `json:"stdout"`
-	Stderr       string `json:"stderr,omitempty"`
-	TimeMs       int    `json:"time_ms"`
-	MemoryKb     int    `json:"memory_kb"`
-	CompileError string `json:"compile_error,omitempty"`
+	Status        string `json:"status"`
+	Stdout        string `json:"stdout"`
+	Stderr        string `json:"stderr,omitempty"`
+	TimeMs        int    `json:"time_ms"`
+	WallTimeMs    int    `json:"wall_time_ms"`
+	MemoryKb      int    `json:"memory_kb"`
+	TimeoutSource string `json:"timeout_source,omitempty"`
+	CompileError  string `json:"compile_error,omitempty"`
 }
 
 // sampleTestResponse 样例测试响应。
@@ -77,7 +81,7 @@ func (a *API) handleRunTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
-	a.handleSingleTest(w, r, id, u.ID)
+	a.handleSingleTest(w, r, p, u.ID)
 }
 
 // handleContestRunTest 为比赛题提供与普通题一致的自测能力。
@@ -123,34 +127,44 @@ func (a *API) handleContestRunTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "该题目不属于本场比赛")
 		return
 	}
-	if _, err := a.store.GetProblem(r.Context(), pid); err != nil {
+	p, err := a.store.GetProblem(r.Context(), pid)
+	if err != nil {
 		writeError(w, http.StatusNotFound, "题目不存在")
 		return
 	}
-	a.handleSingleTest(w, r, pid, u.ID)
+	a.handleSingleTest(w, r, p, u.ID)
 }
 
-func (a *API) handleSingleTest(w http.ResponseWriter, r *http.Request, problemID, userID int64) {
+func (a *API) handleSingleTest(w http.ResponseWriter, r *http.Request, problem model.Problem, userID int64) {
 	var req testRequest
 	if !decodeJSON(w, r, &req) {
+		return
+	}
+	testInput := judge.TestInput{Input: req.Input}
+	if req.SampleIndex != nil {
+		if *req.SampleIndex < 0 || *req.SampleIndex >= len(problem.Samples) {
+			writeError(w, http.StatusBadRequest, "无效的样例序号")
+			return
+		}
+		sample := problem.Samples[*req.SampleIndex]
+		testInput = judge.TestInput{Input: sample.Input, Expected: sample.Output, Compare: true}
+	}
+	if len(testInput.Input) > maxTestInputBytes {
+		writeError(w, http.StatusBadRequest, "输入过长（最大 1MB）")
 		return
 	}
 	if msg := a.validateTestRequest(r, &req, userID); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
-	if len(req.Input) > maxTestInputBytes {
-		writeError(w, http.StatusBadRequest, "输入过长（最大 1MB）")
-		return
-	}
 
 	task := judge.TestTask{
 		RunID:     randomRunID(),
-		ProblemID: problemID,
+		ProblemID: problem.ID,
 		Language:  req.Language,
 		Code:      req.Code,
 		Optimize:  optimizeOrDefault(req.Optimize),
-		Cases:     []judge.TestInput{{Input: req.Input}},
+		Cases:     []judge.TestInput{testInput},
 	}
 	result, err := a.submitTestTask(r.Context(), task, selfTestWaitTimeout)
 	if err != nil {
@@ -165,7 +179,8 @@ func (a *API) handleSingleTest(w http.ResponseWriter, r *http.Request, problemID
 	if len(result.Cases) > 0 {
 		c := result.Cases[0]
 		resp.Stdout, resp.Stderr = c.Stdout, c.Stderr
-		resp.TimeMs, resp.MemoryKb = c.TimeMs, c.MemoryKb
+		resp.TimeMs, resp.WallTimeMs, resp.MemoryKb = c.TimeMs, c.WallTimeMs, c.MemoryKb
+		resp.TimeoutSource = c.TimeoutSource
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -215,7 +230,7 @@ func (a *API) handleRunSamples(w http.ResponseWriter, r *http.Request) {
 		Cases:     make([]judge.TestInput, 0, len(problem.Samples)),
 	}
 	for _, s := range problem.Samples {
-		task.Cases = append(task.Cases, judge.TestInput{Input: s.Input, Expected: s.Output})
+		task.Cases = append(task.Cases, judge.TestInput{Input: s.Input, Expected: s.Output, Compare: true})
 	}
 	result, err := a.submitTestTask(r.Context(), task, sampleTestWaitTime)
 	if err != nil {

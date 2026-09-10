@@ -30,11 +30,21 @@ func (s *Store) IsProblemFavorite(ctx context.Context, userID, problemID int64) 
 	return exists, err
 }
 
-// ListFavoriteProblems 返回用户收藏题目。
+// ListFavoriteProblems 返回用户收藏题目，并附带该用户在这些题目上的作答状态
+// （accepted / wrong_answer / 空），前端无需再额外拉取状态映射。
 func (s *Store) ListFavoriteProblems(ctx context.Context, userID int64) ([]model.HomeProblem, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id, p.title, p.difficulty, p.tags, p.accepted_count, p.submission_count,
-		       p.created_at, p.updated_at
+		       p.created_at, p.updated_at,
+		       CASE
+		         WHEN EXISTS (SELECT 1 FROM submissions s
+		                      WHERE s.problem_id = p.id AND s.user_id = $1 AND s.status = 'accepted')
+		           THEN 'accepted'
+		         WHEN EXISTS (SELECT 1 FROM submissions s
+		                      WHERE s.problem_id = p.id AND s.user_id = $1)
+		           THEN 'wrong_answer'
+		         ELSE ''
+		       END AS my_status
 		FROM problem_favorites f JOIN problems p ON p.id = f.problem_id
 		WHERE f.user_id = $1 AND p.status = 'published'
 		ORDER BY f.created_at DESC`, userID)
@@ -46,7 +56,8 @@ func (s *Store) ListFavoriteProblems(ctx context.Context, userID int64) ([]model
 	for rows.Next() {
 		var item model.HomeProblem
 		if err := rows.Scan(&item.ID, &item.Title, &item.Difficulty, &item.Tags,
-			&item.AcceptedCount, &item.SubmissionCount, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.AcceptedCount, &item.SubmissionCount, &item.CreatedAt, &item.UpdatedAt,
+			&item.MyStatus); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

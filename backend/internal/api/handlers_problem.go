@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -59,11 +60,37 @@ func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		// 公共列表只返回已发布题目；管理员可查看全部状态
 		IncludeUnpublished: isAdmin,
 	}
+	// 难度与标签筛选对所有用户开放（刷题页的主要筛选维度）
+	for _, raw := range queryList(r, "difficulty") {
+		if v, err := strconv.Atoi(raw); err == nil && v >= model.MinDifficulty && v <= model.MaxDifficulty {
+			f.Difficulties = append(f.Difficulties, v)
+		}
+	}
+	for _, tag := range queryList(r, "tag") {
+		if tag = strings.TrimSpace(tag); tag != "" && len(tag) <= 32 {
+			f.Tags = append(f.Tags, tag)
+		}
+	}
+	if len(f.Tags) > 8 {
+		f.Tags = f.Tags[:8]
+	}
+	// 我的作答状态：未做 / 尝试过 / 已通过
+	if loggedIn {
+		f.UserID = u.ID
+		switch status := strings.TrimSpace(r.URL.Query().Get("my_status")); status {
+		case "todo", "attempted", "accepted":
+			f.MyStatus = status
+		}
+	}
+	switch sort := strings.TrimSpace(r.URL.Query().Get("sort")); sort {
+	case "difficulty", "difficulty_desc", "acceptance", "newest", "submissions", "recent":
+		f.Sort = sort
+	}
+	// 题型与发布状态属于管理维度，仅管理员可筛
 	if isAdmin {
-		if v := queryInt(r, "difficulty", 0); v >= model.MinDifficulty && v <= model.MaxDifficulty {
+		if v := queryInt(r, "difficulty_single", 0); v >= model.MinDifficulty && v <= model.MaxDifficulty {
 			f.Difficulty = &v
 		}
-		f.Tag = strings.TrimSpace(r.URL.Query().Get("tag"))
 		f.Type = strings.TrimSpace(r.URL.Query().Get("type"))
 		f.Status = strings.TrimSpace(r.URL.Query().Get("status"))
 	}
@@ -107,6 +134,38 @@ func (a *API) handleListProblems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
 }
 
+// handleProblemFacets 返回题库页的筛选统计：难度分布、我的进度与标签频次。
+// 位于 /api/problems/facets，供题库侧栏一次拉取，避免前端多次请求。
+func (a *API) handleProblemFacets(w http.ResponseWriter, r *http.Request) {
+	var userID int64
+	if u, ok := userFromCtx(r.Context()); ok {
+		userID = u.ID
+	}
+	facets, err := a.store.ProblemFacets(r.Context(), userID)
+	if err != nil {
+		slogError(r, "题库统计", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, facets)
+}
+
+// handleProblemNeighbors 返回相邻题目 ID，供单题页的「上一题 / 下一题」使用。
+func (a *API) handleProblemNeighbors(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "无效的题目 ID")
+		return
+	}
+	prev, next, err := a.store.NeighborProblems(r.Context(), id)
+	if err != nil {
+		slogError(r, "相邻题目", err)
+		writeError(w, http.StatusInternalServerError, "查询失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"prev": prev, "next": next})
+}
+
 // problemDetailDTO 题目详情响应：评测器源码仅管理员可见。
 type problemDetailDTO struct {
 	ID              int64          `json:"id"`
@@ -123,16 +182,20 @@ type problemDetailDTO struct {
 	AcceptedCount   int64          `json:"accepted_count"`
 	SubmissionCount int64          `json:"submission_count"`
 	Type            string         `json:"type"`
+	CheckerMode     string         `json:"checker_mode"`
 	TestcaseScores  []int          `json:"testcase_scores"`
 	SubmissionLimit int            `json:"submission_limit"`
 	Status          string         `json:"status"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	// 管理员专属：评测器源码与测试点数量
-	SPJSource        string `json:"spj_source,omitempty"`
-	InteractorSource string `json:"interactor_source,omitempty"`
-	TestcaseCount    int64  `json:"testcase_count,omitempty"`
-	IsFavorite       bool   `json:"is_favorite,omitempty"`
+	SPJSource           string `json:"spj_source,omitempty"`
+	InteractorSource    string `json:"interactor_source,omitempty"`
+	HackGeneratorSource string `json:"hack_generator_source,omitempty"`
+	HackReferenceSource string `json:"hack_reference_source,omitempty"`
+	HackTargetSource    string `json:"hack_target_source,omitempty"`
+	TestcaseCount       int64  `json:"testcase_count,omitempty"`
+	IsFavorite          bool   `json:"is_favorite,omitempty"`
 }
 
 // handleGetProblem 题目详情。
@@ -167,7 +230,7 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 		Samples: p.Samples, TimeLimitMs: p.TimeLimitMs, MemoryLimitKb: p.MemoryLimitKb,
 		Difficulty: p.Difficulty, Tags: p.Tags,
 		AcceptedCount: p.AcceptedCount, SubmissionCount: p.SubmissionCount,
-		Type: p.Type, TestcaseScores: p.TestcaseScores,
+		Type: p.Type, CheckerMode: p.CheckerMode, TestcaseScores: p.TestcaseScores,
 		SubmissionLimit: p.SubmissionLimit, Status: p.Status,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
@@ -179,7 +242,13 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 	if isAdmin {
 		dto.SPJSource = p.SPJSource
 		dto.InteractorSource = p.InteractorSource
+		dto.HackGeneratorSource = p.HackGeneratorSource
+		dto.HackReferenceSource = p.HackReferenceSource
 		dto.TestcaseCount = p.TestcaseCount
+	}
+	if p.Type == model.ProblemTypeHack {
+		// Hack 题的目标程序是题面的一部分，参赛者需要据此构造攻击数据。
+		dto.HackTargetSource = p.HackTargetSource
 	}
 	writeJSON(w, http.StatusOK, dto)
 }
@@ -196,12 +265,20 @@ type problemPayload struct {
 	MemoryLimitKb int            `json:"memory_limit_kb"`
 	Difficulty    int            `json:"difficulty"`
 	Tags          []string       `json:"tags"`
-	// Type 题目类型：standard | spj | interactive | output_only（空 = standard）
+	// Type 题目类型：standard | hack | spj | interactive | output_only（空 = standard）
 	Type string `json:"type"`
+	// CheckerMode 标准题输出判定：token | exact（空 = token）
+	CheckerMode string `json:"checker_mode"`
 	// SPJSource 特殊评测器源码（type=spj）
 	SPJSource string `json:"spj_source"`
 	// InteractorSource 交互器源码（type=interactive）
 	InteractorSource string `json:"interactor_source"`
+	// HackGeneratorSource Hack 测试生成器源码（type=hack）
+	HackGeneratorSource string `json:"hack_generator_source"`
+	// HackReferenceSource Hack 参考解源码（type=hack）
+	HackReferenceSource string `json:"hack_reference_source"`
+	// HackTargetSource Hack 题待攻击的目标程序源码（type=hack）
+	HackTargetSource string `json:"hack_target_source"`
 	// TestcaseScores 各测试点分数（空 = 均分）
 	TestcaseScores []int `json:"testcase_scores"`
 	// SubmissionLimit 比赛内提交次数上限（0 = 不限）
@@ -403,9 +480,21 @@ func validateProblem(p problemPayload) string {
 		ptype = model.ProblemTypeStandard
 	}
 	switch ptype {
-	case model.ProblemTypeStandard, model.ProblemTypeSPJ, model.ProblemTypeInteractive, model.ProblemTypeOutputOnly:
+	case model.ProblemTypeStandard, model.ProblemTypeHack, model.ProblemTypeSPJ, model.ProblemTypeInteractive, model.ProblemTypeOutputOnly:
 	default:
 		return "无效的题目类型"
+	}
+	checkerMode := p.CheckerMode
+	if checkerMode == "" {
+		checkerMode = model.CheckerModeToken
+	}
+	switch checkerMode {
+	case model.CheckerModeToken, model.CheckerModeExact:
+	default:
+		return "无效的输出判定模式（token/exact）"
+	}
+	if ptype != model.ProblemTypeStandard && checkerMode != model.CheckerModeToken {
+		return "仅标准题支持 Exact 输出判定"
 	}
 	if ptype == model.ProblemTypeSPJ && strings.TrimSpace(p.SPJSource) == "" {
 		return "SPJ 题目必须提供 spj_source"
@@ -413,7 +502,17 @@ func validateProblem(p problemPayload) string {
 	if ptype == model.ProblemTypeInteractive && strings.TrimSpace(p.InteractorSource) == "" {
 		return "交互题必须提供 interactor_source"
 	}
-	if len(p.SPJSource) > 64<<10 || len(p.InteractorSource) > 64<<10 {
+	if ptype == model.ProblemTypeHack {
+		if strings.TrimSpace(p.HackTargetSource) != "" {
+			if strings.TrimSpace(p.HackReferenceSource) == "" {
+				return "Hack 题必须提供 hack_reference_source 作为标准答案程序"
+			}
+		} else if strings.TrimSpace(p.HackGeneratorSource) == "" || strings.TrimSpace(p.HackReferenceSource) == "" {
+			return "Hack 题必须提供 hack_target_source，或兼容旧版的生成器与参考解"
+		}
+	}
+	if len(p.SPJSource) > 64<<10 || len(p.InteractorSource) > 64<<10 ||
+		len(p.HackGeneratorSource) > 64<<10 || len(p.HackReferenceSource) > 64<<10 || len(p.HackTargetSource) > 64<<10 {
 		return "评测器源码过长（最大 64KB）"
 	}
 	if len(p.TestcaseScores) > 100 {
@@ -457,27 +556,35 @@ func payloadToProblem(payload problemPayload) model.Problem {
 	if ptype == "" {
 		ptype = model.ProblemTypeStandard
 	}
+	checkerMode := payload.CheckerMode
+	if checkerMode == "" {
+		checkerMode = model.CheckerModeToken
+	}
 	status := payload.Status
 	if status == "" {
 		status = model.ProblemStatusPublished
 	}
 	return model.Problem{
-		Title:            strings.TrimSpace(payload.Title),
-		Statement:        payload.Statement,
-		InputFormat:      payload.InputFormat,
-		OutputFormat:     payload.OutputFormat,
-		Hint:             payload.Hint,
-		Samples:          payload.Samples,
-		TimeLimitMs:      payload.TimeLimitMs,
-		MemoryLimitKb:    payload.MemoryLimitKb,
-		Difficulty:       payload.Difficulty,
-		Tags:             tags,
-		Type:             ptype,
-		SPJSource:        payload.SPJSource,
-		InteractorSource: payload.InteractorSource,
-		TestcaseScores:   payload.TestcaseScores,
-		SubmissionLimit:  payload.SubmissionLimit,
-		Status:           status,
+		Title:               strings.TrimSpace(payload.Title),
+		Statement:           payload.Statement,
+		InputFormat:         payload.InputFormat,
+		OutputFormat:        payload.OutputFormat,
+		Hint:                payload.Hint,
+		Samples:             payload.Samples,
+		TimeLimitMs:         payload.TimeLimitMs,
+		MemoryLimitKb:       payload.MemoryLimitKb,
+		Difficulty:          payload.Difficulty,
+		Tags:                tags,
+		Type:                ptype,
+		CheckerMode:         checkerMode,
+		SPJSource:           payload.SPJSource,
+		InteractorSource:    payload.InteractorSource,
+		HackGeneratorSource: payload.HackGeneratorSource,
+		HackReferenceSource: payload.HackReferenceSource,
+		HackTargetSource:    payload.HackTargetSource,
+		TestcaseScores:      payload.TestcaseScores,
+		SubmissionLimit:     payload.SubmissionLimit,
+		Status:              status,
 	}
 }
 

@@ -28,6 +28,8 @@ const (
 	testPopTimeout  = 1500 * time.Millisecond
 	heartbeatPeriod = 3 * time.Second
 	maxNodeWorkers  = 256
+	// systemTestSweepInterval 赛后系统测试巡检周期
+	systemTestSweepInterval = 30 * time.Second
 )
 
 type workerHandle struct {
@@ -77,6 +79,8 @@ func main() {
 	}
 
 	sandbox := judge.NewIsolateSandbox(cfg.IsolatePath, cfg.IsolateDir, cfg.IsolateCG)
+	// 后台巡检：赛后用完整数据对只跑过预测试的提交做系统测试
+	go sweepSystemTests(ctx, st, q, slog.Default())
 	runManager(ctx, st, q, sandbox, cfg)
 }
 
@@ -255,7 +259,9 @@ func runWorker(ctx context.Context, st *store.Store, q *queue.Queue,
 		}
 		id, err := q.Pop(ctx, consumerID, popTimeout)
 		if errors.Is(err, queue.ErrEmpty) {
+			// 提交队列空闲时处理临时测试运行与选手间 Hack
 			runTestTask(ctx, q, runner, logger)
+			runHackTask(ctx, q, runner, logger)
 			continue
 		}
 		if err != nil {
@@ -314,4 +320,59 @@ func runTestTask(ctx context.Context, q *queue.Queue, runner *judge.Runner, logg
 	}
 	logger.Info("测试运行完成", "run_id", task.RunID, "status", result.Status, "cases", len(result.Cases))
 	return true
+}
+
+// runHackTask 消费一个选手间 Hack 任务并写回结果。返回是否有任务被处理。
+func runHackTask(ctx context.Context, q *queue.Queue, runner *judge.Runner, logger *slog.Logger) bool {
+	hackID, err := q.PopHack(ctx, testPopTimeout)
+	if errors.Is(err, queue.ErrEmpty) {
+		return false
+	}
+	if err != nil {
+		logger.Error("取 Hack 任务失败", "err", err)
+		return false
+	}
+	if err := runner.JudgeHack(ctx, hackID); err != nil {
+		logger.Error("Hack 评测失败", "hack_id", hackID, "err", err)
+	}
+	return true
+}
+
+// sweepSystemTests 周期性找出「比赛已结束但仍只跑过预测试」的提交，
+// 重置为待评测并重新入队，用完整测试数据做赛后系统测试。
+func sweepSystemTests(ctx context.Context, st *store.Store, q *queue.Queue, logger *slog.Logger) {
+	ticker := time.NewTicker(systemTestSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		ids, err := st.ListSubmissionsNeedingSystemTest(ctx, 200)
+		if err != nil {
+			logger.Error("查询待系统测试提交失败", "err", err)
+			continue
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		queued := 0
+		for _, id := range ids {
+			if err := st.PrepareSystemTest(ctx, id); err != nil {
+				if !errors.Is(err, store.ErrNotFound) {
+					logger.Warn("准备系统测试失败", "submission_id", id, "err", err)
+				}
+				continue
+			}
+			if err := q.Push(ctx, id); err != nil {
+				logger.Error("系统测试入队失败", "submission_id", id, "err", err)
+				continue
+			}
+			queued++
+		}
+		if queued > 0 {
+			logger.Info("已入队赛后系统测试", "count", queued)
+		}
+	}
 }

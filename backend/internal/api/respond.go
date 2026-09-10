@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -41,6 +44,10 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		writeError(w, http.StatusBadRequest, "无效的 JSON 请求体")
 		return false
 	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "JSON 请求体只能包含一个值")
+		return false
+	}
 	return true
 }
 
@@ -55,6 +62,46 @@ func queryInt(r *http.Request, key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// queryList 解析可重复或逗号分隔的查询参数：?tag=a&tag=b 与 ?tag=a,b 等价。
+// 返回值已去空、去重（保持出现顺序）。
+func queryList(r *http.Request, key string) []string {
+	values := r.URL.Query()[key]
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, raw := range values {
+		for _, part := range strings.Split(raw, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" || seen[part] {
+				continue
+			}
+			seen[part] = true
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// parseQueryTime 解析时间查询参数：支持 RFC3339 与 Unix 秒，非法时 ok=false。
+func parseQueryTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, true
+	}
+	if secs, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if secs <= 0 {
+			return time.Time{}, false
+		}
+		return time.Unix(secs, 0).UTC(), true
+	}
+	return time.Time{}, false
 }
 
 // clamp 限制整数范围。

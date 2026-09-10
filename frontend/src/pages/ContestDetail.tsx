@@ -319,22 +319,25 @@ function ProblemsTable({ contestId, problems }: {
   }
   return (
     <div className="table-frame">
-      <table className="data-table contest-problems-table">
+      <table className="data-table contest-table contest-problems-table">
+        <colgroup>
+          <col className="col-problem-id" />
+          <col />
+          <col className="col-my-status" />
+          <col className="col-attempts" />
+          <col className="col-rate" />
+          <col className="col-my-count" />
+          <col className="col-actions" />
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 72 }}>题号</th>
+            <th>题号</th>
             <th>标题</th>
-            <th style={{ width: 104 }}>我的状态</th>
-            <th style={{ width: 96 }} className="cell-right">
-              通过 / 尝试
-            </th>
-            <th style={{ width: 76 }} className="cell-right">
-              通过率
-            </th>
-            <th style={{ width: 96 }} className="cell-right">
-              我的提交
-            </th>
-            <th style={{ width: 72 }} className="cell-actions">
+            <th>我的状态</th>
+            <th className="cell-right">通过 / 尝试</th>
+            <th className="cell-right">通过率</th>
+            <th className="cell-right">我的提交</th>
+            <th className="cell-actions">
               <span className="visually-hidden">操作</span>
             </th>
           </tr>
@@ -774,14 +777,17 @@ export default function ContestDetail() {
                 <span className="section-hint">报名后可见题目状态与提交入口</span>
               </div>
               <div className="table-frame">
-                <table className="data-table contest-problems-table">
+                <table className="data-table contest-table contest-problems-table">
+                  <colgroup>
+                    <col className="col-problem-id" />
+                    <col />
+                    <col className="col-score-single" />
+                  </colgroup>
                   <thead>
                     <tr>
-                      <th style={{ width: 72 }}>题号</th>
+                      <th>题号</th>
                       <th>标题</th>
-                      <th style={{ width: 120 }} className="cell-right">
-                        单题分值
-                      </th>
+                      <th className="cell-right">单题分值</th>
                     </tr>
                   </thead>
                   <tbody>

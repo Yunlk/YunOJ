@@ -260,24 +260,29 @@ export default function ContestMySubmissions() {
           </div>
 
           <div className="table-frame">
-            <table className="data-table contest-submissions-table">
+            <table className="data-table contest-table contest-submissions-table">
+              <colgroup>
+                <col className="col-id" />
+                {isAdmin && <col className="col-user" />}
+                <col />
+                <col className="col-lang" />
+                <col className="col-status" />
+                <col className="col-score" />
+                <col className="col-cpu" />
+                <col className="col-mem" />
+                <col className="col-submitted" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th style={{ width: 84 }}>#</th>
-                  {isAdmin && <th style={{ width: 130 }}>用户</th>}
+                  <th>#</th>
+                  {isAdmin && <th>用户</th>}
                   <th>题目</th>
-                  <th style={{ width: 96 }}>语言</th>
-                  <th style={{ width: 118 }}>状态</th>
-                  <th style={{ width: 72 }} className="cell-right">
-                    得分
-                  </th>
-                  <th style={{ width: 96 }} className="cell-right">
-                    耗时
-                  </th>
-                  <th style={{ width: 96 }} className="cell-right">
-                    内存
-                  </th>
-                  <th style={{ width: 160 }}>提交时间</th>
+                  <th>语言</th>
+                  <th>状态</th>
+                  <th className="cell-right">得分</th>
+                  <th className="cell-right">耗时</th>
+                  <th className="cell-right">内存</th>
+                  <th>提交时间</th>
                 </tr>
               </thead>
               <tbody>

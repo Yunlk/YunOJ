@@ -24,6 +24,14 @@ type RankState = {
 
 type PhaseFilter = '' | ContestPhase
 
+/**
+ * 分组标题文案：upcoming 用「即将开始」（phaseLabel 给的是「未开始」，
+ * 而那个函数被榜单等页面共用，这里不动它，只在本页覆盖文案）。
+ */
+function groupTitle(p: ContestPhase): string {
+  return p === 'upcoming' ? '即将开始' : phaseLabel(p)
+}
+
 /** 在途的列表请求：StrictMode 双跑 effect 时复用，避免重复打接口。 */
 let inFlightListRequest: Promise<Awaited<ReturnType<typeof getContests>>> | null = null
 
@@ -93,18 +101,26 @@ function ContestRows({
   return (
     <div className="table-frame">
       <table className="data-table contest-table">
+        <colgroup>
+          <col className="col-id" />
+          <col />
+          <col className="col-mode" />
+          <col className="col-time" />
+          <col className="col-phase" />
+          <col className="col-reg" />
+          <col className="col-rank" />
+          <col className="col-actions" />
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 60 }}>#</th>
+            <th>#</th>
             <th>比赛</th>
-            <th style={{ width: 96 }}>赛制</th>
-            <th style={{ width: 200 }}>时间</th>
-            <th style={{ width: 136 }}>{phase === 'running' ? '剩余时间' : '距开始'}</th>
-            <th style={{ width: 116 }}>报名</th>
-            <th style={{ width: 84 }} className="cell-right">
-              我的排名
-            </th>
-            <th style={{ width: 68 }} className="cell-actions">
+            <th>赛制</th>
+            <th>时间</th>
+            <th>{phase === 'running' ? '剩余时间' : '距开始'}</th>
+            <th>报名</th>
+            <th className="cell-right">我的排名</th>
+            <th className="cell-actions">
               <span className="visually-hidden">操作</span>
             </th>
           </tr>
@@ -181,17 +197,24 @@ function EndedRows({
   return (
     <div className="table-frame">
       <table className="data-table contest-table">
+        <colgroup>
+          <col className="col-id" />
+          <col />
+          <col className="col-mode" />
+          <col className="col-time" />
+          <col className="col-reg" />
+          <col className="col-rank" />
+          <col className="col-actions" />
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 60 }}>#</th>
+            <th>#</th>
             <th>比赛</th>
-            <th style={{ width: 96 }}>赛制</th>
-            <th style={{ width: 200 }}>比赛时间</th>
-            <th style={{ width: 116 }}>参与</th>
-            <th style={{ width: 84 }} className="cell-right">
-              我的排名
-            </th>
-            <th style={{ width: 68 }} className="cell-actions">
+            <th>赛制</th>
+            <th>比赛时间</th>
+            <th>参与</th>
+            <th className="cell-right">我的排名</th>
+            <th className="cell-actions">
               <span className="visually-hidden">操作</span>
             </th>
           </tr>
@@ -442,16 +465,16 @@ export default function ContestList() {
         visibleGroups.map((group) =>
           // 空分组只留一行说明：避免渲染空表格导致“表格 0 行”，也省掉一屏空白。
           group.items.length === 0 ? (
-            <section className="contest-group" key={group.phase} aria-label={`${phaseLabel(group.phase)}的比赛`}>
+            <section className="contest-group" key={group.phase} aria-label={`${groupTitle(group.phase)}的比赛`}>
               <h2 className="contest-group-title">
-                <span className={`phase-badge phase-${group.phase}`}>{phaseLabel(group.phase)}</span>
+                <span className={`phase-badge phase-${group.phase}`}>{groupTitle(group.phase)}</span>
                 <span className="contest-group-count">暂无</span>
               </h2>
             </section>
           ) : (
-            <section className="contest-group" key={group.phase} aria-label={`${phaseLabel(group.phase)}的比赛`}>
+            <section className="contest-group" key={group.phase} aria-label={`${groupTitle(group.phase)}的比赛`}>
               <h2 className="contest-group-title">
-                <span className={`phase-badge phase-${group.phase}`}>{phaseLabel(group.phase)}</span>
+                <span className={`phase-badge phase-${group.phase}`}>{groupTitle(group.phase)}</span>
                 <span className="contest-group-count">{group.items.length} 场</span>
               </h2>
               {group.phase === 'ended' ? (

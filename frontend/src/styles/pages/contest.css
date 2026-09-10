@@ -37,11 +37,138 @@
   font-variant-numeric: tabular-nums;
 }
 
-.contest-table .contest-title-cell {
-  max-width: 0;
+/*
+ * 固定布局：容器变窄时按我声明的列宽收缩，而不是把某一列压到最小宽度再折行。
+ * 没有这层约束时，窄屏（如 900px）下 `table-layout: auto` 会忽略 th 的 width，
+ * 把状态列压到几十像素，行高从 44px 涨到 147px。
+ * 列宽预算写在自己的 CSS（`col.col-*`），单行截断只加在会变长的单元格上。
+ */
+.contest-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.contest-table col.col-id {
+  width: 60px;
+}
+
+.contest-table col.col-mode {
+  width: 92px;
+}
+
+.contest-table col.col-time {
+  width: 180px;
+}
+
+.contest-table col.col-phase {
+  width: 128px;
+}
+
+.contest-table col.col-reg {
+  width: 120px;
+}
+
+.contest-table col.col-rank {
+  width: 84px;
+}
+
+.contest-table col.col-actions {
+  width: 68px;
+}
+
+.contest-table col.col-user {
+  width: 130px;
+}
+
+.contest-table col.col-lang {
+  width: 92px;
+}
+
+.contest-table col.col-status {
+  width: 128px;
+}
+
+.contest-table col.col-score {
+  width: 68px;
+}
+
+.contest-table col.col-cpu {
+  width: 84px;
+}
+
+.contest-table col.col-mem {
+  width: 84px;
+}
+
+.contest-table col.col-submitted {
+  width: 156px;
+}
+
+.contest-table col.col-problem-id {
+  width: 68px;
+}
+
+.contest-table col.col-my-status {
+  width: 132px;
+}
+
+.contest-table col.col-attempts {
+  width: 104px;
+}
+
+.contest-table col.col-rate {
+  width: 76px;
+}
+
+.contest-table col.col-my-count {
+  width: 96px;
+}
+
+.contest-table col.col-score-single {
+  width: 96px;
+}
+
+/* 单行截断：只给会变长的单元格，避免整表 nowrap 把时间列的两行挤成一行 */
+.contest-table .contest-title-cell,
+.contest-problems-table td:first-child,
+.contest-submissions-table td:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.contest-table .contest-title-cell,
+.contest-submissions-table td:nth-child(2) {
   white-space: nowrap;
+}
+
+/*
+ * 窄容器下限：表格总宽不足时不再压缩列，而是让 .table-frame 横向滚动。
+ * 这样行高在窄屏也保持 44px（否则标题列被压到 0 宽、单元格折行，行高涨到 63/147px）。
+ */
+.contest-table.contest-submissions-table {
+  min-width: 1080px;
+}
+
+.contest-table:not(.contest-submissions-table):not(.contest-problems-table) {
+  min-width: 980px;
+}
+
+.contest-table.contest-problems-table {
+  min-width: 720px;
+}
+
+.contest-table .contest-reg-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.contest-stub-list {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.8;
 }
 
 .contest-row-chip {

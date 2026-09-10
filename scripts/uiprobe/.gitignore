@@ -1,0 +1,4 @@
+# 探测工具的本地产物：token 缓存（含凭据，绝不入库）、依赖与截图
+.cache/
+node_modules/
+shots/

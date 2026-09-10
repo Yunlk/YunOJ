@@ -1,0 +1,14 @@
+{
+  "name": "yunoj-uiprobe",
+  "private": true,
+  "type": "module",
+  "description": "YunOJ 前端验收工具链：驱动系统已安装的 Chrome 做布局审计、交互断言、截图与请求统计。",
+  "scripts": {
+    "install-browser": "echo 使用系统 Chrome，无需下载浏览器",
+    "audit": "node audit.mjs --verbose",
+    "verify": "pwsh -File verify-ui.ps1"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

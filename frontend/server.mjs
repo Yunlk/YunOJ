@@ -1,11 +1,27 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import http from 'node:http'
+import net from 'node:net'
 import path from 'node:path'
 
 const port = Number.parseInt(process.env.PORT || '8080', 10)
 const root = path.resolve('dist')
 const apiUpstream = new URL(process.env.API_UPSTREAM || 'http://backend:8080')
+const trustProxy = process.env.TRUST_PROXY === 'true'
+const apiProxyTimeoutMs = Number.parseInt(process.env.API_PROXY_TIMEOUT_MS || '310000', 10)
+
+const staticSecurityHeaders = {
+  'content-security-policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:",
+  'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+  'referrer-policy': 'strict-origin-when-cross-origin',
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+}
+
+const hopByHopHeaders = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
+])
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -22,18 +38,30 @@ const contentTypes = {
 }
 
 function sendText(response, status, message) {
-  response.writeHead(status, { 'content-type': 'text/plain; charset=utf-8' })
+  response.writeHead(status, { ...staticSecurityHeaders, 'content-type': 'text/plain; charset=utf-8' })
   response.end(message)
+}
+
+function clientAddress(request) {
+  if (trustProxy) {
+    const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    if (net.isIP(forwarded)) return forwarded
+  }
+  return request.socket.remoteAddress || ''
 }
 
 function proxyAPI(request, response) {
   const target = new URL(request.url, apiUpstream)
-  const headers = { ...request.headers, host: apiUpstream.host }
-  const forwardedFor = request.socket.remoteAddress || ''
-  headers['x-forwarded-for'] = headers['x-forwarded-for']
-    ? `${headers['x-forwarded-for']}, ${forwardedFor}`
-    : forwardedFor
-  headers['x-forwarded-proto'] = 'http'
+  const headers = {}
+  for (const [name, value] of Object.entries(request.headers)) {
+    if (!hopByHopHeaders.has(name)) headers[name] = value
+  }
+  const forwardedFor = clientAddress(request)
+  headers.host = apiUpstream.host
+  headers['x-forwarded-for'] = forwardedFor
+  headers['x-real-ip'] = forwardedFor
+  headers['x-forwarded-host'] = request.headers.host || ''
+  headers['x-forwarded-proto'] = request.socket.encrypted ? 'https' : 'http'
 
   const upstreamRequest = http.request({
     protocol: apiUpstream.protocol,
@@ -53,6 +81,10 @@ function proxyAPI(request, response) {
       response.destroy()
     }
   })
+  upstreamRequest.setTimeout(apiProxyTimeoutMs, () => {
+    upstreamRequest.destroy(new Error('upstream timeout'))
+  })
+  request.on('aborted', () => upstreamRequest.destroy())
   request.pipe(upstreamRequest)
 }
 
@@ -97,9 +129,9 @@ const server = http.createServer(async (request, response) => {
   const extension = path.extname(asset).toLowerCase()
   const isIndex = path.basename(asset) === 'index.html'
   response.writeHead(200, {
+    ...staticSecurityHeaders,
     'content-type': contentTypes[extension] || 'application/octet-stream',
     'cache-control': isIndex ? 'no-cache' : 'public, max-age=31536000, immutable',
-    'x-content-type-options': 'nosniff',
   })
   if (request.method === 'HEAD') {
     response.end()
@@ -109,5 +141,10 @@ const server = http.createServer(async (request, response) => {
   stream.on('error', () => response.destroy())
   stream.pipe(response)
 })
+
+server.headersTimeout = 15_000
+server.requestTimeout = 5 * 60_000
+server.keepAliveTimeout = 65_000
+server.maxHeadersCount = 100
 
 server.listen(port, '0.0.0.0')

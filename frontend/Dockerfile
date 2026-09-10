@@ -12,7 +12,9 @@ WORKDIR /app
 COPY --chown=node:node frontend/server.mjs ./server.mjs
 COPY --chown=node:node --from=builder /src/dist ./dist
 ENV PORT=8080 \
-    API_UPSTREAM=http://backend:8080
+    API_UPSTREAM=http://backend:8080 \
+    TRUST_PROXY=false \
+    API_PROXY_TIMEOUT_MS=310000
 EXPOSE 8080
 USER node
 ENTRYPOINT ["node", "server.mjs"]

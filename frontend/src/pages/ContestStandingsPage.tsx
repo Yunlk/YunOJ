@@ -1,20 +1,21 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
 import {
   extractError, getContest, getContestStandings,
 } from '../api'
 import { ACMCell, TeamAvatar } from '../components/ContestBoardParts'
 import type {
-  ACMStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding,
+  ACMStanding, CFStanding, ContestDetail as ContestDetailData, ContestProblem, ContestStandings, OIStanding,
 } from '../types'
 import { formatTime } from '../utils/format'
 import { formatContestMinutes } from '../utils/contest'
 import { formatRemaining, useClock } from '../utils/clock'
+import { buildRevealTimings } from '../utils/reveal'
 import { getStatusInfo, isPendingStatus } from '../utils/status'
 
 // ---------- 排行榜 ----------
 
-function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus, revealedStatus, activeAnimationKey }: {
+export function ACMTable({ contestId, standings, problems, startTime, activeTeamId, activeProblemId, activeStatus, revealedStatus, activeAnimationKey }: {
   contestId: number
   standings: ACMStanding[]
   problems: ContestProblem[]
@@ -186,6 +187,92 @@ function OITable({ contestId, standings, problems }: {
   )
 }
 
+/**
+ * CF（Codeforces 风格）榜单：
+ *   - 总分列 = 各题得分之和（分值随提交时间衰减，早交得分高）
+ *   - 罚时列 = Σ(通过用时分钟 + 通过前错误次数 × 罚时)
+ *   - 每题格子：已通过显示得分（绿），未通过显示 -错误次数（红），未提交空白
+ */
+function CFTable({ contestId, standings, problems }: {
+  contestId: number
+  standings: CFStanding[]
+  problems: ContestProblem[]
+}) {
+  return (
+    <div className="standings-wrap">
+      <table className="data-table standings-table">
+        <thead>
+          <tr>
+            <th className="rank-column">#</th>
+            <th className="team-column">队伍</th>
+            <th className="total-column">总分</th>
+            <th className="penalty-column">罚时</th>
+            <th className="hack-column" title="Hack 成功 / 失败（成功 +100，失败 −50）">Hack</th>
+            {problems.map((p) => (
+              <th key={p.problem_id} title={p.title} className={`problem-column problem-theme-${p.theme_color || 'blue'}`}>
+                <span className={`standings-problem-swatch swatch-${p.theme_color || 'blue'}`} aria-hidden="true" />
+                <span className="standings-problem-id">{p.display_id}</span>
+                <span className="standings-problem-title">{p.title}</span>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {standings.length === 0 ? (
+            <tr><td colSpan={5 + problems.length} className="table-empty">暂无队伍</td></tr>
+          ) : (
+            standings.map((s) => (
+              <tr key={s.team_id}>
+                <td className="mono rank-column">{s.rank}</td>
+                <td className="team-column">
+                  <span className="standings-team">
+                    <TeamAvatar contestId={contestId} teamId={s.team_id} avatar={s.avatar} size="sm" />
+                    <span>{s.team_name}</span>
+                  </span>
+                </td>
+                <td className="mono standings-total total-column">{s.score}</td>
+                <td className="mono penalty-column">{s.penalty}</td>
+                <td className="mono hack-column" title={s.hack_points !== 0 ? `Hack 得分 ${s.hack_points}` : undefined}>
+                  {s.hack_success === 0 && s.hack_fail === 0 ? (
+                    <span className="muted">—</span>
+                  ) : (
+                    <>
+                      {s.hack_success > 0 && <span className="hack-ok">+{s.hack_success}</span>}
+                      {s.hack_fail > 0 && <span className="hack-bad">−{s.hack_fail}</span>}
+                    </>
+                  )}
+                </td>
+                {problems.map((p) => {
+                  const ps = s.problems[p.display_id]
+                  if (!ps || (!ps.score && ps.failed_attempts === 0)) {
+                    return <td key={p.problem_id} className="standings-cell" />
+                  }
+                  if (ps.score > 0) {
+                    return (
+                      <td
+                        key={p.problem_id}
+                        className="standings-cell ac-cell"
+                        title={ps.solved_at ? `得分 ${ps.score}（当前满分 ${ps.max_score}）` : `得分 ${ps.score}`}
+                      >
+                        {ps.score}
+                      </td>
+                    )
+                  }
+                  return (
+                    <td key={p.problem_id} className="standings-cell wa-cell" title={`${ps.failed_attempts} 次未通过尝试`}>
+                      -{ps.failed_attempts}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function DynamicRevealStatus({
   contest,
   now,
@@ -193,6 +280,8 @@ function DynamicRevealStatus({
   dynamicPrelude,
   rollStep,
   rollTotal,
+  dynamicLocked,
+  dynamicStartAt,
 }: {
   contest: ContestStandings['contest']
   now: number
@@ -200,11 +289,26 @@ function DynamicRevealStatus({
   dynamicPrelude: boolean
   rollStep: number
   rollTotal: number
+  dynamicLocked?: boolean
+  dynamicStartAt?: string
 }) {
   const startMs = new Date(contest.start_time).getTime()
   const endMs = new Date(contest.end_time).getTime()
   const freezeMinutes = Math.max(0, contest.freeze_duration_minutes || 0)
   const freezeAtMs = freezeMinutes > 0 ? endMs - freezeMinutes * 60_000 : 0
+  const dynamicStartMs = dynamicStartAt ? new Date(dynamicStartAt).getTime() : 0
+
+  if (dynamicLocked && now >= startMs && dynamicStartMs > now) {
+    return (
+      <div className="dynamic-countdown-banner dynamic-countdown-upcoming" aria-live="polite">
+        <div className="dynamic-countdown-main">
+          <strong>动态大屏尚未开启</strong>
+          <b>{formatRemaining(dynamicStartMs - now)}</b>
+        </div>
+        <span className="muted">固定榜单不受影响，动态揭晓将在比赛后程开始</span>
+      </div>
+    )
+  }
 
   if (dynamicPrelude) {
     return (
@@ -349,6 +453,10 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
   const [revealMode, setRevealMode] = useState<RevealMode | null>(dynamicOnly ? 'choice' : null)
   const [dynamicPrelude, setDynamicPrelude] = useState(false)
   const [quickPreview, setQuickPreview] = useState(false)
+  const rollTimings = useMemo(
+    () => buildRevealTimings(standings?.roll_events ?? []),
+    [standings?.roll_events],
+  )
   const now = useClock(1000)
 
   useEffect(() => {
@@ -394,20 +502,23 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true)
     setError('')
-    getContestStandings(contestId)
+    getContestStandings(contestId, dynamicOnly)
       .then((s) => {
         // 比赛进行中且未封榜：保持 3 秒轮询，随提交实时更新
         const now = Date.now()
         const start = new Date(s.contest.start_time).getTime()
         const end = new Date(s.contest.end_time).getTime()
         const running = now >= start && now < end
+        const dynamicReady = !dynamicOnly || !s.dynamic_locked
         const frozen = Boolean(s.freeze_at)
         // 封榜期间仍保持轮询，比赛结束后自动拉取揭晓事件。
         const pendingReveal = dynamicOnly && frozen && !rollStarted.current
           && (now < end || (!s.roll_available && (s.frozen_submissions ?? 0) > 0))
-        const incoming = s.live_submissions ?? (s.latest_submission ? [s.latest_submission] : [])
+        const incoming = dynamicOnly && s.dynamic_locked
+          ? []
+          : s.live_submissions ?? (s.latest_submission ? [s.latest_submission] : [])
         const waitingForJudge = incoming.some((item) => isPendingStatus(item.status))
-        setLive(running || pendingReveal || waitingForJudge)
+        setLive((running && dynamicReady) || pendingReveal || waitingForJudge)
 
         // 轮询到的最新总榜不能直接覆盖当前画面。每条提交在显示终态后
         // 再应用 standings_after，否则 AC 会在“评测中”阶段提前改变名次。
@@ -471,13 +582,16 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
     const endMs = new Date(standings.contest.end_time).getTime()
     const freezeMinutes = Math.max(0, standings.contest.freeze_duration_minutes || 0)
     const freezeAtMs = freezeMinutes > 0 ? endMs - freezeMinutes * 60_000 : 0
-    const nextBoundary = [freezeAtMs, endMs]
+    const dynamicStartMs = standings.dynamic_start_at
+      ? new Date(standings.dynamic_start_at).getTime()
+      : 0
+    const nextBoundary = [dynamicStartMs, freezeAtMs, endMs]
       .filter((value) => value > now)
       .sort((a, b) => a - b)[0]
     if (!nextBoundary) return
     const timer = window.setTimeout(() => load(true), Math.max(200, nextBoundary - now + 250))
     return () => window.clearTimeout(timer)
-  }, [dynamicOnly, load, now, standings?.contest.end_time, standings?.contest.freeze_duration_minutes])
+  }, [dynamicOnly, load, now, standings?.contest.end_time, standings?.contest.freeze_duration_minutes, standings?.dynamic_start_at])
 
   // 选择动态榜单后，先从表格底部向上检查提交结果，再进入逐条滚榜。
   useEffect(() => {
@@ -542,7 +656,13 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
       setRollPhase('done')
       return
     }
-    const duration = rollPhase === 'focus' ? 900 : rollPhase === 'judging' ? 1200 : rollPhase === 'result' ? 1000 : 700
+    const timing = rollTimings[rollStep]
+    const duration = timing
+      ? rollPhase === 'focus' ? timing.focus
+        : rollPhase === 'judging' ? timing.judging
+          : rollPhase === 'result' ? timing.result
+            : timing.settled
+      : rollPhase === 'focus' ? 460 : rollPhase === 'judging' ? 360 : rollPhase === 'result' ? 620 : 240
     const timer = window.setTimeout(() => {
       if (rollPhase === 'focus') setRollPhase('judging')
       else if (rollPhase === 'judging') setRollPhase('result')
@@ -567,7 +687,7 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
       }
     }, duration)
     return () => window.clearTimeout(timer)
-  }, [rolling, rollPhase, rollStep, standings])
+  }, [rolling, rollPhase, rollStep, rollTimings, standings])
 
   useEffect(() => {
     const event = rolling && standings?.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : null
@@ -590,6 +710,7 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
   if (!standings) return null
 
   const isACM = standings.mode === 'ACM'
+  const isCF = standings.mode === 'CF'
   const frozen = Boolean(standings.freeze_at)
   const rollEvent = rolling && standings.roll_events && rollStep >= 0 ? standings.roll_events[rollStep] : undefined
   const liveSubmission = !rolling ? liveEvent : undefined
@@ -647,6 +768,8 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
           dynamicPrelude={dynamicPrelude}
           rollStep={rollStep}
           rollTotal={standings.roll_events?.length ?? 0}
+          dynamicLocked={standings.dynamic_locked}
+          dynamicStartAt={standings.dynamic_start_at}
         />
       )}
       {dynamicOnly && isACM && revealMode === 'dynamic' && (rolling || (standings.roll_available && (standings.roll_events?.length ?? 0) > 0)) && (
@@ -694,6 +817,12 @@ function StandingsPanel({ contestId, dynamicOnly = false }: { contestId: number;
             />
           </div>
         </>
+      ) : isCF ? (
+        <CFTable
+          contestId={contestId}
+          standings={standings.standings as CFStanding[]}
+          problems={standings.problems}
+        />
       ) : (
         <OITable
           contestId={contestId}

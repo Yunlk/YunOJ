@@ -1,0 +1,611 @@
+/*
+ * YunOJ public page foundation.
+ * Imported after the legacy stylesheet so the shared shell has one stable visual contract.
+ * Immersive contest workspaces and judge detail surfaces deliberately keep their own styles.
+ */
+
+:root {
+  --app-bg: #f3f6fa;
+  --app-surface: #ffffff;
+  --app-surface-muted: #f8fafc;
+  --app-text: #162235;
+  --app-text-muted: #65748a;
+  --app-border: #dfe6ee;
+  --app-border-strong: #cbd5e1;
+  --app-primary: #2563d8;
+  --app-primary-hover: #1d4fb7;
+  --app-primary-soft: #edf4ff;
+  --app-focus: rgba(37, 99, 216, 0.2);
+  --app-positive: #178451;
+  --app-danger: #c63e45;
+  --app-radius: 5px;
+  --app-content-width: 1320px;
+  --app-control-height: 38px;
+}
+
+html {
+  background: var(--app-bg);
+}
+
+body {
+  min-width: 320px;
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+::selection {
+  background: #cfe0ff;
+  color: #10203a;
+}
+
+a {
+  color: var(--app-primary);
+}
+
+a:hover {
+  color: var(--app-primary-hover);
+}
+
+/* Navigation stays compact: navigation is context, not the page's main content. */
+.navbar {
+  min-height: 58px;
+  background: #16273f;
+  border-bottom: 1px solid #0e1b2c;
+  box-shadow: none;
+}
+
+.navbar-inner {
+  width: min(calc(100% - 40px), 1480px);
+  min-height: 58px;
+  margin: 0 auto;
+  padding: 0;
+  gap: 30px;
+}
+
+.navbar .logo {
+  min-width: auto;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.navbar .nav-links {
+  gap: 6px;
+}
+
+.navbar .nav-links a,
+.navbar .nav-links > .nav-dropdown > summary,
+.navbar .nav-auth > a,
+.navbar .nav-auth > .nav-dropdown > summary {
+  min-height: 58px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 0;
+  color: #d8e2f1;
+  font-size: 14px;
+  line-height: 58px;
+}
+
+.navbar .nav-links a:hover,
+.navbar .nav-links > .nav-dropdown > summary:hover,
+.navbar .nav-auth > a:hover,
+.navbar .nav-auth > .nav-dropdown > summary:hover {
+  background: #203959;
+  color: #ffffff;
+}
+
+.navbar .nav-links a.active,
+.navbar .nav-links > .nav-dropdown.active > summary,
+.navbar .nav-auth > a.active,
+.navbar .nav-auth > .nav-dropdown.active > summary {
+  background: #0f4da2;
+  color: #ffffff;
+  box-shadow: inset 0 -2px 0 #8fc2ff;
+}
+
+.navbar .nav-auth {
+  margin-left: auto;
+  gap: 6px;
+}
+
+.navbar .nav-auth a,
+.navbar .nav-auth > .nav-dropdown > summary {
+  color: #e4ebf6;
+}
+
+.navbar .nav-dropdown-panel {
+  background: #ffffff;
+}
+
+.navbar .nav-dropdown-panel a,
+.navbar .nav-dropdown-panel .nav-dropdown-action {
+  color: #263850;
+}
+
+.navbar .nav-role-badge {
+  border-radius: 3px;
+}
+
+.navbar .nav-dropdown-menu,
+.navbar .user-dropdown-menu {
+  border: 1px solid #cad5e2;
+  border-radius: var(--app-radius);
+  box-shadow: 0 10px 28px rgba(20, 40, 68, 0.16);
+}
+
+/* All ordinary pages share a measured reading width. */
+main.container.app-shell {
+  width: min(calc(100% - 48px), var(--app-content-width));
+  min-height: calc(100vh - 58px);
+  margin: 0 auto;
+  padding: 32px 0 76px;
+}
+
+.app-shell > .page-header:first-child,
+.app-shell > .ranking-page > .page-header:first-child,
+.app-shell > .home-page > .home-command-bar:first-child {
+  margin-top: 0;
+}
+
+.app-shell .page-header-standard {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 20px;
+  padding: 0 0 18px;
+  border-bottom: 1px solid var(--app-border);
+}
+
+.app-shell .page-heading {
+  min-width: 0;
+}
+
+.app-shell .page-eyebrow {
+  margin: 0 0 6px;
+  color: var(--app-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.app-shell .page-title {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 26px;
+  font-weight: 720;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.app-shell .page-description {
+  max-width: 720px;
+  margin: 7px 0 0;
+  color: var(--app-text-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.app-shell .page-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Inputs, toolbars and actions share dimensions so a page reads as one tool. */
+.app-shell input:not([type="checkbox"]):not([type="radio"]),
+.app-shell select,
+.app-shell textarea {
+  border: 1px solid var(--app-border-strong);
+  border-radius: 4px;
+  color: var(--app-text);
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.app-shell input:not([type="checkbox"]):not([type="radio"]),
+.app-shell select {
+  min-height: var(--app-control-height);
+}
+
+.app-shell input:focus,
+.app-shell select:focus,
+.app-shell textarea:focus {
+  border-color: var(--app-primary);
+  outline: 0;
+  box-shadow: 0 0 0 3px var(--app-focus);
+}
+
+.app-shell .button,
+.app-shell button.button {
+  min-height: var(--app-control-height);
+  border-radius: 4px;
+  box-shadow: none;
+  font-weight: 650;
+}
+
+.app-shell .button-primary {
+  border-color: var(--app-primary);
+  background: var(--app-primary);
+  color: #ffffff;
+}
+
+.app-shell .button-primary:hover {
+  border-color: var(--app-primary-hover);
+  background: var(--app-primary-hover);
+}
+
+.app-shell .button-secondary,
+.app-shell .button-outline {
+  border-color: var(--app-border-strong);
+  background: #ffffff;
+  color: #31425a;
+}
+
+.app-shell .button-secondary:hover,
+.app-shell .button-outline:hover {
+  border-color: #aebdce;
+  background: var(--app-surface-muted);
+  color: var(--app-text);
+}
+
+.app-shell .search-form,
+.app-shell .filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+}
+
+.app-shell .page-actions .search-form {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.app-shell .search-input {
+  min-width: 260px;
+}
+
+/* Tables are the default OJ work surface; contain overflow instead of shrinking content. */
+.app-shell .table-frame,
+.app-shell .ranking-table-wrap,
+.app-shell .profile-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+}
+
+.app-shell .data-table {
+  width: 100%;
+  min-width: 760px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: transparent;
+}
+
+.app-shell .data-table th {
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--app-border-strong);
+  background: var(--app-surface-muted);
+  color: #52647d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.app-shell .data-table td {
+  height: 52px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--app-border);
+  color: #27384f;
+  vertical-align: middle;
+}
+
+.app-shell .data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.app-shell .data-table tbody tr:hover td {
+  background: #f7faff;
+}
+
+.app-shell .data-table .table-empty {
+  height: 156px;
+  color: var(--app-text-muted);
+  text-align: center;
+}
+
+.app-shell .data-table .tag-chip,
+.app-shell .tag-chip {
+  border: 1px solid #dce5ef;
+  border-radius: 3px;
+  background: #f6f8fb;
+  color: #53657d;
+}
+
+.app-shell .accepted,
+.app-shell .problem-list-id-cell.accepted {
+  color: var(--app-positive);
+}
+
+.app-shell .wrong-answer,
+.app-shell .problem-list-id-cell.wrong-answer {
+  color: var(--app-danger);
+}
+
+/* Panels are reserved for grouped information and never simulate a whole page. */
+.app-shell .card,
+.app-shell .profile-panel,
+.app-shell .settings-panel,
+.app-shell .contest-overview-card,
+.app-shell .home-panel {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  box-shadow: none;
+}
+
+.app-shell .error-message {
+  margin: 0 0 16px;
+  border: 1px solid #f0c7ca;
+  border-left: 3px solid var(--app-danger);
+  border-radius: 4px;
+  background: #fff7f7;
+  color: #a72d36;
+}
+
+/* Homepage reads as a dashboard, not a marketing landing page. */
+.app-shell .home-command-bar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 22px;
+  padding: 0 0 20px;
+  border-bottom: 1px solid var(--app-border);
+  background: transparent;
+}
+
+.app-shell .home-command-bar h1,
+.app-shell .home-command-bar .home-title {
+  margin: 0;
+  color: var(--app-text);
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.app-shell .home-dashboard-grid {
+  gap: 18px;
+}
+
+.app-shell .home-panel-heading,
+.app-shell .section-heading {
+  margin-bottom: 12px;
+}
+
+/* Ranking formula is reference text, not a callout competing with the table. */
+.app-shell .ranking-header {
+  align-items: flex-end;
+}
+
+.app-shell .ranking-formula {
+  max-width: 470px;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-surface-muted);
+  color: #596b83;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+/* Management forms retain density without spreading controls across the viewport. */
+.app-shell .form-card,
+.app-shell .contest-form-card,
+.app-shell .admin-panel {
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: none;
+}
+
+.app-shell .form-section-title {
+  color: var(--app-text);
+}
+
+/* Contest administration keeps configuration in one work surface. */
+.app-shell .contest-problem-manager {
+  margin-top: 0;
+  padding: 0 20px 20px;
+  border-color: var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: none;
+}
+
+.app-shell .contest-problem-manager-heading {
+  padding: 20px 0 16px;
+  border-bottom-color: var(--app-border);
+}
+
+.app-shell .contest-problem-manager-heading h2 {
+  color: var(--app-text);
+}
+
+.app-shell .contest-problem-manager-heading .muted {
+  max-width: 860px;
+  color: var(--app-text-muted);
+}
+
+.app-shell .admin-problem-search {
+  display: block;
+  padding: 16px 0;
+  border-bottom-color: var(--app-border);
+}
+
+.app-shell .admin-problem-search > label {
+  color: #52647d;
+  font-size: 12px;
+}
+
+.app-shell .admin-problem-search-row {
+  max-width: 760px;
+}
+
+.app-shell .admin-problem-table-wrap {
+  margin-top: 16px;
+  border-color: var(--app-border);
+}
+
+.app-shell .candidate-list {
+  border-color: var(--app-border);
+  border-radius: var(--app-radius);
+  box-shadow: none;
+}
+
+@media (max-width: 860px) {
+  .navbar .navbar-inner {
+    flex-wrap: wrap;
+  }
+
+  .navbar .nav-menu-toggle {
+    display: inline-grid;
+    place-items: center;
+    border-color: #49627f;
+    background: #203959;
+    color: #ffffff;
+  }
+
+  .navbar .navbar-menu {
+    display: none;
+    border-top-color: #314966;
+    background: #16273f;
+  }
+
+  .navbar .navbar-menu.open {
+    display: block;
+  }
+
+  .navbar .nav-auth {
+    border-top-color: #314966;
+  }
+
+  .navbar .nav-links a,
+  .navbar .nav-links > .nav-dropdown > summary,
+  .navbar .nav-auth > a,
+  .navbar .nav-auth > .nav-dropdown > summary {
+    min-height: 40px;
+    padding: 8px 10px;
+    color: #d8e2f1;
+    line-height: 24px;
+  }
+
+  .navbar .nav-links a.active,
+  .navbar .nav-links > .nav-dropdown.active > summary,
+  .navbar .nav-auth > a.active,
+  .navbar .nav-auth > .nav-dropdown.active > summary {
+    background: #0f4da2;
+  }
+}
+
+@media (max-width: 900px) {
+  .navbar-inner {
+    width: calc(100% - 28px);
+    gap: 10px;
+  }
+
+  .navbar .nav-links a,
+  .navbar .nav-links > .nav-dropdown > summary,
+  .navbar .nav-auth > a,
+  .navbar .nav-auth > .nav-dropdown > summary {
+    padding: 0 9px;
+  }
+
+  .navbar .nav-links {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .navbar .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  main.container.app-shell {
+    width: min(calc(100% - 28px), var(--app-content-width));
+    padding-top: 24px;
+  }
+
+  .app-shell .page-header-standard,
+  .app-shell .home-command-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .app-shell .page-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .app-shell .search-form,
+  .app-shell .filter-bar {
+    flex-wrap: wrap;
+  }
+
+  .app-shell .page-actions .search-form {
+    width: 100%;
+  }
+
+  .app-shell .search-input {
+    min-width: min(100%, 260px);
+    flex: 1 1 220px;
+  }
+
+  .app-shell .ranking-formula {
+    max-width: none;
+    text-align: left;
+  }
+}
+
+@media (max-width: 640px) {
+  .navbar-inner {
+    width: calc(100% - 20px);
+  }
+
+  main.container.app-shell {
+    width: calc(100% - 20px);
+    padding-top: 18px;
+  }
+
+  .app-shell .page-title {
+    font-size: 23px;
+  }
+
+  .app-shell .page-actions,
+  .app-shell .page-actions .search-form {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .app-shell .page-actions .search-form > * {
+    min-width: 0;
+    width: 100%;
+  }
+}

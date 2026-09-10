@@ -34,9 +34,12 @@ services:
       args:
         REGISTRY_PREFIX: ${REGISTRY_PREFIX:-}
     environment:
+      APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: postgres://yunoj:${POSTGRES_PASSWORD:-yunoj}@postgres:5432/yunoj?sslmode=disable
       REDIS_ADDR: redis:6379
       JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      TRUST_PROXY: "true"
       DATA_DIR: /data
       LANGUAGE_CONFIG: /config/languages.json
     volumes:

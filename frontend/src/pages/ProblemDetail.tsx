@@ -1,32 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  createProblemDiscussion,
   createSubmission,
   extractError,
   getLanguages,
-  getProblemLearning,
   getProblem,
-  toggleProblemFavorite,
-  createProblemDiscussion,
+  getProblemLearning,
+  getProblemNeighbors,
   getSubmissions,
   runTest,
-  uploadTests,
+  toggleProblemFavorite,
 } from '../api'
-import ProblemStatement from '../components/ProblemStatement'
+import DifficultyBadge from '../components/DifficultyBadge'
 import Markdown from '../components/Markdown'
+import ProblemStatement from '../components/ProblemStatement'
 import ProblemWorkbench from '../components/ProblemWorkbench'
 import SubmissionPanel from '../components/SubmissionPanel'
-import DifficultyBadge from '../components/DifficultyBadge'
 import { useAuth } from '../context/AuthContext'
 import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../hooks/useCodeDraft'
-import type { Language, ProblemDetail as ProblemDetailType, Sample } from '../types'
-import { copyText } from '../utils/clipboard'
-import { formatMemory, formatTimeLimit } from '../utils/format'
+import type { Language, ProblemDetail as ProblemDetailType, ProblemEditorial, Sample } from '../types'
+import { formatMemory, formatTime, formatTimeLimit } from '../utils/format'
 
-type ViewMode = 'normal' | 'ide' | 'submissions'
+type PaneTab = 'statement' | 'submissions' | 'editorial' | 'discussions'
 
+/**
+ * 单题页：默认就是「题面 + 编辑器」工作台，不再需要先点「进入 IDE 模式」。
+ * 左侧按标签页切换 题目 / 我的提交 / 题解 / 讨论，右侧常驻编辑器与运行结果。
+ */
 export default function ProblemDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
 
@@ -35,12 +39,11 @@ export default function ProblemDetail() {
 
   const [problem, setProblem] = useState<ProblemDetailType | null>(null)
   const [favorite, setFavorite] = useState(false)
+  const [editorial, setEditorial] = useState<ProblemEditorial | null>(null)
   const [discussions, setDiscussions] = useState<import('../types').ProblemDiscussion[]>([])
-  const [editorial, setEditorial] = useState<import('../types').ProblemEditorial | null>(null)
-  const [discussionText, setDiscussionText] = useState('')
-  const [discussionError, setDiscussionError] = useState('')
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [actionError, setActionError] = useState('')
 
   const [languages, setLanguages] = useState<Language[]>([])
   const draftScope = `${assignmentId ? `assignment:${assignmentId}:` : ''}problem:${id}:user:${user?.id ?? 'guest'}`
@@ -51,26 +54,25 @@ export default function ProblemDetail() {
   const [submitError, setSubmitError] = useState('')
   const [submittedId, setSubmittedId] = useState<number | null>(null)
   const [submissionRefreshKey, setSubmissionRefreshKey] = useState(0)
+  const [submissionCount, setSubmissionCount] = useState(0)
 
-  const [mode, setMode] = useState<ViewMode>('normal')
-  const [pendingSample, setPendingSample] = useState<Sample | null>(null)
+  const [tab, setTab] = useState<PaneTab>('statement')
+  const [pendingSample, setPendingSample] = useState<{ sample: Sample; index: number } | null>(null)
+  const [neighbors, setNeighbors] = useState<{ prev: number; next: number }>({ prev: 0, next: 0 })
+  const [discussionDraft, setDiscussionDraft] = useState('')
+  const [discussionBusy, setDiscussionBusy] = useState(false)
 
-  // 复制 Markdown 按钮的绿色反馈
   const [mdCopied, setMdCopied] = useState(false)
   const mdCopiedTimer = useRef<number | null>(null)
 
-  const [uploadFile, setUploadFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [uploadMsg, setUploadMsg] = useState('')
-
+  // ---- 数据加载 ----
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError('')
     getProblem(id!)
       .then((p) => {
-        if (cancelled) return
-        setProblem(p)
+        if (!cancelled) setProblem(p)
       })
       .catch((err) => {
         if (!cancelled) setError(extractError(err))
@@ -89,11 +91,18 @@ export default function ProblemDetail() {
       .then((data) => {
         if (cancelled) return
         setFavorite(data.favorite)
-        setDiscussions(data.discussions)
         setEditorial(data.editorial ?? null)
+        setDiscussions(data.discussions ?? [])
       })
       .catch(() => {})
-    return () => { cancelled = true }
+    getProblemNeighbors(id!)
+      .then((data) => {
+        if (!cancelled) setNeighbors(data)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
   useEffect(() => {
@@ -112,17 +121,24 @@ export default function ProblemDetail() {
     }
   }, [draftScope])
 
-  const changeLanguage = (next: string) => {
-    flushDraft()
-    rememberDraftLanguage(draftScope, next)
-    setLanguage(next)
-  }
-
   useEffect(() => {
     return () => {
       if (mdCopiedTimer.current !== null) window.clearTimeout(mdCopiedTimer.current)
     }
   }, [])
+
+  // 切换题目时回到题面标签，并清空上一题的提交结果提示
+  useEffect(() => {
+    setTab('statement')
+    setSubmittedId(null)
+    setSubmitError('')
+  }, [id])
+
+  const changeLanguage = (next: string) => {
+    flushDraft()
+    rememberDraftLanguage(draftScope, next)
+    setLanguage(next)
+  }
 
   const submit = async () => {
     if (!user) {
@@ -145,7 +161,7 @@ export default function ProblemDetail() {
       const res = await createSubmission(Number(id), language, code, optimize, assignmentId)
       setSubmittedId(res.id)
       setSubmissionRefreshKey((key) => key + 1)
-      setMode('submissions')
+      setTab('submissions')
     } catch (err) {
       setSubmitError(extractError(err))
     } finally {
@@ -154,30 +170,21 @@ export default function ProblemDetail() {
   }
 
   const runProblemTest = useCallback(
-    (input: string) => runTest(Number(id), language, code, input, optimize),
+    (input: string, sampleIndex?: number) => runTest(Number(id), language, code, input, optimize, sampleIndex),
     [code, id, language, optimize],
   )
 
   const toggleFavorite = async () => {
-    if (!user) { setDiscussionError('请先登录后收藏题目'); return }
-    try { setFavorite(await toggleProblemFavorite(Number(id))) } catch (err) { setDiscussionError(extractError(err)) }
-  }
-
-  const postDiscussion = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!user) { setDiscussionError('请先登录后参与讨论'); return }
-    if (!discussionText.trim()) return
+    if (!user) {
+      setActionError('请先登录后收藏题目')
+      return
+    }
     try {
-      const item = await createProblemDiscussion(Number(id), discussionText.trim())
-      setDiscussions((current) => [item, ...current])
-      setDiscussionText('')
-      setDiscussionError('')
-    } catch (err) { setDiscussionError(extractError(err)) }
-  }
-
-  const runSampleFromDetail = (sample: Sample) => {
-    setPendingSample(sample)
-    setMode('ide')
+      setFavorite(await toggleProblemFavorite(Number(id)))
+      setActionError('')
+    } catch (err) {
+      setActionError(extractError(err))
+    }
   }
 
   const copyMarkdown = async () => {
@@ -192,256 +199,230 @@ export default function ProblemDetail() {
       })
     }
     if (problem.hint) parts.push('', '## 提示', '', problem.hint)
+    const { copyText } = await import('../utils/clipboard')
     await copyText(parts.join('\n'))
-    // 绿色反馈：按钮短暂变绿表示复制成功
     setMdCopied(true)
     if (mdCopiedTimer.current !== null) window.clearTimeout(mdCopiedTimer.current)
     mdCopiedTimer.current = window.setTimeout(() => setMdCopied(false), 1500)
   }
 
-  const onUpload = async () => {
-    if (!uploadFile) {
-      setUploadMsg('请先选择 zip 文件')
+  const submitDiscussion = async () => {
+    if (!user) {
+      setActionError('请先登录后参与讨论')
       return
     }
-    setUploading(true)
-    setUploadMsg('')
+    if (!discussionDraft.trim()) return
+    setDiscussionBusy(true)
     try {
-      const res = await uploadTests(id!, uploadFile)
-      setUploadMsg(`上传成功，共 ${res.count} 个测试点`)
-      setUploadFile(null)
+      const created = await createProblemDiscussion(Number(id), discussionDraft.trim())
+      setDiscussions((list) => [...list, created])
+      setDiscussionDraft('')
+      setActionError('')
     } catch (err) {
-      setUploadMsg(extractError(err))
+      setActionError(extractError(err))
     } finally {
-      setUploading(false)
+      setDiscussionBusy(false)
     }
   }
 
   const loadProblemSubmissions = useCallback(
     ({ page, size, problemId, userId }: { page: number; size: number; problemId: number; userId: number }) =>
-      getSubmissions({
-        page,
-        size,
-        problem_id: String(problemId),
-        user_id: String(userId),
-      }),
+      getSubmissions({ page, size, problem_id: String(problemId), user_id: String(userId) }),
     [],
   )
 
+  const goTo = (target: number) => {
+    if (target > 0) navigate(`/problem/${target}${assignmentId ? `?assignment_id=${assignmentId}` : ''}`)
+  }
+
   if (loading) {
-    return <div className="page-loading">加载中…</div>
+    return <div className="page-loading">题目加载中…</div>
   }
 
   if (error || !problem) {
     return (
-      <div className="no-permission">
-        <h1>加载失败</h1>
-        <p>{error || '题目不存在'}</p>
-        <Link to="/" className="button button-primary">
-          返回题目列表
+      <div className="empty-state">
+        <div className="empty-state-title">题目加载失败</div>
+        <p className="empty-state-hint">{error || '题目不存在或已被撤下'}</p>
+        <Link to="/problems" className="button button-primary">
+          返回题库
         </Link>
       </div>
     )
   }
 
   const isAdmin = user?.role === 'admin'
-  /* ---------- IDE 工作台视图 ---------- */
-  if (mode === 'ide' || mode === 'submissions') {
-    return (
-      <div className="problem-page problem-workspace-page">
-        <ProblemWorkbench
-          problem={problem}
-          title={`P${problem.id} ${problem.title}`}
-          languages={languages}
-          language={language}
-          onLanguageChange={changeLanguage}
-          code={code}
-          onCodeChange={setCode}
-          optimize={optimize}
-          onOptimizeChange={setOptimize}
-          submitting={submitting}
-          submitError={submitError}
-          submittedId={submittedId}
-          onSubmit={() => void submit()}
-          onRun={runProblemTest}
-          showSubmissions={mode === 'submissions'}
-          initialSample={pendingSample}
-          onInitialSampleConsumed={() => setPendingSample(null)}
-          statementMeta={(
-            <div className="workbench-meta-line">
-              <span><DifficultyBadge value={problem.difficulty} /></span>
-              <span>时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
-              <span>内存限制 {formatMemory(problem.memory_limit_kb)}</span>
-              <span>提交 {problem.submission_count}</span>
-              <span>通过 {problem.accepted_count}</span>
-            </div>
-          )}
-          headerActions={(
-            <>
-              <button
-                type="button"
-                className={mdCopied ? 'mini-btn copied' : 'mini-btn'}
-                onClick={() => void copyMarkdown()}
-              >
-                复制 Markdown
-              </button>
-              {isAdmin && (
-                <Link to={`/problem/${problem.id}/edit`} className="mini-btn">编辑</Link>
-              )}
-              <button type="button" className="mini-btn" onClick={() => setMode('normal')}>
-                退出 IDE 模式
-              </button>
-            </>
-          )}
-          statementFooter={isAdmin ? (
-            <section className="section">
-              <h2 className="section-title">上传测试数据</h2>
-              <div className="upload-area">
-                <input
-                  type="file"
-                  accept=".zip"
-                  onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-                />
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={onUpload}
-                  disabled={uploading}
-                >
-                  {uploading ? '上传中…' : '上传 zip'}
-                </button>
-                {uploadMsg && <span className="muted">{uploadMsg}</span>}
-              </div>
-            </section>
-          ) : undefined}
-          submissionPanel={(
-              <SubmissionPanel
-                title={`P${problem.id} · 我的提交`}
-                problemId={problem.id}
-                userId={user?.id ?? null}
-                refreshKey={submissionRefreshKey}
-                focusSubmissionId={submittedId}
-                timeLimitMs={problem.time_limit_ms}
-                memoryLimitKb={problem.memory_limit_kb}
-                onBack={() => setMode('ide')}
-                load={loadProblemSubmissions}
-              />
-          )}
+
+  const statementPane = (
+    <div className="wb-statement">
+      {actionError && <div className="error-message">{actionError}</div>}
+      <ProblemStatement
+        problem={problem}
+        onRunSample={(sample, index) => setPendingSample({ sample, index })}
+      />
+    </div>
+  )
+
+  const submissionsPane = (
+    <SubmissionPanel
+      title={`P${problem.id} · 我的提交`}
+      problemId={problem.id}
+      userId={user?.id ?? null}
+      refreshKey={submissionRefreshKey}
+      focusSubmissionId={submittedId}
+      timeLimitMs={problem.time_limit_ms}
+      memoryLimitKb={problem.memory_limit_kb}
+      onBack={() => setTab('statement')}
+      onTotalChange={setSubmissionCount}
+      load={loadProblemSubmissions}
+    />
+  )
+
+  const editorialPane = editorial ? (
+    <article className="wb-editorial">
+      <Markdown>{editorial.content}</Markdown>
+      <p className="field-hint">最后更新：{formatTime(editorial.updated_at)}</p>
+    </article>
+  ) : (
+    <div className="empty-state">
+      <div className="empty-state-title">暂无题解</div>
+      <p className="empty-state-hint">管理员发布题解后会显示在这里。</p>
+    </div>
+  )
+
+  const discussionsPane = (
+    <div className="wb-discussions">
+      <form
+        className="discussion-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submitDiscussion()
+        }}
+      >
+        <textarea
+          value={discussionDraft}
+          onChange={(e) => setDiscussionDraft(e.target.value)}
+          placeholder={user ? '写下你的思路、疑问或反例…' : '登录后可参与讨论'}
+          disabled={!user || discussionBusy}
+          aria-label="发表讨论"
         />
-      </div>
-    )
-  }
+        <div className="discussion-form-actions">
+          <span className="field-hint">支持 Markdown 与 LaTeX</span>
+          <button type="submit" className="button button-primary button-sm" disabled={!user || discussionBusy || !discussionDraft.trim()}>
+            {discussionBusy ? '发布中…' : '发布'}
+          </button>
+        </div>
+      </form>
+      {discussions.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">还没有讨论</div>
+          <p className="empty-state-hint">第一个分享思路的人往往收获最多。</p>
+        </div>
+      ) : (
+        <ul className="discussion-list">
+          {discussions.map((d) => (
+            <li key={d.id} className="discussion-item">
+              <div className="discussion-head">
+                <strong>{d.username}</strong>
+                <time dateTime={d.created_at}>{formatTime(d.created_at)}</time>
+              </div>
+              <Markdown>{d.content}</Markdown>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 
-  /* ---------- 普通题目详情视图 ---------- */
   return (
-    <div className="problem-page">
-      {/* 顶部题目概览卡片 */}
-      <div className="overview-card">
-        <div className="overview-top">
-          <h1 className="overview-title">
-            P{problem.id} {problem.title}
-          </h1>
-          <div className="overview-stats">
-            <span className="overview-stat">
-              <b>{problem.submission_count}</b> 提交数
-            </span>
-            <span className="overview-stat">
-              <b>{problem.accepted_count}</b> 通过数
-            </span>
-            <span className="overview-stat">
-              <b>{formatTimeLimit(problem.time_limit_ms)}</b> 时间限制
-            </span>
-            <span className="overview-stat">
-              <b>{formatMemory(problem.memory_limit_kb)}</b> 内存限制
-            </span>
-          </div>
+    <div className="wb-page">
+      <header className="wb-topbar">
+        <nav className="wb-breadcrumb" aria-label="面包屑">
+          <Link to="/problems">题库</Link>
+          <span className="breadcrumb-sep">/</span>
+          <span>P{problem.id}</span>
+        </nav>
+        <div className="wb-topbar-actions">
+          <button
+            type="button"
+            className="button button-ghost button-sm"
+            onClick={() => goTo(neighbors.prev)}
+            disabled={neighbors.prev === 0}
+            title={neighbors.prev ? `上一题 P${neighbors.prev}` : '已经是第一题'}
+          >
+            ← 上一题
+          </button>
+          <button
+            type="button"
+            className="button button-ghost button-sm"
+            onClick={() => goTo(neighbors.next)}
+            disabled={neighbors.next === 0}
+            title={neighbors.next ? `下一题 P${neighbors.next}` : '已经是最后一题'}
+          >
+            下一题 →
+          </button>
         </div>
-        <div className="overview-bottom">
-          <div className="overview-tabs">
-            <span className="overview-tab active">题目描述</span>
-            <Link to={`/problem/${problem.id}/submit-file`} className="overview-tab">
-              提交答案
-            </Link>
-          </div>
-          <div className="overview-actions">
-            <button type="button" className="button button-secondary" onClick={() => void toggleFavorite()}>{favorite ? '已收藏' : '收藏题目'}</button>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => setMode('ide')}
-            >
-              进入 IDE 模式
-            </button>
-          </div>
-        </div>
-      </div>
+      </header>
 
-      <section className={`problem-learning-grid${editorial ? '' : ' single-column'}`}>
-        {editorial && <div className="side-card problem-editorial-card"><div className="side-card-title">官方题解</div><Markdown>{editorial.content}</Markdown></div>}
-        <div className="side-card problem-discussion-card"><div className="side-card-title">题目讨论 <span className="muted">{discussions.length}</span></div><form className="discussion-form" onSubmit={postDiscussion}><textarea value={discussionText} onChange={(event) => setDiscussionText(event.target.value)} placeholder="分享思路、提问或补充说明…" rows={3} /><button className="button button-secondary" type="submit">发布讨论</button></form>{discussionError && <div className="error-message">{discussionError}</div>}<div className="discussion-list">{discussions.length === 0 ? <p className="muted">还没有讨论。</p> : discussions.map((item) => <article className="discussion-item" key={item.id}><div><strong>{item.username}</strong><time>{item.created_at.slice(0, 16).replace('T', ' ')}</time></div><p>{item.content}</p></article>)}</div></div>
-      </section>
-
-      {/* 下方：左宽右窄两栏 */}
-      <div className="problem-detail-grid">
-        <div className="statement-card">
-          <div className="statement-card-header">
-            <span className="statement-label">题面</span>
-            <div className="statement-actions">
+      <ProblemWorkbench
+        problem={problem}
+        title={`P${problem.id} ${problem.title}`}
+        languages={languages}
+        language={language}
+        onLanguageChange={changeLanguage}
+        code={code}
+        onCodeChange={setCode}
+        optimize={optimize}
+        onOptimizeChange={setOptimize}
+        submitting={submitting}
+        submitError={submitError}
+        submittedId={submittedId}
+        onSubmit={() => void submit()}
+        onRun={runProblemTest}
+        tab={tab}
+        onTabChange={(key) => setTab(key as PaneTab)}
+        tabs={[
+          { key: 'statement', label: '题目' },
+          { key: 'submissions', label: '我的提交', count: submissionCount },
+          { key: 'editorial', label: '题解' },
+          { key: 'discussions', label: '讨论', count: discussions.length },
+        ]}
+        panes={{
+          statement: statementPane,
+          submissions: submissionsPane,
+          editorial: editorialPane,
+          discussions: discussionsPane,
+        }}
+        initialSample={pendingSample}
+        onInitialSampleConsumed={() => setPendingSample(null)}
+        meta={
+          <div className="wb-meta">
+            <DifficultyBadge value={problem.difficulty} />
+            <span className="wb-meta-item">时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
+            <span className="wb-meta-item">内存限制 {formatMemory(problem.memory_limit_kb)}</span>
+            <span className="wb-meta-item">
+              通过 {problem.accepted_count} / 提交 {problem.submission_count}
+            </span>
+            <div className="wb-meta-actions">
+              <button type="button" className="button button-ghost button-sm" onClick={() => void toggleFavorite()}>
+                {favorite ? '★ 已收藏' : '☆ 收藏'}
+              </button>
               <button
                 type="button"
-                className={mdCopied ? 'mini-btn copied' : 'mini-btn'}
+                className={mdCopied ? 'button button-ghost button-sm copied' : 'button button-ghost button-sm'}
                 onClick={() => void copyMarkdown()}
               >
-                复制 Markdown
-              </button>
-              <button type="button" className="mini-btn" onClick={() => setMode('ide')}>
-                进入 IDE 模式
+                {mdCopied ? '已复制' : '复制 Markdown'}
               </button>
               {isAdmin && (
-                <Link to={`/problem/${problem.id}/edit`} className="mini-btn">
+                <Link to={`/problem/${problem.id}/edit`} className="button button-ghost button-sm">
                   编辑
                 </Link>
               )}
             </div>
           </div>
-          <div className="statement-content">
-            <ProblemStatement problem={problem} onRunSample={runSampleFromDetail} />
-          </div>
-        </div>
-
-        <div className="sidebar">
-          <div className="side-card">
-            <div className="side-card-title">题目信息</div>
-            <div className="side-row">
-              <span className="side-label">题目编号</span>
-              <span className="mono">P{problem.id}</span>
-            </div>
-            <div className="side-row">
-              <span className="side-label">难度</span>
-              <DifficultyBadge value={problem.difficulty} />
-            </div>
-            <div className="side-row">
-              <span className="side-label">标签</span>
-              <span className="tag-list">
-                {problem.tags.length > 0
-                  ? problem.tags.map((t) => (
-                      <span key={t} className="tag-chip">
-                        {t}
-                      </span>
-                    ))
-                  : '暂无标签'}
-              </span>
-            </div>
-            <div className="side-row">
-              <span className="side-label">提交</span>
-              <Link to="/status" className="side-link">
-                提交记录
-              </Link>
-            </div>
-          </div>
-
-        </div>
-      </div>
+        }
+      />
     </div>
   )
 }

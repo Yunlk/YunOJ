@@ -1,102 +1,360 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { extractError, getHome } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { extractError, getHome, getProblemFacets, getProblems, getSubmissions } from '../api'
 import DifficultyBadge from '../components/DifficultyBadge'
+import PageHeader from '../components/PageHeader'
+import StatusBadge from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
-import type { HomeData } from '../types'
-import { formatTime } from '../utils/format'
+import type { Contest, HomeData, ProblemFacets, ProblemListItem, SubmissionListItem } from '../types'
+import { formatRemaining, useClock } from '../utils/clock'
+import { contestModeLabel } from '../utils/contest'
+import { getDifficulty } from '../utils/difficulty'
+import { formatRunTime, formatTime } from '../utils/format'
 
-function contestState(start: string, end: string): string {
-  const now = Date.now()
-  if (now < new Date(start).getTime()) return '即将开始'
-  if (now < new Date(end).getTime()) return '进行中'
-  return '已结束'
+type ContestPhase = 'active' | 'upcoming' | 'ended'
+
+function contestPhase(contest: Contest, now: number): ContestPhase {
+  if (now < new Date(contest.start_time).getTime()) return 'upcoming'
+  if (now < new Date(contest.end_time).getTime()) return 'active'
+  return 'ended'
 }
 
+const PHASE_LABEL: Record<ContestPhase, string> = {
+  active: '进行中',
+  upcoming: '即将开始',
+  ended: '已结束',
+}
+
+/**
+ * 首页 = 训练工作台：先回答「我现在该做什么」，再给进度与赛程。
+ * 平台总量数据退到页面底部一行，不再占据首屏。
+ */
 export default function Home() {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const now = useClock()
   const [data, setData] = useState<HomeData | null>(null)
+  const [facets, setFacets] = useState<ProblemFacets | null>(null)
+  const [recent, setRecent] = useState<SubmissionListItem[]>([])
+  const [attempted, setAttempted] = useState<ProblemListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
     getHome()
-      .then((value) => { if (!cancelled) setData(value) })
-      .catch((err) => { if (!cancelled) setError(extractError(err)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+      .then((value) => {
+        if (!cancelled) setData(value)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(extractError(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    getProblemFacets()
+      .then((value) => {
+        if (!cancelled) setFacets(value)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
+
+  useEffect(() => {
+    if (!user) {
+      setRecent([])
+      setAttempted([])
+      return
+    }
+    let cancelled = false
+    getSubmissions({ page: 1, size: 6, user_id: String(user.id) })
+      .then((page) => {
+        if (!cancelled) setRecent(page.items)
+      })
+      .catch(() => {})
+    // 按最近提交排序：首页「继续上次的进度」要回到刚动过的那道题，而不是题号最小的
+    getProblems({ page: 1, size: 5, my_status: 'attempted', sort: 'recent' })
+      .then((page) => {
+        if (!cancelled) setAttempted(page.items)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  const contests = useMemo(() => {
+    if (!data) return []
+    const all = [...data.summary.active_contests, ...data.summary.upcoming_contests]
+    return all
+      .filter((c) => contestPhase(c, now) !== 'ended')
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+  }, [data, now])
+
+  const runningContest = contests.find((c) => contestPhase(c, now) === 'active') ?? null
+  const nextContest = contests.find((c) => contestPhase(c, now) === 'upcoming') ?? null
+  const solved = facets?.solved ?? 0
+  const total = facets?.total ?? 0
+  const solvedPercent = total > 0 ? Math.round((solved / total) * 100) : 0
+
+  const randomProblem = async () => {
+    try {
+      const first = await getProblems({ page: 1, size: 1 })
+      if (first.total === 0) return
+      const pick = Math.floor(Math.random() * first.total) + 1
+      const target = await getProblems({ page: pick, size: 1 })
+      if (target.items[0]) navigate(`/problem/${target.items[0].id}`)
+    } catch (err) {
+      setError(extractError(err))
+    }
+  }
+
+  const continueProblem = () => {
+    if (attempted[0]) navigate(`/problem/${attempted[0].id}`)
+    else navigate('/problems?my_status=todo')
+  }
 
   if (loading) return <div className="page-loading">首页加载中…</div>
   if (error || !data) return <div className="error-message">{error || '首页加载失败'}</div>
+
   const { summary } = data
-  const contests = [...summary.active_contests, ...summary.upcoming_contests]
 
   return (
-    <div className="home-page">
-      <section className="home-intro">
-        <div>
-          <p className="home-kicker">YunOJ · 训练与竞赛平台</p>
-          <h1>把每一次提交，变成可追踪的进步。</h1>
-          <p className="home-intro-copy">题库、比赛和班级作业集中在一个工作台里，适合日常练习，也适合学校组织小型竞赛。</p>
-          <div className="home-intro-actions">
-            <Link to="/problems" className="button button-primary">进入题库</Link>
-            <Link to="/contests" className="button button-secondary">浏览比赛</Link>
-          </div>
-        </div>
-        <div className="home-stat-strip">
-          <div><strong>{summary.problem_count}</strong><span>公开题目</span></div>
-          <div><strong>{summary.user_count}</strong><span>活跃用户</span></div>
-          <div><strong>{summary.submission_count}</strong><span>累计提交</span></div>
-        </div>
-      </section>
+    <div className="home">
+      <PageHeader
+        eyebrow="训练工作台"
+        title={user ? `${user.username}，继续刷题` : '开始刷题'}
+        description={
+          user
+            ? `已解决 ${solved} / ${total} 道题，保持节奏。`
+            : '登录后可保存代码草稿、记录提交与进度。'
+        }
+        actions={
+          <>
+            <button type="button" className="button button-secondary" onClick={() => void randomProblem()}>
+              随机一题
+            </button>
+            <Link to="/problems" className="button button-primary">
+              进入题库
+            </Link>
+          </>
+        }
+      />
 
-      {user && data.my_stats && (
-        <section className="home-section home-personal-strip">
-          <div><span>我的提交</span><strong>{data.my_stats.total_submissions}</strong></div>
-          <div><span>通过提交</span><strong>{data.my_stats.accepted_submissions}</strong></div>
-          <div><span>做过题目</span><strong>{data.my_stats.attempted_problems}</strong></div>
-          <div><Link to="/profile">打开个人中心 →</Link></div>
-        </section>
-      )}
-
-      <div className="home-content-grid">
-        <section className="home-section">
-          <div className="home-section-heading"><h2>比赛日程</h2><Link to="/contests">全部比赛</Link></div>
-          {contests.length === 0 ? <p className="home-empty">暂时没有公开比赛。</p> : (
-            <div className="home-contest-list">
-              {contests.slice(0, 6).map((contest) => (
-                <Link className="home-contest-item" to={`/contest/${contest.id}`} key={contest.id}>
-                  <div><strong>{contest.title}</strong><span>{formatTime(contest.start_time)} · {contest.mode}</span></div>
-                  <span className={`home-contest-state ${contestState(contest.start_time, contest.end_time) === '进行中' ? 'active' : ''}`}>{contestState(contest.start_time, contest.end_time)}</span>
-                </Link>
-              ))}
-            </div>
+      <div className="home-grid">
+        <div className="home-main">
+          {user && (
+            <section className="card home-continue">
+              <div className="home-continue-text">
+                <span className="home-continue-label">继续上次的进度</span>
+                {attempted.length > 0 ? (
+                  <>
+                    <strong>P{attempted[0].id} {attempted[0].title}</strong>
+                    <span className="home-continue-hint">
+                      这道题你尝试过但还没通过 · 难度 {getDifficulty(attempted[0].difficulty).label}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <strong>还没有未完成的题目</strong>
+                    <span className="home-continue-hint">从题库挑一道开始，或者随机来一题</span>
+                  </>
+                )}
+              </div>
+              <div className="home-continue-actions">
+                <button type="button" className="button button-primary" onClick={continueProblem}>
+                  {attempted.length > 0 ? '继续这题' : '去选题'}
+                </button>
+              </div>
+            </section>
           )}
-        </section>
 
-        <section className="home-section">
-          <div className="home-section-heading"><h2>最近题目</h2><Link to="/problems">题库</Link></div>
-          <div className="home-problem-list">
-            {summary.recent_problems.map((problem) => (
-              <Link className="home-problem-item" to={`/problem/${problem.id}`} key={problem.id}>
-                <span><strong>P{problem.id} · {problem.title}</strong><small>{problem.accepted_count} / {problem.submission_count} 通过</small></span>
-                <DifficultyBadge value={problem.difficulty} />
+          <section className="section">
+            <div className="section-head">
+              <h2 className="section-title">比赛</h2>
+              <Link to="/contests" className="section-hint">
+                全部比赛 →
               </Link>
-            ))}
-          </div>
-        </section>
-      </div>
+            </div>
+            {contests.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-title">暂无公开赛程</div>
+                <p className="empty-state-hint">有新的比赛时会显示在这里。</p>
+              </div>
+            ) : (
+              <div className="home-contests">
+                {runningContest && (
+                  <Link to={`/contest/${runningContest.id}`} className="home-contest home-contest-active">
+                    <span className="home-contest-phase">进行中</span>
+                    <strong>{runningContest.title}</strong>
+                    <span className="home-contest-meta">
+                      {contestModeLabel(runningContest.mode)} · 剩余 {formatRemaining(new Date(runningContest.end_time).getTime() - now)}
+                    </span>
+                  </Link>
+                )}
+                {nextContest && (
+                  <Link to={`/contest/${nextContest.id}`} className="home-contest">
+                    <span className="home-contest-phase upcoming">即将开始</span>
+                    <strong>{nextContest.title}</strong>
+                    <span className="home-contest-meta">
+                      {contestModeLabel(nextContest.mode)} · {formatTime(nextContest.start_time)}
+                    </span>
+                  </Link>
+                )}
+                {contests
+                  .filter((c) => c.id !== runningContest?.id && c.id !== nextContest?.id)
+                  .slice(0, 3)
+                  .map((c) => (
+                    <Link to={`/contest/${c.id}`} className="home-contest" key={c.id}>
+                      <span className={`home-contest-phase ${contestPhase(c, now)}`}>{PHASE_LABEL[contestPhase(c, now)]}</span>
+                      <strong>{c.title}</strong>
+                      <span className="home-contest-meta">
+                        {contestModeLabel(c.mode)} · {formatTime(c.start_time)}
+                      </span>
+                    </Link>
+                  ))}
+              </div>
+            )}
+          </section>
 
-      {user && data.groups && data.groups.length > 0 && (
-        <section className="home-section">
-          <div className="home-section-heading"><h2>我的班级 / 团体</h2><Link to="/groups">管理空间</Link></div>
-          <div className="home-group-grid">
-            {data.groups.slice(0, 4).map((group) => <Link to={`/groups/${group.id}`} className="home-group-item" key={group.id}><strong>{group.name}</strong><span>{group.member_count} 位成员 · {group.owner_name}</span></Link>)}
-          </div>
-        </section>
-      )}
+          {user && (
+            <section className="section">
+              <div className="section-head">
+                <h2 className="section-title">最近提交</h2>
+                <Link to="/status" className="section-hint">
+                  全部提交 →
+                </Link>
+              </div>
+              {recent.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-title">还没有提交记录</div>
+                  <p className="empty-state-hint">通过一题后，这里会记录你的每一次尝试。</p>
+                  <Link to="/problems" className="button button-primary button-sm">
+                    去题库
+                  </Link>
+                </div>
+              ) : (
+                <div className="table-frame">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 92 }}>结果</th>
+                        <th>题目</th>
+                        <th style={{ width: 88 }}>语言</th>
+                        <th className="cell-right" style={{ width: 96 }}>
+                          耗时
+                        </th>
+                        <th className="cell-right" style={{ width: 160 }}>
+                          提交时间
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recent.map((s) => (
+                        <tr key={s.id} className="clickable-row" onClick={() => navigate(`/submission/${s.id}`)}>
+                          <td>
+                            <StatusBadge status={s.status} />
+                          </td>
+                          <td>
+                            <Link
+                              to={`/problem/${s.problem_id}`}
+                              className="problem-link"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              P{s.problem_id} {s.problem_title}
+                            </Link>
+                          </td>
+                          <td className="mono">{s.language}</td>
+                          <td className="cell-right cell-num">{formatRunTime(s.time_ms)}</td>
+                          <td className="cell-right mono">{formatTime(s.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+
+        <aside className="home-side">
+          {user && facets && (
+            <section className="side-card">
+              <h2 className="side-card-title">刷题进度</h2>
+              <div className="progress-summary">
+                <strong>{solved}</strong>
+                <span>/ {total} 题</span>
+                <span className="progress-percent">{solvedPercent}%</span>
+              </div>
+              <div className="progress" role="progressbar" aria-valuenow={solvedPercent} aria-valuemin={0} aria-valuemax={100}>
+                <div className="progress-bar accepted" style={{ width: `${solvedPercent}%` }} />
+              </div>
+              <ul className="difficulty-progress">
+                {facets.difficulties
+                  .filter((d) => d.total > 0)
+                  .map((d) => {
+                    const info = getDifficulty(d.difficulty)
+                    const percent = d.total > 0 ? Math.round((d.solved / d.total) * 100) : 0
+                    return (
+                      <li key={d.difficulty}>
+                        <Link
+                          to={`/problems?difficulty=${d.difficulty}&my_status=todo`}
+                          className={`difficulty-progress-row ${info.className}`}
+                        >
+                          <span className="difficulty-progress-label">{info.label}</span>
+                          <span className="difficulty-progress-bar">
+                            <span style={{ width: `${percent}%` }} />
+                          </span>
+                          <span className="difficulty-progress-count">
+                            {d.solved}/{d.total}
+                          </span>
+                        </Link>
+                      </li>
+                    )
+                  })}
+              </ul>
+            </section>
+          )}
+
+          <section className="side-card">
+            <h2 className="side-card-title">最近添加的题目</h2>
+            <ul className="home-problem-list">
+              {summary.recent_problems.slice(0, 6).map((p) => (
+                <li key={p.id}>
+                  <Link to={`/problem/${p.id}`}>
+                    <span className="home-problem-id">P{p.id}</span>
+                    <span className="home-problem-title">{p.title}</span>
+                    <DifficultyBadge value={p.difficulty} />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <Link to="/problems" className="button button-ghost button-sm button-block">
+              查看全部题目
+            </Link>
+          </section>
+
+          <section className="side-card home-platform">
+            <h2 className="side-card-title">平台规模</h2>
+            <dl className="kv-list">
+              <div>
+                <dt>公开题目</dt>
+                <dd>{summary.problem_count}</dd>
+              </div>
+              <div>
+                <dt>注册用户</dt>
+                <dd>{summary.user_count}</dd>
+              </div>
+              <div>
+                <dt>累计提交</dt>
+                <dd>{summary.submission_count}</dd>
+              </div>
+            </dl>
+          </section>
+        </aside>
+      </div>
     </div>
   )
 }

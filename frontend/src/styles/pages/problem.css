@@ -1,0 +1,423 @@
+/*
+ * 单题页：题面 + 编辑器工作台。
+ * 结构：.wb（整页） > .wb-shell（左右分栏） > .wb-left / .wb-divider / .wb-right
+ * 页面本身不滚动，左右两栏各自滚动——刷题时题面和代码都不该把页面推走。
+ */
+
+/* 单题页由 App 以 .problem-workspace-shell 渲染：占满导航栏以下的视口高度，页面本身不滚动 */
+main.problem-workspace-shell {
+  height: calc(100vh - var(--h-nav));
+  overflow: hidden;
+}
+
+.wb-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--c-bg);
+}
+
+.wb-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+
+.wb-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+.wb-breadcrumb a {
+  color: var(--c-text-2);
+}
+
+.wb-breadcrumb a:hover {
+  color: var(--c-primary);
+}
+
+.wb-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- 工作台骨架 ---------- */
+
+.wb {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-shell {
+  display: flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-left,
+.wb-right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-left {
+  flex: 1 1 46%;
+  background: var(--c-surface);
+}
+
+.wb-right {
+  flex: 1 1 54%;
+  border-left: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+
+.wb-divider {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--c-surface-2);
+  border-left: 1px solid var(--c-border);
+  border-right: 1px solid var(--c-border);
+  touch-action: none;
+}
+
+.wb-divider:hover,
+.wb-divider.dragging {
+  background: var(--c-primary);
+}
+
+/* ---------- 左栏 ---------- */
+
+.wb-left-head {
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.wb-title {
+  margin: 0;
+  font-size: var(--fs-18);
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.wb-meta-row {
+  margin-top: var(--space-3);
+}
+
+.wb-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.wb-meta-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.wb-tabs {
+  padding: 0 var(--space-3);
+  background: var(--c-surface);
+}
+
+.wb-left-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.wb-statement .section:first-child .section-title {
+  margin-top: 0;
+}
+
+.wb-editorial {
+  font-size: var(--fs-14);
+  line-height: var(--lh-prose);
+}
+
+/* ---------- 左栏：讨论 ---------- */
+
+.discussion-form {
+  margin-bottom: var(--space-5);
+}
+
+.discussion-form textarea {
+  width: 100%;
+  min-height: 88px;
+}
+
+.discussion-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+}
+
+.discussion-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.discussion-item {
+  padding: var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+.discussion-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+.discussion-head strong {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+}
+
+/* ---------- 右栏：编辑器 ---------- */
+
+.wb-editor-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.wb-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 46px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.wb-code-label {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+
+.wb-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.wb-toolbar-right .select-input {
+  min-height: var(--h-ctl-sm);
+  font-size: var(--fs-12);
+}
+
+.wb-settings {
+  position: relative;
+}
+
+.wb-settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dropdown);
+}
+
+.wb-settings-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: calc(var(--z-dropdown) + 1);
+  min-width: 108px;
+}
+
+.wb-settings-panel .menu-item.active {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-weight: 650;
+}
+
+.wb-editor-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wb-statusbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 26px;
+  padding: 0 var(--space-4);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-status-right {
+  margin-left: auto;
+}
+
+.wb-notice {
+  margin: 0;
+  border-radius: 0;
+  border-left-width: 3px;
+}
+
+/* ---------- 自测抽屉 ---------- */
+
+.wb-drawer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
+}
+
+.wb-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  background: var(--c-surface-2);
+}
+
+.wb-drawer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wb-drawer-verdict {
+  font-size: var(--fs-11);
+}
+
+.wb-drawer-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  height: 200px;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.wb-drawer-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.wb-drawer-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-weight: 650;
+}
+
+.wb-drawer-meta {
+  color: var(--c-text-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-drawer-input,
+.wb-drawer-output {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.wb-drawer-input {
+  width: 100%;
+  padding: var(--space-3);
+  line-height: 1.5;
+  resize: none;
+}
+
+.wb-drawer-output {
+  padding: var(--space-3);
+}
+
+.wb-drawer-output .io-output,
+.wb-drawer-output .code-block {
+  margin: 0;
+  font-size: var(--fs-12);
+  white-space: pre-wrap;
+}
+
+/* ---------- 窄屏单栏 ---------- */
+
+.wb-narrow .wb-shell {
+  flex-direction: column;
+}
+
+.wb-narrow .wb-left,
+.wb-narrow .wb-right {
+  flex: 1 1 auto;
+  border-left: 0;
+}
+
+.wb-narrow .wb-narrow-tabs {
+  background: var(--c-surface);
+  padding: 0 var(--space-3);
+}
+
+.wb-pane-left .wb-right,
+.wb-pane-editor .wb-left {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .wb-drawer-body {
+    grid-template-columns: minmax(0, 1fr);
+    height: 260px;
+  }
+}

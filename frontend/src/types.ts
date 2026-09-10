@@ -190,15 +190,40 @@ export interface ProblemListItem {
   submission_count: number
   created_at: string
   updated_at: string
-  my_status?: 'accepted' | 'wrong_answer'
+  /**
+   * 当前用户对该题的作答状态：
+   * `accepted` 已通过 / `wrong_answer` 尝试过 / `''` 未做。
+   * 收藏、题库列表等带用户上下文的接口会返回该字段（空串表示未做）。
+   */
+  my_status?: 'accepted' | 'wrong_answer' | ''
   // 管理员列表专属
   type?: ProblemType
   status?: ProblemStatus
   testcase_count?: number
 }
 
+/** 题库筛选项统计（/problems/facets）。 */
+export interface ProblemDifficultyFacet {
+  difficulty: number
+  total: number
+  solved: number
+}
+
+export interface ProblemTagFacet {
+  tag: string
+  count: number
+}
+
+export interface ProblemFacets {
+  total: number
+  solved: number
+  difficulties: ProblemDifficultyFacet[]
+  tags: ProblemTagFacet[]
+}
+
 export type ProblemStatus = 'draft' | 'published' | 'disabled'
-export type ProblemType = 'standard' | 'spj' | 'interactive' | 'output_only'
+export type ProblemType = 'standard' | 'hack' | 'spj' | 'interactive' | 'output_only'
+export type CheckerMode = 'token' | 'exact'
 
 export interface Sample {
   input: string
@@ -215,14 +240,18 @@ export interface ProblemDetail extends ProblemListItem {
   time_limit_ms: number
   memory_limit_kb: number
   type: ProblemType
+  checker_mode: CheckerMode
   testcase_scores: number[]
   submission_limit: number
   status: ProblemStatus
   is_favorite?: boolean
   // 管理员专属
-  spj_source?: string
-  interactor_source?: string
-  testcase_count?: number
+	spj_source?: string
+	interactor_source?: string
+	hack_generator_source?: string
+	hack_reference_source?: string
+	hack_target_source?: string
+	testcase_count?: number
 }
 
 export interface TestcaseItem {
@@ -234,6 +263,7 @@ export interface TestcaseItem {
   input_exists: boolean
   output_exists: boolean
   valid: boolean
+  is_pretest: boolean
 }
 
 export interface TestcasesResp {
@@ -277,8 +307,12 @@ export interface SubmissionListItem {
   language: string
   status: string
   time_ms: number
+  wall_time_ms: number
   memory_kb: number
   score: number
+  pretest_only?: boolean
+  system_tested?: boolean
+  is_hacked?: boolean
   created_at: string
 }
 
@@ -286,7 +320,10 @@ export interface CaseResult {
   case_id: number
   status: string
   time_ms: number
+  wall_time_ms: number
   memory_kb: number
+	timeout_source?: string
+	hack_status?: string
 }
 
 export interface SubmissionDetail extends SubmissionListItem {
@@ -294,6 +331,7 @@ export interface SubmissionDetail extends SubmissionListItem {
   compile_error: string | null
   case_results: CaseResult[] | null
   case_scores: number[] | null
+  timeout_source?: string
 }
 
 export interface Language {
@@ -306,7 +344,7 @@ export interface Language {
 
 // ---- 比赛 ----
 
-export type ContestMode = 'ACM' | 'OI' | 'IOI'
+export type ContestMode = 'ACM' | 'OI' | 'IOI' | 'CF'
 export type ContestFeedback = 'realtime' | 'blind'
 export type ContestScoreMode = 'all_or_nothing' | 'partial'
 export type ContestRegistrationMode = 'individual' | 'team' | 'both'
@@ -319,6 +357,7 @@ export interface Contest {
   score_mode: ContestScoreMode
   penalty_minutes: number
   freeze_duration_minutes: number
+  dynamic_delay_minutes: number
   rank_keys: string[]
   start_time: string
   end_time: string
@@ -331,7 +370,13 @@ export interface Contest {
   registration_mode: ContestRegistrationMode
   max_team_size: number
   allow_team_edit: boolean
+  /** 比赛中只评测预测试，赛后自动用完整数据系统测试 */
+  pretest_only: boolean
+  /** 开放 Hack（锁定已通过题目后可攻击他人提交） */
+  hacking_enabled: boolean
   created_at: string
+  /** 当前登录用户是否已报名本场比赛；GET /contests 列表里由后端批量计算（未登录恒为 false） */
+  is_registered?: boolean
 }
 
 export interface ContestProblem {
@@ -420,6 +465,7 @@ export interface ContestInput {
   score_mode: ContestScoreMode
   penalty_minutes: number
   freeze_duration_minutes: number
+  dynamic_delay_minutes: number
   rank_keys: string[]
   start_time: string
   end_time: string
@@ -432,6 +478,46 @@ export interface ContestInput {
   registration_mode: ContestRegistrationMode
   max_team_size: number
   allow_team_edit: boolean
+  pretest_only?: boolean
+  hacking_enabled?: boolean
+}
+
+// ---- Open Hacking ----
+
+export interface HackTarget {
+  submission_id: number
+  team_id: number
+  team_name: string
+  language: string
+  code: string
+  submitted_at: string
+  hacked: boolean
+}
+
+export interface HackTargetsResp {
+  items: HackTarget[]
+  locked: boolean
+  /** 题目未配置参考解时，Hack 必须同时提供期望输出 */
+  requires_expected_output: boolean
+}
+
+export interface ContestHackItem {
+  id: number
+  contest_id: number
+  problem_id: number
+  display_id: string
+  hacker_id: number
+  hacker_name: string
+  target_submission_id: number
+  target_team_id: number
+  target_team_name: string
+  input: string
+  expected_output: string
+  verdict: 'pending' | 'success' | 'fail' | 'error'
+  target_status: string
+  judge_note: string
+  created_at: string
+  judged_at: string | null
 }
 
 export interface ContestRegistration {
@@ -525,12 +611,38 @@ export interface OIStanding {
   problem_submissions: Record<string, number>
 }
 
+/** CF（Codeforces 风格）赛制：单题得分随提交时间衰减。 */
+export interface CFProblemState {
+  score: number
+  failed_attempts: number
+  solved_at?: string
+  /** 当前时刻的满分（随比赛线性衰减到 30%） */
+  max_score: number
+}
+
+export interface CFStanding {
+  rank: number
+  team_id: number
+  team_name: string
+  avatar: string
+  score: number
+  penalty: number
+  solved: number
+  last_ac?: string
+  problems: Record<string, CFProblemState>
+  hack_success: number
+  hack_fail: number
+  hack_points: number
+}
+
 export interface ContestStandings {
   contest: Contest
   problems: ContestProblem[]
   mode: ContestMode
-  standings: ACMStanding[] | OIStanding[]
+  standings: ACMStanding[] | OIStanding[] | CFStanding[]
   freeze_at?: string
+  dynamic_start_at?: string
+  dynamic_locked?: boolean
   frozen_submissions?: number
   live_submissions?: LiveSubmission[]
   latest_submission?: LiveSubmission
@@ -559,6 +671,7 @@ export interface RollEvent {
   team_id: number
   team_name: string
   team_avatar: string
+  created_at?: string
   standings: ACMStanding[]
 }
 

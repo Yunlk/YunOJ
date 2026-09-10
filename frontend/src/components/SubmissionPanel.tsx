@@ -16,6 +16,8 @@ interface SubmissionPanelProps {
   timeLimitMs: number
   memoryLimitKb: number
   onBack: () => void
+  /** onTotalChange 把提交总数回传给调用方（用于标签页计数）。 */
+  onTotalChange?: (total: number) => void
   load: (params: {
     page: number
     size: number
@@ -48,11 +50,11 @@ function statusCode(status: string): string {
   return labels[status] ?? status.toUpperCase()
 }
 
-function resultText(status: string) {
+function resultText(status: string, hackStatus?: string) {
   const info = getStatusInfo(status)
   return (
     <span className={`submission-result submission-result-${info.color}`}>
-      {statusCode(status)}
+      {statusCode(status)}{hackStatus ? `（目标 ${statusCode(hackStatus)}）` : ''}
     </span>
   )
 }
@@ -68,6 +70,7 @@ export default function SubmissionPanel({
   timeLimitMs,
   memoryLimitKb,
   onBack,
+  onTotalChange,
   load,
 }: SubmissionPanelProps) {
   const [items, setItems] = useState<SubmissionListItem[]>([])
@@ -99,6 +102,7 @@ export default function SubmissionPanel({
         const data = await loadPage()
         if (cancelled) return
         setItems(data.items)
+        onTotalChange?.(data.total)
         setHistoryError('')
         if (data.items.some((item) => isPendingStatus(item.status))) {
           timer = window.setTimeout(() => void refresh(), 2200)
@@ -116,7 +120,7 @@ export default function SubmissionPanel({
       cancelled = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [loadPage, refreshKey])
+  }, [loadPage, refreshKey, onTotalChange])
 
   useEffect(() => {
     if (selectedId === null) {
@@ -202,7 +206,7 @@ export default function SubmissionPanel({
                   <th>结果</th>
                   {showScore && <th>得分</th>}
                   <th>语言</th>
-                  <th>耗时</th>
+                  <th>CPU 耗时</th>
                   <th>内存</th>
                   <th>提交时间</th>
                 </tr>
@@ -228,7 +232,7 @@ export default function SubmissionPanel({
                     <td>{resultText(item.status)}</td>
                     {showScore && <td className="mono submission-score">{item.status === 'hidden' ? '-' : item.score}</td>}
                     <td className="mono">{item.language}</td>
-                    <td className="mono">{item.status === 'hidden' ? '-' : formatRunTime(item.time_ms)}</td>
+                    <td className="mono submission-runtime-cell">{item.status === 'hidden' ? '-' : `CPU ${formatRunTime(item.time_ms)}`}</td>
                     <td className="mono">{item.status === 'hidden' ? '-' : formatMemory(item.memory_kb)}</td>
                     <td className="mono submission-created-at">{formatTime(item.created_at)}</td>
                   </tr>
@@ -258,7 +262,7 @@ export default function SubmissionPanel({
                     <div><span>得分</span><strong>{hidden ? '-' : detail.score}</strong></div>
                   )}
                   <div>
-                    <span>耗时 / 限制</span>
+                    <span>CPU 耗时 / 限制</span>
                     <strong>{hidden ? '-' : formatRunTime(detail.time_ms)} / {formatTimeLimit(timeLimitMs)}</strong>
                   </div>
                   <div>
@@ -289,24 +293,24 @@ export default function SubmissionPanel({
                           <th>测试点</th>
                           <th>结果</th>
                           {showScore && <th>得分</th>}
-                          <th>耗时</th>
+                          <th>CPU 耗时</th>
                           <th>内存</th>
                         </tr>
                       </thead>
                       <tbody>
                         {caseResults === null ? (
-                          <tr><td colSpan={showScore ? 5 : 4} className="table-empty">测试点详情不可见</td></tr>
+                          <tr><td colSpan={showScore ? 4 : 3} className="table-empty">测试点详情不可见</td></tr>
                         ) : caseResults && caseResults.length > 0 ? caseResults.map((item, index) => (
                           <tr key={item.case_id} className={rowClass(item.status)}>
                             <td className="mono">#{item.case_id}</td>
-                            <td>{resultText(item.status)}</td>
+                            <td>{resultText(item.status, item.hack_status)}</td>
                             {showScore && <td className="mono">{detail.case_scores?.[index] ?? 0}</td>}
-                            <td className="mono">{item.status === 'not_run' ? '-' : formatRunTime(item.time_ms)}</td>
+                            <td className="mono submission-runtime-cell">{item.status === 'not_run' ? '-' : `CPU ${formatRunTime(item.time_ms)}`}</td>
                             <td className="mono">{item.status === 'not_run' ? '-' : formatMemory(item.memory_kb)}</td>
                           </tr>
                         )) : (
                           <tr>
-                            <td colSpan={showScore ? 5 : 4} className="table-empty">
+                            <td colSpan={showScore ? 4 : 3} className="table-empty">
                               {isPendingStatus(detail.status) ? '等待测试点结果...' : '没有测试点结果'}
                             </td>
                           </tr>

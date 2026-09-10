@@ -1,0 +1,384 @@
+/* 题库页：刷题主循环的第一屏（状态列 + 多维筛选 + 进度 + 随机/继续） */
+
+.problems-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.problems-main {
+  min-width: 0;
+}
+
+.problems-side {
+  position: sticky;
+  top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ---------- 工具栏 ---------- */
+
+.problems-toolbar {
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.problems-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.problems-search .search-input {
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+
+.problems-search kbd {
+  flex: 0 0 auto;
+}
+
+.toolbar-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolbar-field select {
+  min-height: var(--h-ctl-sm);
+  min-width: 118px;
+  font-size: var(--fs-12);
+}
+
+/* ---------- 筛选区 ---------- */
+
+.problem-filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+
+.filter-group {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.filter-label {
+  flex: 0 0 34px;
+  padding-top: 5px;
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.filter-chip:hover {
+  border-color: var(--c-border-strong);
+  background: var(--c-surface-hover);
+  color: var(--c-text);
+}
+
+/* 选中态沿用难度色板（--difficulty-color / --difficulty-bg 由 .difficulty-level-* 提供） */
+.filter-chip.active {
+  border-color: var(--difficulty-color, var(--c-primary));
+  background: var(--difficulty-bg, var(--c-primary-soft));
+  color: var(--difficulty-color, var(--c-primary));
+  font-weight: 650;
+}
+
+.filter-chip-count {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-chip.active .filter-chip-count {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.filter-chip-remove {
+  font-size: var(--fs-13);
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.filter-chip-add {
+  border-style: dashed;
+}
+
+/* 标签选择面板 */
+.tag-picker {
+  position: relative;
+}
+
+.tag-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dropdown);
+}
+
+.tag-picker-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: calc(var(--z-dropdown) + 1);
+  display: flex;
+  flex-direction: column;
+  max-height: 296px;
+  width: 232px;
+  overflow-y: auto;
+}
+
+.tag-picker-panel .menu-item {
+  justify-content: space-between;
+}
+
+.tag-picker-panel .menu-item.active {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+  font-weight: 650;
+}
+
+.tag-picker-count {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-picker-empty {
+  padding: var(--space-4);
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+  text-align: center;
+}
+
+/* ---------- 表格 ---------- */
+
+.problems-table .problem-link {
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.problems-table .problem-link:hover {
+  color: var(--c-primary);
+}
+
+.data-table .cell-tight {
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+}
+
+.problem-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-12);
+  font-weight: 700;
+}
+
+.problem-status-accepted {
+  background: var(--c-positive-soft);
+  color: var(--c-positive);
+}
+
+.problem-status-attempted {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.problem-status-todo {
+  background: var(--c-surface-3);
+  color: var(--c-text-3);
+}
+
+.problem-rate {
+  display: inline-block;
+  margin-left: var(--space-3);
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+}
+
+.empty-state-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--c-text-3);
+}
+
+/* ---------- 侧栏：进度与快捷入口 ---------- */
+
+.progress-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.progress-summary strong {
+  color: var(--c-positive);
+  font-size: var(--fs-22);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-summary span {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.progress-percent {
+  margin-left: auto;
+  color: var(--c-text-3) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.difficulty-progress {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.difficulty-progress-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.difficulty-progress-row:hover {
+  background: var(--c-surface-2);
+}
+
+.difficulty-progress-row.active {
+  border-color: var(--difficulty-color, var(--c-primary));
+  background: var(--difficulty-bg, var(--c-primary-soft));
+}
+
+.difficulty-progress-label {
+  color: var(--difficulty-color, var(--c-text-2));
+  font-weight: 650;
+}
+
+.difficulty-progress-bar {
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.difficulty-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--difficulty-color, var(--c-primary));
+}
+
+.difficulty-progress-count {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.side-actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.legend-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  list-style: none;
+}
+
+.legend-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.side-hint {
+  margin: var(--space-3) 0 0;
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+@media (max-width: 1080px) {
+  .problems-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .problems-side {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .problems-side > .side-card {
+    flex: 1 1 260px;
+  }
+}
+
+@media (max-width: 720px) {
+  .filter-group {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .filter-label {
+    padding-top: 0;
+  }
+
+  .problems-search {
+    width: 100%;
+  }
+}

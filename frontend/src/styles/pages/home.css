@@ -1,0 +1,189 @@
+/* 首页 = 训练工作台：先给动作（继续/随机），再给进度与赛程 */
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.home-main {
+  min-width: 0;
+}
+
+.home-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ---------- 继续刷题 ---------- */
+
+.home-continue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  margin-bottom: var(--space-6);
+  border-left: 3px solid var(--c-primary);
+}
+
+.home-continue-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.home-continue-label {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+.home-continue-text strong {
+  color: var(--c-text);
+  font-size: var(--fs-16);
+}
+
+.home-continue-hint {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.home-continue-actions {
+  flex: 0 0 auto;
+}
+
+/* ---------- 比赛 ---------- */
+
+.home-contests {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.home-contest {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+}
+
+.home-contest:hover {
+  border-color: var(--c-primary-border);
+  background: var(--c-surface-hover);
+}
+
+.home-contest strong {
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-contest-active {
+  border-color: var(--c-positive-border);
+  background: var(--c-positive-soft);
+}
+
+.home-contest-phase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-3);
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  font-weight: 650;
+}
+
+.home-contest-phase.active,
+.home-contest-active .home-contest-phase {
+  background: var(--c-positive);
+  color: #ffffff;
+}
+
+.home-contest-phase.upcoming {
+  background: var(--c-primary-soft);
+  color: var(--c-primary);
+}
+
+.home-contest-meta {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+/* ---------- 侧栏 ---------- */
+
+.home-problem-list {
+  display: grid;
+  gap: 2px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.home-problem-list a {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--c-text);
+  font-size: var(--fs-13);
+}
+
+.home-problem-list a:hover {
+  background: var(--c-surface-2);
+  color: var(--c-primary);
+}
+
+.home-problem-id {
+  color: var(--c-text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.home-problem-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-platform .kv-list {
+  color: var(--c-text-2);
+}
+
+@media (max-width: 1080px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-side {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .home-side > .side-card {
+    flex: 1 1 260px;
+  }
+}
+
+@media (max-width: 720px) {
+  .home-continue {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .home-contest {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}

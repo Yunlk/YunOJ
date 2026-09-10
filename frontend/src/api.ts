@@ -3,11 +3,13 @@ import type {
   Contest,
   ContestCommunications,
   ContestDetail,
+  ContestHackItem,
   ContestRegistration,
   ContestInput,
   ContestOverview,
   ContestProblemView,
   ContestParticipant,
+  HackTargetsResp,
   ProblemDiscussion,
   ProblemEditorial,
   Notification,
@@ -22,6 +24,7 @@ import type {
   ProfileData,
   RankingEntry,
   ProblemDetail,
+  ProblemFacets,
   ProblemListItem,
   Sample,
   SubmissionDetail,
@@ -98,6 +101,15 @@ export async function getMe() {
 
 export async function changePassword(currentPassword: string, newPassword: string) {
   await api.post('/profile/password', { current_password: currentPassword, new_password: newPassword })
+}
+
+export async function updateProfile(username: string, email: string, currentPassword: string) {
+  const res = await api.patch<{ user: User }>('/profile', {
+    username,
+    email,
+    current_password: currentPassword,
+  })
+  return res.data
 }
 
 // ---- 首页 / 教学空间 ----
@@ -203,6 +215,12 @@ export async function markNotificationRead(id: number) {
   await api.post(`/notifications/${id}/read`)
 }
 
+/** 一键把当前用户可见的全部通知标为已读，返回本次新标记条数。 */
+export async function markAllNotificationsRead() {
+  const res = await api.post<{ marked: number }>('/notifications/read-all')
+  return res.data.marked
+}
+
 export async function createNotification(data: { title: string; content: string; kind?: string }) {
   const res = await api.post<Notification>('/notifications', data)
   return res.data
@@ -214,23 +232,46 @@ export async function deleteNotification(id: number) {
 
 // ---- 全站排名 ----
 
-export async function getRankings(page: number, size: number) {
-  const res = await api.get<Page<RankingEntry>>('/rankings', { params: { page, size } })
+export async function getRankings(page: number, size: number, keyword?: string) {
+  const res = await api.get<Page<RankingEntry>>('/rankings', { params: { page, size, keyword } })
   return res.data
 }
 
 // ---- Problems ----
 
+export type ProblemSort =
+  | 'id'
+  | 'difficulty'
+  | 'difficulty_desc'
+  | 'acceptance'
+  | 'newest'
+  | 'submissions'
+  /** recent：按「我最近提交过」排序（需要登录；未登录时回退题号） */
+  | 'recent'
+export type MyProblemStatus = 'todo' | 'attempted' | 'accepted'
+
 export async function getProblems(params: {
   page: number
   size: number
   keyword?: string
-  difficulty?: number
-  tag?: string
+  difficulty?: number[]
+  tag?: string[]
+  my_status?: MyProblemStatus
+  sort?: ProblemSort
   type?: string
   status?: string
 }) {
-  const res = await api.get<Page<ProblemListItem>>('/problems', { params })
+  const res = await api.get<Page<ProblemListItem>>('/problems', {
+    params,
+    // 数组参数序列化为 difficulty=1&difficulty=2，与后端 queryList 约定一致
+    paramsSerializer: { indexes: null },
+  })
+  return res.data
+}
+
+/** 题库筛选统计：难度分布、我的进度与标签频次。 */
+export async function getProblemFacets() {
+  const res = await api.get<ProblemFacets>('/problems/facets')
   return res.data
 }
 
@@ -242,6 +283,18 @@ export async function getProblem(id: number | string) {
 export async function getProblemLearning(id: number | string) {
   const res = await api.get<{ favorite: boolean; discussions: ProblemDiscussion[]; editorial?: ProblemEditorial }>(`/problems/${id}/learning`)
   return res.data
+}
+
+/** 相邻题目（0 表示没有），供单题页「上一题 / 下一题」使用。 */
+export async function getProblemNeighbors(id: number | string) {
+  const res = await api.get<{ prev: number; next: number }>(`/problems/${id}/neighbors`)
+  return res.data
+}
+
+/** 当前进行中的比赛（没有则 null）。导航栏倒计时用，避免拉整份首页数据。 */
+export async function getActiveContest() {
+  const res = await api.get<{ contest: Contest | null }>('/contests/active')
+  return res.data.contest
 }
 
 export async function toggleProblemFavorite(id: number | string) {
@@ -266,9 +319,13 @@ export interface ProblemInput {
   difficulty: number
   tags: string[]
   type: string
-  spj_source: string
-  interactor_source: string
-  testcase_scores: number[]
+  checker_mode: 'token' | 'exact'
+	spj_source: string
+	interactor_source: string
+	hack_generator_source: string
+	hack_reference_source: string
+	hack_target_source: string
+	testcase_scores: number[]
   submission_limit: number
   status: string
 }
@@ -278,6 +335,23 @@ export interface ProblemInput {
 export async function copyProblem(id: number | string) {
   const res = await api.post<ProblemDetail>(`/problems/${id}/copy`)
   return res.data
+}
+
+export async function importProblemPackage(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<{ problem: ProblemDetail; testcase_count: number }>('/problems/import', form)
+  return res.data
+}
+
+export async function exportProblemPackage(id: number | string) {
+  const res = await api.get<Blob>(`/problems/${id}/package`, { responseType: 'blob' })
+  const url = URL.createObjectURL(res.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `problem-${id}-package.zip`
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function updateProblemStatus(id: number | string, status: string) {
@@ -345,10 +419,14 @@ export async function addTestcase(
   return res.data
 }
 
-export async function updateTestcase(id: number | string, ordinal: number, score: number) {
-  const res = await api.put<{ ordinal: number; score: number }>(
+export async function updateTestcase(
+  id: number | string,
+  ordinal: number,
+  patch: { score?: number; is_pretest?: boolean },
+) {
+  const res = await api.put<{ ordinal: number; score: number; is_pretest: boolean }>(
     `/problems/${id}/testcases/${ordinal}`,
-    { score },
+    patch,
   )
   return res.data
 }
@@ -408,6 +486,12 @@ export async function getSubmissions(params: {
   problem_id?: string
   user_id?: string
   status?: string
+  /** 语言键过滤（如 cpp） */
+  language?: string
+  /** 提交时间下界（RFC3339），用于「今天 / 近 7 天」等服务端筛选 */
+  created_after?: string
+  /** 提交时间上界（RFC3339，开区间） */
+  created_before?: string
 }) {
   const res = await api.get<Page<SubmissionListItem>>('/submissions', { params })
   return res.data
@@ -444,7 +528,9 @@ export interface RunTestResult {
   stdout: string
   stderr?: string
   time_ms: number
+  wall_time_ms: number
   memory_kb: number
+  timeout_source?: string
   compile_error?: string
 }
 
@@ -452,7 +538,9 @@ export interface SampleCaseResult {
   status: string
   stdout: string
   time_ms: number
+  wall_time_ms: number
   memory_kb: number
+  timeout_source?: string
   passed: boolean | null
 }
 
@@ -468,12 +556,14 @@ export async function runTest(
   code: string,
   input: string,
   optimize = true,
+  sampleIndex?: number,
 ) {
   const res = await api.post<RunTestResult>(`/problems/${problemId}/test`, {
     language,
     code,
     input,
     optimize,
+    ...(sampleIndex !== undefined ? { sample_index: sampleIndex } : {}),
   })
   return res.data
 }
@@ -485,10 +575,17 @@ export async function runContestTest(
   code: string,
   input: string,
   optimize = true,
+  sampleIndex?: number,
 ) {
   const res = await api.post<RunTestResult>(
     `/contests/${contestId}/problems/${problemId}/test`,
-    { language, code, input, optimize },
+    {
+      language,
+      code,
+      input,
+      optimize,
+      ...(sampleIndex !== undefined ? { sample_index: sampleIndex } : {}),
+    },
   )
   return res.data
 }
@@ -552,6 +649,13 @@ export async function uploadContestCover(id: number | string, file: File) {
   const form = new FormData()
   form.append('file', file)
   const res = await api.post<{ cover_image: string }>(`/contests/${id}/cover`, form)
+  return res.data
+}
+
+export async function uploadMarkdownImage(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<{ url: string }>('/markdown-images', form)
   return res.data
 }
 
@@ -639,8 +743,10 @@ export async function submitToContest(
   return res.data
 }
 
-export async function getContestStandings(id: number | string) {
-  const res = await api.get<ContestStandings>(`/contests/${id}/standings`)
+export async function getContestStandings(id: number | string, dynamic = false) {
+  const res = await api.get<ContestStandings>(`/contests/${id}/standings`, {
+    params: dynamic ? { view: 'dynamic' } : undefined,
+  })
   return res.data
 }
 
@@ -713,6 +819,38 @@ export async function reorderContestProblems(id: number | string, problemIds: nu
     problem_ids: problemIds,
   })
   return res.data
+}
+
+// ---- Open Hacking（锁题 / 查看他人提交 / 发起 Hack） ----
+
+export async function lockContestProblem(id: number | string, problemId: number) {
+  const res = await api.post<{ ok: boolean; locked: boolean }>(
+    `/contests/${id}/problems/${problemId}/lock`,
+  )
+  return res.data
+}
+
+export async function getContestLocks(id: number | string) {
+  const res = await api.get<{ problem_ids: number[] }>(`/contests/${id}/locks`)
+  return res.data.problem_ids
+}
+
+export async function getHackTargets(id: number | string, problemId: number) {
+  const res = await api.get<HackTargetsResp>(`/contests/${id}/problems/${problemId}/hack-targets`)
+  return res.data
+}
+
+export async function createHack(
+  id: number | string,
+  data: { target_submission_id: number; input: string; expected_output: string },
+) {
+  const res = await api.post<{ id: number }>(`/contests/${id}/hacks`, data)
+  return res.data
+}
+
+export async function getContestHacks(id: number | string) {
+  const res = await api.get<{ items: ContestHackItem[] }>(`/contests/${id}/hacks`)
+  return res.data.items
 }
 
 export async function getServerTime(): Promise<string> {

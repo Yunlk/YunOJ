@@ -182,19 +182,16 @@ try {
     await page.getByRole('button', { name: /^全部/ }).click()
     await page.waitForTimeout(400)
 
-    // 「只看我报名的」：过滤口径是「当前登录账号已报名」。
-    // 本段以管理员身份运行，而夹具是 private、报名者是 demo01，
-    // 因此这里按接口返回的 is_registered 数量做交叉验证（而不是假设某一行为 1）。
-    const adminList = await (await fetch(`${API}/contests?size=200`, { headers: { Authorization: `Bearer ${adminToken}` } })).json()
-    const expectedMine = (adminList.items ?? []).filter((c) => c.is_registered).length
+    // 「只看我报名的」：管理员默认没报名任何比赛，勾选后应显示空状态而不报错
     await page.getByLabel('只看我报名的').check()
     await page.waitForFunction(() => new URL(location.href).searchParams.get('mine') === '1')
-    await page.waitForTimeout(600)
-    const mineRows = await page.locator('.contest-table tbody tr').count()
+    await page.waitForTimeout(700)
+    const mineRowsAdmin = await page.locator('.contest-table tbody tr').count()
+    const emptyState = await page.locator('.empty-state').count()
     check(
-      '「只看我报名的」只保留当前账号已报名的比赛',
-      page.url().includes('mine=1') && mineRows === expectedMine,
-      `row=${mineRows} 期望=${expectedMine}（接口 is_registered 计数）`,
+      '「只看我报名的」写入 URL；管理员未报名任何比赛时显示空状态',
+      page.url().includes('mine=1') && emptyState === 1 && mineRowsAdmin === 0,
+      `rows=${mineRowsAdmin} empty=${emptyState}`,
     )
     await page.getByLabel('只看我报名的').uncheck()
     await page.waitForTimeout(400)
@@ -217,6 +214,27 @@ try {
   {
     const { context, page, httpErrors } = await openPage('demo01')
     console.log('\n== 比赛详情：进行中 + 已报名 ==')
+    // 「只看我报名的」在真实选手身上验证：未报名的 private 夹具行应被过滤掉
+    await page.goto(`${BASE}/contests`, { waitUntil: 'networkidle' })
+    await page.waitForSelector('.contest-group')
+    await page.waitForTimeout(800)
+    await page.getByLabel('只看我报名的').check()
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('mine') === '1')
+    await page.waitForTimeout(700)
+    const unregisteredFixtureRow = await page.locator('.contest-table tbody tr', {
+      has: page.locator('.cell-id', { hasText: new RegExp(`^${upcoming.id}$`) }),
+    }).count()
+    const remainingBadges = await page.locator('.contest-reg-badge').allInnerTexts()
+    check(
+      '「只看我报名的」过滤掉未报名的比赛',
+      page.url().includes('mine=1') && unregisteredFixtureRow === 0 && remainingBadges.every((t) => t.includes('已报名')),
+      `fixtureRow=${unregisteredFixtureRow} badges=${remainingBadges.join(' / ')}`,
+    )
+    const hiddenPrivate = await page.locator('.contest-table tbody tr', {
+      has: page.locator('.cell-id', { hasText: new RegExp(`^${running.id}$`) }),
+    }).count()
+    check('private 夹具不出现在非管理员的公开列表（不污染他人）', hiddenPrivate === 0, `row=${hiddenPrivate}`)
+
     await page.goto(`${BASE}/contest/${running.id}`, { waitUntil: 'networkidle' })
     await page.waitForSelector('.contest-status-bar')
 

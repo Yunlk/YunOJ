@@ -105,8 +105,16 @@ main.problem-workspace-shell {
 /* ---------- 左栏 ---------- */
 
 .wb-left-head {
+  position: relative;
   padding: var(--space-4) var(--space-5) var(--space-3);
   border-bottom: 1px solid var(--c-border);
+}
+
+/* 左栏头部右上角的动作（如「我的提交 / 返回代码」开关） */
+.wb-head-actions {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-4);
 }
 
 .wb-title {

@@ -52,6 +52,13 @@ interface ProblemWorkbenchProps {
   tab?: string
   onTabChange?: (key: string) => void
   panes?: Record<string, ReactNode>
+  /**
+   * rightPane 提供时替换右栏内容（例如提交后展示评测结果/测试点面板）。
+   * 未提供时右栏是编辑器——这样「提交后看结果」仍在右侧，左栏保持题面不动。
+   */
+  rightPane?: ReactNode
+  /** 题目标题下方元信息行里的额外动作（如「我的提交」开关） */
+  metaActions?: ReactNode
   /** 题目标题下方的元信息行 */
   meta?: ReactNode
   canSubmit?: boolean
@@ -92,6 +99,8 @@ export default function ProblemWorkbench({
   tab,
   onTabChange,
   panes,
+  rightPane,
+  metaActions,
   meta,
   canSubmit = true,
   submitLabel = '提交',
@@ -217,6 +226,20 @@ export default function ProblemWorkbench({
   const selectedLanguage = languages.find((item) => item.key === language)
   const leftStyle: CSSProperties | undefined = narrow ? undefined : { flexBasis: `${split * 100}%` }
 
+  // 提交反馈：编辑器视图放在状态栏下方；右栏换成评测面板时同样要显示，
+  // 否则「已提交 #123」这类关键信息会随编辑器一起被卸载。
+  const submitNotices = (
+    <>
+      {submitDisabledReason && <div className="wb-notice warning-message">{submitDisabledReason}</div>}
+      {submitError && <div className="wb-notice error-message">{submitError}</div>}
+      {submittedId !== null && (
+        <div className="wb-notice success-message">
+          已提交 <Link to={`/submission/${submittedId}`}>#{submittedId}</Link>，评测结果见右侧面板。
+        </div>
+      )}
+    </>
+  )
+
   const editorPane = (
     <div className="wb-editor-pane">
       <div className="wb-editor-toolbar">
@@ -317,13 +340,7 @@ export default function ProblemWorkbench({
         <span className="wb-status-right">Ctrl+Enter 提交</span>
       </div>
 
-      {submitDisabledReason && <div className="wb-notice warning-message">{submitDisabledReason}</div>}
-      {submitError && <div className="wb-notice error-message">{submitError}</div>}
-      {submittedId !== null && (
-        <div className="wb-notice success-message">
-          已提交 <Link to={`/submission/${submittedId}`}>#{submittedId}</Link>，结果见左侧「我的提交」。
-        </div>
-      )}
+      {submitNotices}
 
       {!hackMode && (
         <div className={drawerOpen ? 'wb-drawer open' : 'wb-drawer'}>
@@ -416,7 +433,7 @@ export default function ProblemWorkbench({
             aria-selected={mobilePane === 'editor'}
             onClick={() => setMobilePane('editor')}
           >
-            {legacy && showSubmissions ? '评测' : '代码'}
+            {(legacy && showSubmissions) || (!legacy && rightPane) ? '评测' : '代码'}
           </button>
         </div>
       )}
@@ -439,6 +456,7 @@ export default function ProblemWorkbench({
             <div className="wb-left-head">
               <h1 className="wb-title">{title}</h1>
               {meta && <div className="wb-meta-row">{meta}</div>}
+              {metaActions && <div className="wb-head-actions">{metaActions}</div>}
             </div>
             <div className="tabs wb-tabs" role="tablist" aria-label="题目视图">
               {(tabs ?? []).map((item) => (
@@ -479,7 +497,16 @@ export default function ProblemWorkbench({
         )}
 
         <section className="wb-right" aria-label="代码与运行">
-          {legacy && showSubmissions ? submissionPanel : editorPane}
+          {legacy ? (
+            showSubmissions ? submissionPanel : editorPane
+          ) : rightPane ? (
+            <>
+              {submitNotices}
+              {rightPane}
+            </>
+          ) : (
+            editorPane
+          )}
           {legacy && editorFooter && !showSubmissions && <div className="wb-editor-footer">{editorFooter}</div>}
         </section>
       </div>

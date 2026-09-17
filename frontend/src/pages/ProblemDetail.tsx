@@ -22,11 +22,12 @@ import { preferredDraftLanguage, rememberDraftLanguage, useCodeDraft } from '../
 import type { Language, ProblemDetail as ProblemDetailType, ProblemEditorial, Sample } from '../types'
 import { formatMemory, formatTime, formatTimeLimit } from '../utils/format'
 
-type PaneTab = 'statement' | 'submissions' | 'editorial' | 'discussions'
+type PaneTab = 'statement' | 'editorial' | 'discussions'
 
 /**
  * 单题页：默认就是「题面 + 编辑器」工作台，不再需要先点「进入 IDE 模式」。
- * 左侧按标签页切换 题目 / 我的提交 / 题解 / 讨论，右侧常驻编辑器与运行结果。
+ * 左栏切换 题目 / 题解 / 讨论；提交后**右栏**切换为评测结果（测试点、结论），
+ * 与旧版布局一致：题面位置不动，结果出现在代码那一侧。
  */
 export default function ProblemDetail() {
   const { id } = useParams()
@@ -54,9 +55,10 @@ export default function ProblemDetail() {
   const [submitError, setSubmitError] = useState('')
   const [submittedId, setSubmittedId] = useState<number | null>(null)
   const [submissionRefreshKey, setSubmissionRefreshKey] = useState(0)
-  const [submissionCount, setSubmissionCount] = useState(0)
 
   const [tab, setTab] = useState<PaneTab>('statement')
+  // 右栏视图：编辑器 / 评测结果（提交后自动切到评测结果，点「返回代码」切回）
+  const [rightView, setRightView] = useState<'editor' | 'submissions'>('editor')
   const [pendingSample, setPendingSample] = useState<{ sample: Sample; index: number } | null>(null)
   const [neighbors, setNeighbors] = useState<{ prev: number; next: number }>({ prev: 0, next: 0 })
   const [discussionDraft, setDiscussionDraft] = useState('')
@@ -127,9 +129,10 @@ export default function ProblemDetail() {
     }
   }, [])
 
-  // 切换题目时回到题面标签，并清空上一题的提交结果提示
+  // 切换题目时回到题面标签与编辑器，并清空上一题的提交结果提示
   useEffect(() => {
     setTab('statement')
+    setRightView('editor')
     setSubmittedId(null)
     setSubmitError('')
   }, [id])
@@ -161,7 +164,8 @@ export default function ProblemDetail() {
       const res = await createSubmission(Number(id), language, code, optimize, assignmentId)
       setSubmittedId(res.id)
       setSubmissionRefreshKey((key) => key + 1)
-      setTab('submissions')
+      // 结果出现在右栏（测试点/结论），左栏题面保持不动——与旧版布局一致
+      setRightView('submissions')
     } catch (err) {
       setSubmitError(extractError(err))
     } finally {
@@ -263,6 +267,7 @@ export default function ProblemDetail() {
     </div>
   )
 
+  // 右栏评测面板：提交后替换编辑器显示，点「返回代码」切回编辑器
   const submissionsPane = (
     <SubmissionPanel
       title={`P${problem.id} · 我的提交`}
@@ -272,8 +277,7 @@ export default function ProblemDetail() {
       focusSubmissionId={submittedId}
       timeLimitMs={problem.time_limit_ms}
       memoryLimitKb={problem.memory_limit_kb}
-      onBack={() => setTab('statement')}
-      onTotalChange={setSubmissionCount}
+      onBack={() => setRightView('editor')}
       load={loadProblemSubmissions}
     />
   )
@@ -383,16 +387,28 @@ export default function ProblemDetail() {
         onTabChange={(key) => setTab(key as PaneTab)}
         tabs={[
           { key: 'statement', label: '题目' },
-          { key: 'submissions', label: '我的提交', count: submissionCount },
           { key: 'editorial', label: '题解' },
           { key: 'discussions', label: '讨论', count: discussions.length },
         ]}
         panes={{
           statement: statementPane,
-          submissions: submissionsPane,
           editorial: editorialPane,
           discussions: discussionsPane,
         }}
+        // 提交后右栏切到评测结果（测试点/结论），左栏题面不动
+        rightPane={rightView === 'submissions' ? submissionsPane : undefined}
+        // 有历史提交时，右上角提供「我的提交」入口，便于随时回看
+        metaActions={
+          user ? (
+            <button
+              type="button"
+              className="button button-ghost button-sm"
+              onClick={() => setRightView((v) => (v === 'submissions' ? 'editor' : 'submissions'))}
+            >
+              {rightView === 'submissions' ? '返回代码' : '我的提交'}
+            </button>
+          ) : undefined
+        }
         initialSample={pendingSample}
         onInitialSampleConsumed={() => setPendingSample(null)}
         meta={

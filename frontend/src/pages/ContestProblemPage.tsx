@@ -257,7 +257,6 @@ export default function ContestProblemPage() {
         onOptimizeChange={setOptimize}
         submitting={busy}
         submitError={submitError}
-        submittedId={submittedId}
         onSubmit={() => void submit()}
         onRun={runContestCode}
         showSubmissions={panel === 'submissions'}

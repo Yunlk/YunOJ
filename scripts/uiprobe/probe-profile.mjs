@@ -1,4 +1,4 @@
-// C 组交互验收：个人中心进度卡数字与 API 一致、收藏筛选/取消收藏、通知未读样式与批量已读。
+// C 组交互验收：个人中心统计块与 API 一致、收藏筛选/取消收藏、通知未读样式与批量已读。
 // 用法：node scripts/uiprobe/probe-profile.mjs [--user demo05 --pass demo123] [--exercise-batch-read]
 // 默认只读（不点击「全部标为已读」、不造通知数据）；唯一的写操作是收藏「取消收藏」后立即还原。
 import { chromium } from 'playwright-core'
@@ -35,61 +35,28 @@ const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url().replace(BASE, '')}`) })
 
-const num = (text) => Number(String(text).replace(/[^\d]/g, ''))
-
 /* ---------------- 个人中心 ---------------- */
-console.log('\n== 个人中心：进度卡与 API 一致 ==')
-const facets = await getJSON('/problems/facets')
+console.log('\n== 个人中心：统计块与账号卡（进度卡 / 热力图已下线） ==')
 const profile = await getJSON('/profile')
 
 await page.goto(`${BASE}/profile`, { waitUntil: 'networkidle' })
-await page.waitForSelector('.pf-difficulty-list')
+await page.waitForSelector('.pf-main .stat-grid')
 
 check('使用两栏骨架 .layout-side', (await page.locator('.layout-side .pf-main').count()) === 1)
-check('侧栏含账号卡与进度卡', (await page.locator('.pf-side .side-card').count()) === 2)
+check('不再有刷题进度卡', (await page.locator('.pf-progress-figure, .pf-difficulty-list, .pf-difficulty-row').count()) === 0)
+check('不再有刷题活动热力图', (await page.locator('.pf-heatmap-cell, .pf-heatmap-grid, .pf-heatmap-wrap').count()) === 0)
+check('侧栏只剩账号卡', (await page.locator('.pf-side .side-card').count()) === 1)
 
-const figure = await page.locator('.pf-progress-figure').innerText()
+const tiles = page.locator('.pf-main .stat-tile')
+check('统计块至少 6 项指标', (await tiles.count()) >= 6, `${await tiles.count()} 项`)
+const tileText = (await page.locator('.pf-main .stat-grid').innerText()).replace(/\s+/g, ' ')
 check(
-  `进度卡已通过题数与 facets.solved 一致（API ${facets.solved}）`,
-  num(figure.split('/')[0]) === facets.solved,
-  figure.replace(/\s+/g, ' '),
+  `统计块数字与 /profile stats 一致（提交 ${profile.stats.total_submissions} / 通过 ${profile.stats.accepted_submissions}）`,
+  tileText.includes(String(profile.stats.total_submissions)) && tileText.includes(String(profile.stats.accepted_submissions)),
+  tileText.slice(0, 90),
 )
-check(
-  `进度卡总题数与 facets.total 一致（API ${facets.total}）`,
-  num(figure.split('/')[1]) === facets.total,
-  figure.replace(/\s+/g, ' '),
-)
-
-const barWidth = await page.locator('.pf-progress-figure + .progress .progress-bar').getAttribute('style')
-const expectedPct = Math.round((facets.solved / facets.total) * 100)
-check(`总进度条宽度 % 与 solved/total 一致（${expectedPct}%）`, (barWidth ?? '').includes(`${expectedPct}%`), String(barWidth))
-
-const rows = page.locator('.pf-difficulty-row')
-const apiRows = facets.difficulties.filter((d) => d.total > 0)
-check(`难度行数与非空难度数一致（API ${apiRows.length}）`, (await rows.count()) === apiRows.length, `页面 ${await rows.count()}`)
-
-let rowsOk = true
-const rowDetail = []
-for (let i = 0; i < apiRows.length; i += 1) {
-  const text = await rows.nth(i).innerText()
-  const expected = `${apiRows[i].solved}/${apiRows[i].total}`
-  const ok = text.replace(/\s+/g, '').includes(expected)
-  if (!ok) rowsOk = false
-  rowDetail.push(`${text.replace(/\s+/g, '')}${ok ? '' : `≠${expected}`}`)
-}
-check('每档难度的 solved/total 与 API 一致', rowsOk, rowDetail.join(' '))
-
-const labelColor = await page.locator('.pf-difficulty-row .pf-difficulty-label').first().evaluate(
-  (el) => getComputedStyle(el).color,
-)
-check('难度标签使用了难度色变量', labelColor !== 'rgb(85, 103, 127)', labelColor)
-
-check('保留刷题活动热力图', (await page.locator('.pf-heatmap-cell').count()) >= 350)
 check('最近提交表为 44px 行高', await page.locator('.data-table tbody td').first().evaluate((el) => Math.round(el.getBoundingClientRect().height)) === 44)
 check('账号卡展示邮箱', (await page.locator('.pf-account-head').innerText()).length > 0)
-
-const heatCells = await page.locator('.pf-heatmap-cell').count()
-check('热力图为整年（371 格）', heatCells === 371, String(heatCells))
 
 /* ---------------- 收藏 ---------------- */
 console.log('\n== 收藏：筛选 / 状态列 / 取消收藏 ==')

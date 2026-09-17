@@ -126,95 +126,6 @@
   font-size: var(--fs-12);
 }
 
-/* ---------- 刷题活动热力图（保留原有数据逻辑，仅收敛密度与配色） ---------- */
-
-.pf-heatmap-total {
-  color: var(--c-text-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-12);
-  white-space: nowrap;
-}
-
-.pf-heatmap-wrap {
-  display: flex;
-  gap: var(--space-2);
-  overflow-x: auto;
-  padding-bottom: var(--space-1);
-}
-
-.pf-week-labels {
-  display: grid;
-  flex: 0 0 10px;
-  grid-template-rows: repeat(7, 11px);
-  gap: 3px;
-  color: var(--c-text-3);
-  font-size: 10px;
-  line-height: 11px;
-}
-
-.pf-week-labels > span:nth-child(2) { grid-row: 3; }
-.pf-week-labels > span:nth-child(3) { grid-row: 5; }
-
-.pf-heatmap-grid {
-  display: grid;
-  min-width: max-content;
-  grid-auto-flow: column;
-  grid-auto-columns: 11px;
-  grid-template-rows: repeat(7, 11px);
-  gap: 3px;
-}
-
-.pf-heatmap-cell,
-.pf-heatmap-legend i {
-  display: block;
-  width: 11px;
-  height: 11px;
-  border: 1px solid var(--c-border);
-  border-radius: 2px;
-}
-
-.pf-heatmap-cell {
-  cursor: help;
-}
-
-/* 活动密度分级：0 ~ 4 档，颜色只走 token */
-.pf-heatmap-cell.level-0,
-.pf-heatmap-legend i.level-0 {
-  background: var(--c-surface-3);
-}
-
-.pf-heatmap-cell.level-1,
-.pf-heatmap-legend i.level-1 {
-  border-color: var(--c-primary-border);
-  background: var(--c-primary-soft);
-}
-
-.pf-heatmap-cell.level-2,
-.pf-heatmap-legend i.level-2 {
-  border-color: var(--c-primary-border);
-  background: var(--c-primary-border);
-}
-
-.pf-heatmap-cell.level-3,
-.pf-heatmap-legend i.level-3 {
-  border-color: var(--c-primary);
-  background: var(--c-primary);
-}
-
-.pf-heatmap-cell.level-4,
-.pf-heatmap-legend i.level-4 {
-  border-color: var(--c-primary-active);
-  background: var(--c-primary-active);
-}
-
-.pf-heatmap-legend {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-1);
-  margin-top: var(--space-3);
-}
-
 /* ---------- 参加过的比赛 ---------- */
 
 .pf-contest-list {
@@ -318,76 +229,6 @@
 
 .pf-account-name .badge {
   align-self: flex-start;
-}
-
-/* ---------- 侧栏：刷题进度卡 ---------- */
-
-.pf-progress-figure {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-2);
-}
-
-.pf-progress-figure strong {
-  color: var(--c-positive);
-  font-size: var(--fs-26);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-}
-
-.pf-progress-note {
-  margin: var(--space-2) 0 var(--space-4);
-  color: var(--c-text-3);
-  font-size: var(--fs-11);
-}
-
-.pf-difficulty-list {
-  display: grid;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-4);
-  padding: 0;
-  list-style: none;
-}
-
-.pf-difficulty-row {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 46px;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--fs-12);
-}
-
-/* 难度色由 .difficulty-level-N 提供 */
-.pf-difficulty-label {
-  color: var(--difficulty-color, var(--c-text-2));
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.pf-difficulty-bar {
-  display: block;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--c-surface-3);
-  overflow: hidden;
-}
-
-.pf-difficulty-bar > span {
-  display: block;
-  height: 100%;
-  border-radius: var(--radius-pill);
-  background: var(--difficulty-color, var(--c-primary));
-  transition: width 0.3s ease;
-}
-
-.pf-difficulty-count {
-  color: var(--c-text-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
 /* ---------- 表格布局（两页共用） ----------
@@ -557,12 +398,11 @@
 
 /* ---------- 窄屏 ---------- */
 
-/* ≤1080px 时 .layout-side 变单列；把侧栏整体提到主区之前，
-   这样「刷题进度」是首屏就能看到的第一块信息（进度卡在 .pf-side 内本就排第一）。 */
+/* ≤1080px 时 .layout-side 变单列：账号卡跟在主区内容之后。
+   （原先把侧栏提到最前，是为了让「刷题进度」卡首屏可见；该卡已下线。） */
 @media (max-width: 1080px) {
   .pf-side {
     display: grid;
-    order: -1;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: var(--space-4);
   }

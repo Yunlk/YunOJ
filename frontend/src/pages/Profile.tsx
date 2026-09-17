@@ -1,45 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { extractError, getProblemFacets, getProfile } from '../api'
+import { extractError, getProfile } from '../api'
 import PageHeader from '../components/PageHeader'
 import StatusBadge from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
-import type { ProblemFacets, ProfileActivityDay, ProfileData, SubmissionListItem } from '../types'
-import { getDifficulty } from '../utils/difficulty'
+import type { ProfileData, SubmissionListItem } from '../types'
 import { formatRunTime, formatTime } from '../utils/format'
 import { ratingClass } from '../utils/rating'
-
-const dateKey = (date: Date): string => date.toISOString().slice(0, 10)
-
-/** 热力图密度分级：与题库页一致的 5 档。 */
-const heatLevel = (count: number): string => {
-  if (count <= 0) return 'level-0'
-  if (count === 1) return 'level-1'
-  if (count <= 3) return 'level-2'
-  if (count <= 6) return 'level-3'
-  return 'level-4'
-}
-
-/** 最近一年（按周一开头对齐）的提交活动格子。 */
-function buildHeatmap(activity: ProfileActivityDay[]): { date: string; count: number }[] {
-  const counts = new Map(activity.map((item) => [item.date, item.count]))
-  const now = new Date()
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  const start = new Date(end)
-  start.setUTCDate(start.getUTCDate() - 364)
-  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7))
-  const cells: { date: string; count: number }[] = []
-  for (let i = 0; i < 371; i += 1) {
-    const date = new Date(start)
-    date.setUTCDate(start.getUTCDate() + i)
-    const key = dateKey(date)
-    cells.push({ date: key, count: counts.get(key) ?? 0 })
-  }
-  return cells
-}
-
-const percent = (part: number, whole: number): number =>
-  whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0
 
 function Avatar({ profile, failed, onError }: {
   profile: ProfileData
@@ -81,64 +48,11 @@ function RecentSubmissionRow({ item }: { item: SubmissionListItem }) {
   )
 }
 
-/** 刷题进度：已解决 / 总数 + 按难度分布。数据来自 /api/problems/facets。 */
-function ProgressCard({ facets, attempted }: { facets: ProblemFacets; attempted: number }) {
-  const solved = facets.solved
-  const total = facets.total
-  const difficulties = facets.difficulties.filter((d) => d.total > 0)
-
-  if (total === 0) {
-    return (
-      <section className="side-card" aria-labelledby="pf-progress-title">
-        <h2 className="side-card-title" id="pf-progress-title">刷题进度</h2>
-        <p className="pf-muted">题库暂时还没有已发布题目。</p>
-      </section>
-    )
-  }
-
-  return (
-    <section className="side-card" aria-labelledby="pf-progress-title">
-      <h2 className="side-card-title" id="pf-progress-title">刷题进度</h2>
-      <p className="pf-progress-figure">
-        <strong>{solved}</strong>
-        <span className="pf-muted">/ {total} 题已通过</span>
-      </p>
-      <div className="progress" role="img" aria-label={`已通过 ${solved} 题，共 ${total} 题`}>
-        <div className="progress-bar accepted" style={{ width: `${percent(solved, total)}%` }} />
-      </div>
-      <p className="pf-progress-note">
-        完成度 {percent(solved, total)}% · 尝试过 {attempted} 题
-      </p>
-
-      <ul className="pf-difficulty-list">
-        {difficulties.map((item) => {
-          const info = getDifficulty(item.difficulty)
-          return (
-            <li className={`pf-difficulty-row ${info.className}`} key={item.difficulty}>
-              <span className="pf-difficulty-label">{info.label}</span>
-              <span className="pf-difficulty-bar" aria-hidden="true">
-                <span style={{ width: `${percent(item.solved, item.total)}%` }} />
-              </span>
-              <span className="pf-difficulty-count">{item.solved}/{item.total}</span>
-            </li>
-          )
-        })}
-      </ul>
-
-      <Link to="/problems?my_status=todo" className="button button-secondary button-sm button-block">
-        继续刷题
-      </Link>
-    </section>
-  )
-}
-
 export default function Profile() {
   const { setUser } = useAuth()
   const [profile, setProfile] = useState<ProfileData | null>(null)
-  const [facets, setFacets] = useState<ProblemFacets | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [facetsError, setFacetsError] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
 
   useEffect(() => {
@@ -159,20 +73,6 @@ export default function Profile() {
     return () => { cancelled = true }
   }, [setUser])
 
-  // 进度卡单独拉取，失败不影响页面其余部分
-  useEffect(() => {
-    let cancelled = false
-    getProblemFacets()
-      .then((data) => { if (!cancelled) setFacets(data) })
-      .catch((err) => { if (!cancelled) setFacetsError(extractError(err)) })
-    return () => { cancelled = true }
-  }, [])
-
-  const heatmap = useMemo(() => buildHeatmap(profile?.activity ?? []), [profile?.activity])
-  const activityTotal = useMemo(
-    () => (profile?.activity ?? []).reduce((sum, item) => sum + item.count, 0),
-    [profile?.activity],
-  )
   const acceptedRate = profile && profile.stats.total_submissions > 0
     ? Math.round((profile.stats.accepted_submissions / profile.stats.total_submissions) * 100)
     : 0
@@ -234,33 +134,6 @@ export default function Profile() {
             </div>
           </section>
 
-          <section className="pf-panel" aria-labelledby="pf-activity-title">
-            <div className="pf-panel-head">
-              <div>
-                <h2 className="pf-panel-title" id="pf-activity-title">刷题活动</h2>
-                <p className="pf-panel-sub">最近一年提交记录</p>
-              </div>
-              <span className="pf-heatmap-total">{activityTotal} 次提交</span>
-            </div>
-            <div className="pf-heatmap-wrap">
-              <div className="pf-week-labels" aria-hidden="true"><span>一</span><span>三</span><span>五</span></div>
-              <div className="pf-heatmap-grid">
-                {heatmap.map((cell) => (
-                  <span
-                    key={cell.date}
-                    className={`pf-heatmap-cell ${heatLevel(cell.count)}`}
-                    title={`${cell.date}：${cell.count} 次提交`}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="pf-heatmap-legend">
-              <span className="pf-muted">少</span>
-              <i className="level-0" /><i className="level-1" /><i className="level-2" /><i className="level-3" /><i className="level-4" />
-              <span className="pf-muted">多</span>
-            </div>
-          </section>
-
           <section className="pf-panel" aria-labelledby="pf-recent-title">
             <div className="pf-panel-head">
               <h2 className="pf-panel-title" id="pf-recent-title">最近提交</h2>
@@ -316,17 +189,7 @@ export default function Profile() {
           </section>
         </div>
 
-        <aside className="pf-side" aria-label="账号与进度">
-          {/* 刷题进度是个人中心最该先看到的信息，放侧栏第一位（窄屏横排时也在最前） */}
-          {facetsError && <div className="error-message">{facetsError}</div>}
-          {facets
-            ? <ProgressCard facets={facets} attempted={stats.attempted_problems} />
-            : !facetsError && (
-              <section className="side-card" aria-label="刷题进度">
-                <div className="skeleton" style={{ height: 88 }} />
-              </section>
-            )}
-
+        <aside className="pf-side" aria-label="账号信息">
           <section className="side-card" aria-labelledby="pf-account-title">
             <h2 className="side-card-title" id="pf-account-title">账号信息</h2>
             <div className="pf-account-head">

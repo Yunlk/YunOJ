@@ -239,7 +239,6 @@
 }
 
 /* ---------- 侧栏：快捷入口与说明 ---------- */
-/* 刷题进度的样式（.progress-summary / .difficulty-progress）只被首页使用，见 home.css */
 
 .side-actions {
   display: grid;

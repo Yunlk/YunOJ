@@ -65,15 +65,10 @@ export interface AssignmentProgress {
 }
 
 export interface HomeSummary {
-  user_count: number
-  problem_count: number
-  contest_count: number
-  submission_count: number
-  group_count: number
-  assignment_count: number
+  /** 首页只渲染比赛：进行中 / 即将开始 / 最近举行（已结束，按结束时间倒序）。 */
   active_contests: Contest[]
   upcoming_contests: Contest[]
-  recent_problems: ProblemListItem[]
+  recent_contests: Contest[]
 }
 
 export interface HomeData {
@@ -200,6 +195,18 @@ export interface ProblemListItem {
   type?: ProblemType
   status?: ProblemStatus
   testcase_count?: number
+	attachment_count?: number
+}
+
+/** 题目附件（题目设置里上传，题目页可下载）。 */
+export interface ProblemAttachment {
+  id: number
+  problem_id: number
+  filename: string
+  content_type: string
+  size_bytes: number
+  uploader?: string
+  created_at: string
 }
 
 /** 题库筛选项统计（/problems/facets）。 */
@@ -244,6 +251,10 @@ export interface ProblemDetail extends ProblemListItem {
   testcase_scores: number[]
   submission_limit: number
   status: ProblemStatus
+  /** 提供者/来源（公开字段，如「Codeforces 1900E」） */
+  provider: string
+  /** 是否向选手展示该题分数（公开字段；false 时后端会抹掉非管理员的得分） */
+  show_score: boolean
   is_favorite?: boolean
   // 管理员专属
 	spj_source?: string

@@ -1,4 +1,4 @@
-// 导航壳与首页交互测试：Ctrl+K 快速跳转、/ 唤起、Esc 关闭、随机一题、进度卡数据一致。
+// 导航壳与首页交互测试：Ctrl+K 快速跳转、/ 唤起、Esc 关闭、随机一题、最近举行的比赛。
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
 
@@ -11,7 +11,6 @@ const PASS = argOf('pass', 'demo123')
 
 const login = () => getToken(USER, PASS)
 const token = await login()
-const facets = await (await fetch(`${API}/problems/facets`, { headers: { Authorization: `Bearer ${token}` } })).json()
 
 let pass = 0
 let fail = 0
@@ -40,11 +39,16 @@ check('Ctrl+K 打开命令面板', await page.locator('.cmdk').isVisible())
 const focused = await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))
 check('面板自动聚焦输入框', focused === '搜索题目或跳转', String(focused))
 await page.keyboard.type('7')
-await page.waitForTimeout(500)
+// 等结果真正渲染出来再断言：命令面板有输入防抖，固定 sleep 在构建/负载下会假失败
+await page.waitForFunction(
+  () => document.querySelector('.cmdk-item')?.textContent?.includes('7'),
+  { timeout: 8000 },
+).catch(() => {})
 const firstItem = await page.locator('.cmdk-item').first().innerText()
 check('数字输入给出题号直达项', /P7|7/.test(firstItem), firstItem.replace(/\s+/g, ' '))
 await page.keyboard.press('Enter')
-await page.waitForTimeout(1200)
+// 用 waitForURL 而不是固定等待：生产构建与探针同时跑时，固定 sleep 会偶发假失败
+await page.waitForURL(/\/problem\/7$/, { timeout: 15000 }).catch(() => {})
 check('回车进入题目页', /\/problem\/7$/.test(page.url()), page.url())
 
 console.log('\n== / 的分发规则与 Esc ==')
@@ -76,7 +80,10 @@ await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
 await page.keyboard.press('Control+k')
 await page.waitForSelector('.cmdk')
 await page.keyboard.type('A+B')
-await page.waitForTimeout(900)
+await page.waitForFunction(
+  () => document.querySelectorAll('.cmdk-item').length > 0,
+  { timeout: 8000 },
+).catch(() => {})
 const items = await page.locator('.cmdk-item').count()
 check('搜索标题命中题目', items > 0, `${items} 项`)
 const label = await page.locator('.cmdk-item-label').first().innerText()
@@ -85,18 +92,20 @@ await page.keyboard.press('Escape')
 
 console.log('\n== 首页：训练工作台 ==')
 check('首屏有继续刷题卡', (await page.locator('.home-continue').count()) === 1)
-const progressText = await page.locator('.home-side .progress-summary').innerText().catch(() => '')
+check('侧栏不再有刷题进度卡', (await page.locator('.home-side .progress-summary, .home-side .difficulty-progress-row').count()) === 0)
+check('不再有平台规模卡', (await page.getByText('平台规模').count()) === 0)
+const recentContests = await page.locator('.home-side .home-contest-list a').count()
+const homeApi = await (await fetch(`${API}/home`, { headers: { Authorization: `Bearer ${token}` } })).json()
 check(
-  '进度卡与 /problems/facets 一致',
-  progressText.includes(String(facets.solved)) && progressText.includes(String(facets.total)),
-  `${progressText.replace(/\s+/g, ' ')} vs API ${facets.solved}/${facets.total}`,
+  '侧栏「最近举行的比赛」与 /api/home 的 recent_contests 一致',
+  recentContests === Math.min(6, (homeApi.summary?.recent_contests ?? []).length),
+  `页面 ${recentContests} 条 vs API ${(homeApi.summary?.recent_contests ?? []).length} 条`,
 )
-check('侧栏有难度进度条', (await page.locator('.home-side .difficulty-progress-row').count()) > 0)
 check('比赛区渲染', (await page.locator('.home-main .section').count()) >= 1)
 
 console.log('\n== 随机一题 ==')
 await page.getByRole('button', { name: '随机一题' }).first().click()
-await page.waitForTimeout(1500)
+await page.waitForURL(/\/problem\/\d+/, { timeout: 15000 }).catch(() => {})
 check('随机一题跳到题目页', /\/problem\/\d+/.test(page.url()), page.url())
 
 console.log('\n== 全站排名 ==')

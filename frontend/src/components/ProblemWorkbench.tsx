@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { extractError } from '../api'
 import type { RunTestResult } from '../api'
 import type { Language, ProblemDetail, Sample } from '../types'
@@ -44,7 +43,6 @@ interface ProblemWorkbenchProps {
   onOptimizeChange: (optimize: boolean) => void
   submitting: boolean
   submitError: string
-  submittedId: number | null
   onSubmit: () => void
   onRun: (input: string, sampleIndex?: number) => Promise<RunTestResult>
   /** 左栏标签页（新模式）；不传时走兼容模式：左栏只放题面，右栏在编辑器/提交面板间切换 */
@@ -92,7 +90,6 @@ export default function ProblemWorkbench({
   onOptimizeChange,
   submitting,
   submitError,
-  submittedId,
   onSubmit,
   onRun,
   tabs,
@@ -226,17 +223,13 @@ export default function ProblemWorkbench({
   const selectedLanguage = languages.find((item) => item.key === language)
   const leftStyle: CSSProperties | undefined = narrow ? undefined : { flexBasis: `${split * 100}%` }
 
-  // 提交反馈：编辑器视图放在状态栏下方；右栏换成评测面板时同样要显示，
-  // 否则「已提交 #123」这类关键信息会随编辑器一起被卸载。
+  /** 提交反馈：编辑器视图放在状态栏下方；右栏换成评测面板时同样要显示，
+   *  否则提交错误这类关键信息会随编辑器一起被卸载。
+   *  提交成功不再额外提示「已提交 #id」——右栏评测面板里就是刚提交的那条。 */
   const submitNotices = (
     <>
       {submitDisabledReason && <div className="wb-notice warning-message">{submitDisabledReason}</div>}
       {submitError && <div className="wb-notice error-message">{submitError}</div>}
-      {submittedId !== null && (
-        <div className="wb-notice success-message">
-          已提交 <Link to={`/submission/${submittedId}`}>#{submittedId}</Link>，评测结果见右侧面板。
-        </div>
-      )}
     </>
   )
 

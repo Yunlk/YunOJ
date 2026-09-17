@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { extractError, getHome, getProblemFacets, getProblems, getSubmissions } from '../api'
-import DifficultyBadge from '../components/DifficultyBadge'
 import PageHeader from '../components/PageHeader'
 import StatusBadge from '../components/StatusBadge'
 import { useAuth } from '../context/AuthContext'
@@ -97,7 +96,6 @@ export default function Home() {
   const nextContest = contests.find((c) => contestPhase(c, now) === 'upcoming') ?? null
   const solved = facets?.solved ?? 0
   const total = facets?.total ?? 0
-  const solvedPercent = total > 0 ? Math.round((solved / total) * 100) : 0
 
   const randomProblem = async () => {
     try {
@@ -280,78 +278,28 @@ export default function Home() {
         </div>
 
         <aside className="home-side">
-          {user && facets && (
-            <section className="side-card">
-              <h2 className="side-card-title">刷题进度</h2>
-              <div className="progress-summary">
-                <strong>{solved}</strong>
-                <span>/ {total} 题</span>
-                <span className="progress-percent">{solvedPercent}%</span>
-              </div>
-              <div className="progress" role="progressbar" aria-valuenow={solvedPercent} aria-valuemin={0} aria-valuemax={100}>
-                <div className="progress-bar accepted" style={{ width: `${solvedPercent}%` }} />
-              </div>
-              <ul className="difficulty-progress">
-                {facets.difficulties
-                  .filter((d) => d.total > 0)
-                  .map((d) => {
-                    const info = getDifficulty(d.difficulty)
-                    const percent = d.total > 0 ? Math.round((d.solved / d.total) * 100) : 0
-                    return (
-                      <li key={d.difficulty}>
-                        <Link
-                          to={`/problems?difficulty=${d.difficulty}&my_status=todo`}
-                          className={`difficulty-progress-row ${info.className}`}
-                        >
-                          <span className="difficulty-progress-label">{info.label}</span>
-                          <span className="difficulty-progress-bar">
-                            <span style={{ width: `${percent}%` }} />
-                          </span>
-                          <span className="difficulty-progress-count">
-                            {d.solved}/{d.total}
-                          </span>
-                        </Link>
-                      </li>
-                    )
-                  })}
-              </ul>
-            </section>
-          )}
-
           <section className="side-card">
-            <h2 className="side-card-title">最近添加的题目</h2>
-            <ul className="home-problem-list">
-              {summary.recent_problems.slice(0, 6).map((p) => (
-                <li key={p.id}>
-                  <Link to={`/problem/${p.id}`}>
-                    <span className="home-problem-id">P{p.id}</span>
-                    <span className="home-problem-title">{p.title}</span>
-                    <DifficultyBadge value={p.difficulty} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            <Link to="/problems" className="button button-ghost button-sm button-block">
-              查看全部题目
+            <h2 className="side-card-title">最近举行的比赛</h2>
+            {summary.recent_contests.length === 0 ? (
+              <p className="field-hint">还没有结束的比赛。</p>
+            ) : (
+              <ul className="home-contest-list">
+                {summary.recent_contests.slice(0, 6).map((c) => (
+                  <li key={c.id}>
+                    <Link to={`/contest/${c.id}`}>
+                      <span className="home-contest-mode">{contestModeLabel(c.mode)}</span>
+                      <span className="home-contest-title">{c.title}</span>
+                      <time className="home-contest-date" dateTime={c.end_time}>
+                        {formatTime(c.end_time).slice(0, 10)}
+                      </time>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link to="/contests" className="button button-ghost button-sm button-block">
+              全部比赛
             </Link>
-          </section>
-
-          <section className="side-card home-platform">
-            <h2 className="side-card-title">平台规模</h2>
-            <dl className="kv-list">
-              <div>
-                <dt>公开题目</dt>
-                <dd>{summary.problem_count}</dd>
-              </div>
-              <div>
-                <dt>注册用户</dt>
-                <dd>{summary.user_count}</dd>
-              </div>
-              <div>
-                <dt>累计提交</dt>
-                <dd>{summary.submission_count}</dd>
-              </div>
-            </dl>
           </section>
         </aside>
       </div>

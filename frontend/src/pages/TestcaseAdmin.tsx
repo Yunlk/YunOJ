@@ -320,15 +320,20 @@ export default function TestcaseAdmin() {
             </div>
           </div>
 
-          {zipPreview && (
+          {zipPreview && (() => {
+            // 后端历史上会把空切片序列化成 null（Go nil slice → JSON null），
+            // 这里统一兜底，避免「can't access property "length", … is null」把整页打崩。
+            const pairs = zipPreview.pairs ?? []
+            const unpaired = zipPreview.unpaired ?? []
+            return (
             <div className="zip-preview">
               <div className={zipPreview.valid ? 'info-message' : 'warning-message'}>
-                解析结果：{zipPreview.pairs.length} 组成对测试点
-                {zipPreview.unpaired.length > 0 && `，未配对文件：${zipPreview.unpaired.join('、')}`}
+                解析结果：{pairs.length} 组成对测试点
+                {unpaired.length > 0 && `，未配对文件：${unpaired.join('、')}`}
                 {zipPreview.valid ? '，可导入' : '，存在未配对文件将无法导入'}
                 ，总大小 {fmtSize(zipPreview.total_size)}
               </div>
-              {zipPreview.pairs.length > 0 && (
+              {pairs.length > 0 && (
                 <>
                   <div className="table-frame">
                     <table className="data-table">
@@ -341,7 +346,7 @@ export default function TestcaseAdmin() {
                         </tr>
                       </thead>
                       <tbody>
-                        {zipPreview.pairs.map((p, i) => (
+                        {pairs.map((p, i) => (
                           <tr key={p.name}>
                             <td className="cell-id">{p.name}</td>
                             <td className="cell-num">{fmtSize(p.in_size)}</td>
@@ -379,7 +384,8 @@ export default function TestcaseAdmin() {
                 </>
               )}
             </div>
-          )}
+            )
+          })()}
         </div>
       </section>
     </div>

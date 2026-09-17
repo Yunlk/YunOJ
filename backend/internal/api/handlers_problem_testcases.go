@@ -114,6 +114,10 @@ func analyzeZip(zipData []byte) (*zipPreviewDTO, error) {
 	preview := &zipPreviewDTO{
 		Entries: make([]zipEntryDTO, 0, len(entries)),
 		Pairs:   []zipPairDTO{},
+		// 必须显式初始化：Go 的 nil 切片会序列化成 JSON null，
+		// 前端对 unpaired/entries/pairs 直接取 length 就会炸（曾导致预览报
+		// 「can't access property "length", zipPreview.unpaired is null」）。
+		Unpaired: []string{},
 	}
 	inSizes := map[string]int64{}
 	outSizes := map[string]int64{}

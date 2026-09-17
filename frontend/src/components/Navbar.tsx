@@ -25,6 +25,8 @@ export default function Navbar() {
   const [activeContest, setActiveContest] = useState<Contest | null>(null)
   const now = useClock()
   const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined)
+  // 下拉菜单项：.menu-item 提供整行可点区域与悬停态；active 由 .appbar-panel a.active 着色
+  const menuClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'menu-item active' : 'menu-item')
   const adminActive = location.pathname.startsWith('/admin/') || location.pathname === '/contest/new'
 
   useEffect(() => setMenuOpen(false), [location.pathname])
@@ -137,19 +139,21 @@ export default function Navbar() {
                 <details className={`appbar-dropdown${adminActive ? ' active' : ''}`} key={`admin-${location.pathname}`}>
                   <summary>管理</summary>
                   <div className="appbar-panel menu">
-                    <NavLink to="/admin/problems" className={navClass}>
+                    {/* 下拉项必须用 .menu-item：早前误传 navClass（只返回 active），
+                        链接退化成行内纯文本，菜单看起来「只有文字」 */}
+                    <NavLink to="/admin/problems" className={menuClass}>
                       题目管理
                     </NavLink>
-                    <NavLink to="/admin/users" className={navClass}>
+                    <NavLink to="/admin/users" className={menuClass}>
                       用户管理
                     </NavLink>
-                    <NavLink to="/admin/judge" className={navClass}>
+                    <NavLink to="/admin/judge" className={menuClass}>
                       测评集群
                     </NavLink>
-                    <NavLink to="/admin/notifications" className={navClass}>
+                    <NavLink to="/admin/notifications" className={menuClass}>
                       全站通知
                     </NavLink>
-                    <NavLink to="/contest/new" className={navClass}>
+                    <NavLink to="/contest/new" className={menuClass}>
                       新建比赛
                     </NavLink>
                   </div>

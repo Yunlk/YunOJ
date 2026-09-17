@@ -1,14 +1,18 @@
 // 单页诊断：打开一个路由，打印可见文本、控制台错误与失败请求，用于快速定位「页面空白」类问题。
-// 用法：node .tools/uiprobe/peek.mjs /problems [--user demo05 --pass demo123] [--selector .foo]
+// 用法：node scripts/uiprobe/peek.mjs /problems [--user demo05 --pass demo123] [--selector .foo]
+// 默认身份取 .env 的 UI_ADMIN_*（管理员可见全部页面）。
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
+import { ADMIN_USER, ADMIN_PASS } from './env.mjs'
 
 const args = process.argv.slice(2)
 const argOf = (n, d = '') => (args.indexOf(`--${n}`) >= 0 ? args[args.indexOf(`--${n}`) + 1] : d)
 const route = args.find((a) => a.startsWith('/')) ?? '/'
 const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
-const USER = argOf('user', 'demo05')
-const PASS = argOf('pass', 'demo123')
+// 默认用管理员账号：管理员能看到全部页面（学生看不到的后台页也能诊断），
+// 需要学生视角时用 --user/--pass 覆盖。
+const USER = argOf('user', ADMIN_USER)
+const PASS = argOf('pass', ADMIN_PASS)
 const SELECTOR = argOf('selector')
 
 const token = await getToken(USER, PASS)

@@ -38,7 +38,10 @@ await page.waitForSelector('.problems-table tbody tr')
 const allRows = await rowCount()
 check('默认列出 20 行', allRows === 20, `实际 ${allRows}`)
 check('存在状态列', (await page.locator('.problems-table .problem-status').count()) > 0)
-check('侧栏显示我的进度', /\/\s*\d+\s*题/.test(await page.locator('.progress-summary').innerText()))
+const sideActions = (await page.locator('.side-actions').innerText()).replace(/\s+/g, ' ').trim()
+check('侧栏快捷入口只保留「随机一题 + 我的收藏」', sideActions === '随机一题 我的收藏', sideActions)
+check('题库页不再显示「我的进度」', (await page.locator('.problems-side .progress-summary').count()) === 0)
+check('页头不再重复「随机一题」', (await page.locator('.page-header').getByRole('button', { name: '随机一题' }).count()) === 0)
 
 // 状态筛选
 await page.getByRole('button', { name: '已通过', exact: true }).click()

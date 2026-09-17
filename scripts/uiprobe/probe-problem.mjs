@@ -1,5 +1,5 @@
 // 单题工作台交互测试：标签页、样例运行、自测抽屉、上一题/下一题、提交后跳转。
-// 用法：node .tools/uiprobe/probe-problem.mjs [--user U --pass P]
+// 用法：node scripts/uiprobe/probe-problem.mjs [--user U --pass P]
 import { chromium } from 'playwright-core'
 import { getToken } from './auth.mjs'
 
@@ -32,7 +32,8 @@ await page.waitForSelector('.wb-shell')
 
 check('默认即是工作台（题面 + 编辑器同屏）', await page.locator('.wb-left').isVisible() && await page.locator('.wb-right').isVisible())
 check('不再有「进入 IDE 模式」按钮', (await page.getByText('进入 IDE 模式').count()) === 0)
-check('左侧存在四个标签', (await page.locator('.wb-tabs .tab').count()) === 4)
+check('左侧存在三个标签（题目/题解/讨论）', (await page.locator('.wb-tabs .tab').count()) === 3)
+check('「我的提交」不再占用左栏标签', (await page.getByRole('tab', { name: '我的提交' }).count()) === 0)
 check('编辑器已挂载', (await page.locator('.monaco-editor').count()) > 0)
 
 const leftVisible = await page.locator('.wb-left').isVisible()
@@ -52,10 +53,7 @@ check('拖拽分隔条改变左栏宽度', after.width > before.width + 60, `${M
 const stored = await page.evaluate(() => localStorage.getItem('yunoj:workbench:split'))
 check('分栏比例写入本地记忆', stored !== null && Number(stored) > 0.4, String(stored))
 
-console.log('\n== 标签页切换 ==')
-await page.getByRole('tab', { name: '我的提交' }).click()
-await page.waitForTimeout(800)
-check('切到「我的提交」显示提交面板', (await page.locator('.submission-row, .submission-panel, .empty-state').count()) > 0)
+console.log('\n== 标签页切换（左栏） ==')
 await page.getByRole('tab', { name: '题解' }).click()
 await page.waitForTimeout(500)
 check('切到「题解」渲染题解区', (await page.locator('.wb-editorial, .empty-state').count()) > 0)
@@ -65,6 +63,17 @@ check('讨论页有发布表单', (await page.locator('.discussion-form textarea
 await page.getByRole('tab', { name: '题目', exact: true }).click()
 await page.waitForTimeout(300)
 check('切回题目显示题面', (await page.locator('.wb-statement').count()) === 1)
+
+console.log('\n== 右栏：编辑器 ↔ 评测结果 ==')
+check('初始右栏是编辑器', await page.locator('.wb-right .monaco-editor').isVisible())
+await page.getByRole('button', { name: '我的提交' }).click()
+await page.waitForTimeout(900)
+check('点「我的提交」右栏换成提交面板', await page.locator('.wb-right .submission-panel').isVisible().catch(() => false))
+check('切换后左栏题面仍在', (await page.locator('.wb-left .wb-statement').count()) === 1)
+check('按钮变为「返回代码」', (await page.getByRole('button', { name: '返回代码' }).count()) === 1)
+await page.getByRole('button', { name: '返回代码' }).click()
+await page.waitForTimeout(500)
+check('点「返回代码」右栏回到编辑器', await page.locator('.wb-right .monaco-editor').isVisible().catch(() => false))
 
 console.log('\n== 样例运行 → 自测抽屉 ==')
 // 先写代码：空代码点运行也必须给出可见反馈（回归用例）
@@ -101,14 +110,16 @@ await page.getByRole('button', { name: /上一题/ }).click()
 await page.waitForTimeout(1200)
 check('点击上一题回到原题', page.url().endsWith('/problem/1'), page.url())
 
-console.log('\n== 提交与结果 ==')
+console.log('\n== 提交与结果（结果落在右栏） ==')
 await page.getByRole('button', { name: '提交', exact: true }).click()
 await page.waitForTimeout(2500)
 const submitted = await page.locator('.wb-notice.success-message').innerText().catch(() => '')
 check('提交后提示提交号', /#\d+/.test(submitted), submitted.trim())
-const activeTab = await page.locator('.wb-tabs .tab.active').innerText().catch(() => '')
-check('提交后自动切到「我的提交」', activeTab.includes('我的提交'), activeTab)
-check('提交面板已渲染', await page.locator('.submission-panel').isVisible().catch(() => false))
+check('提交提示留在右栏（不随编辑器卸载而消失）', (await page.locator('.wb-right .wb-notice.success-message').count()) === 1)
+check('提交后左栏仍是题面标签', (await page.locator('.wb-tabs .tab.active').innerText().catch(() => '')).includes('题目'))
+check('提交后左栏题面未被替换', (await page.locator('.wb-left .wb-statement').count()) === 1)
+check('提交后右栏显示评测面板', await page.locator('.wb-right .submission-panel').isVisible().catch(() => false))
+check('右上角按钮变为「返回代码」', (await page.getByRole('button', { name: '返回代码' }).count()) === 1)
 
 console.log('\n== 窄屏（900px）：单栏标签模式 ==')
 const narrow = await context.newPage()

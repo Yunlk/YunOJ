@@ -11,8 +11,9 @@
 | 基础层 | `frontend/src/styles/base.css` | 排版、焦点环、滚动条、`.visually-hidden`、`.skip-link` |
 | 布局层 | `frontend/src/styles/layout.css` | `main.app-shell`、`app-shell-wide`、`.page-header-standard`、`.toolbar`、`.layout-side`、`.stat-grid` |
 | 组件层 | `frontend/src/styles/components.css` | `.button*`、`.card/.panel/.side-card`、`.data-table`（44px 行 / 38px 表头）、`.tag-chip`、`.badge*`、`.status-badge/.status-flag`、`.tabs/.tab`、`.empty-state`、`.pagination`、`.breadcrumb`、`.progress`、`.menu/.menu-item`、`.toast`、`.kv-list`、`.segmented` |
-| 题库页 | `frontend/src/pages/ProblemList.tsx` + `styles/pages/problems.css` | 状态列、状态/难度/标签多选、排序、每页条数、进度侧栏、随机一题、`/` 快捷搜索 |
-| 单题页 | `frontend/src/pages/ProblemDetail.tsx` + `components/ProblemWorkbench.tsx` + `styles/pages/problem.css` | 默认「题面 + 编辑器」工作台，左栏 题目/我的提交/题解/讨论，右栏编辑器 + 自测抽屉，可拖拽分栏、上一题/下一题 |
+| 题库页 | `frontend/src/pages/ProblemList.tsx` + `styles/pages/problems.css` | 状态列、状态/难度/标签多选、排序、每页条数、快捷入口（随机一题 / 我的收藏）、状态说明、`/` 快捷搜索；刷题进度卡只留在首页，样式归 `styles/pages/home.css` |
+| 单题页 | `frontend/src/pages/ProblemDetail.tsx` + `components/ProblemWorkbench.tsx` + `styles/pages/problem.css` | 默认「题面 + 编辑器」工作台；左栏 题目/题解/讨论（提交结果不占左栏），提交后**右栏**换成评测结果（`.submission-panel`），可用右上角「返回代码」切回编辑器；右栏编辑器 + 自测抽屉，可拖拽分栏、上一题/下一题 |
+| 题目管理 | `components/ProblemAdminTabs.tsx` + `pages/ProblemForm.tsx` + `pages/TestcaseAdmin.tsx` + `styles/pages/admin.css` | 编辑/新建/测试点三页共用「题面设置 · 数据设置 · 题目管理」导航；新建题目还没有 id 时「数据设置」置灰并提示先保存 |
 
 新增后端接口（已实现，可直接调用）：
 - `GET /api/problems/facets` → `{ total, solved, difficulties[], tags[] }`
@@ -52,6 +53,7 @@
 ### B. 比赛 `/contests` + `/contest/:id` + `/contest/:id/submissions`
 场景：赛前报名、赛中进题、赛后看榜。
 - 比赛列表：从纯表格改成**分组列表**——「进行中」「即将开始」「已结束」，进行中的显示**倒计时**（每 30s 刷新，已存在 `utils/clock.ts` 可复用），每行显示赛制标签、时间、报名状态、我的排名（若有数据）
+  - 「已结束」分组不再单列「参与」徽章（名次已表达参与结果）；管理员的「新建比赛 / 全站排名」不在此页重复，走导航栏与 `/ranking`
 - 比赛详情首页：把「题目 / 赛制 / 我的状态」突出出来：
   - 顶部状态条：比赛状态 + 倒计时 / 开始时间 + 报名按钮
   - 题目表格：题号、标题、我的状态（AC 绿 / 尝试）、通过率；整行可点进入比赛题目页

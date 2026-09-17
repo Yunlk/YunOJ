@@ -49,6 +49,10 @@ styles/pages/*.css    页面级样式（每个页面一个文件）
 - 导航元素：`.pagination`、`.breadcrumb`、`.progress`、`.menu/.menu-item/.menu-sep`、`.segmented`、`.toolbar`
 - 布局：`main.app-shell`（`-wide`/`-narrow` 变体）、`.layout-side`、`.layout-split`、`.stat-grid > .stat-tile`、`.workbench-shell/.workbench-pane`
 
+页面级（`styles/pages/*.css`）只在基座缺位时补结构性类，例如单题页的
+`.wb-*`（工作台分栏）与 `.attachment-list`（题面下方的附件下载列表）、
+管理端的 `.problem-admin-tabs`（题面设置 / 题目设置 / 数据设置）与 `.attachment-table`。
+
 ## 4. 交互约定
 
 - 快捷键：`Ctrl/⌘+K` 打开命令面板；`/` 在页面存在 `[data-search-shortcut]` 输入框时聚焦它，否则打开命令面板
@@ -57,16 +61,24 @@ styles/pages/*.css    页面级样式（每个页面一个文件）
 - 表单控件必须有 `<label for>` 或 `aria-label`；整行可点时保留行内链接并 `stopPropagation`
 - 颜色只用令牌；难以避免时用页面级 `.app-shell` 前缀覆盖
 
-## 5. 验证工具（`.tools/uiprobe/`）
+## 5. 验证工具（`scripts/uiprobe/`）
 
 ```powershell
-cd D:\git\YunOJ\frontend; npx tsc --noEmit                  # 类型检查
-cd D:\git\YunOJ; node .tools/uiprobe/audit.mjs --verbose     # 布局指标 + a11y + HTTP 错误
-cd D:\git\YunOJ; node .tools/uiprobe/probe.mjs               # 题库交互断言
-cd D:\git\YunOJ; node .tools/uiprobe/probe-problem.mjs       # 单题工作台断言
-cd D:\git\YunOJ; node .tools/uiprobe/probe-shell.mjs         # 导航/首页/排名断言
-cd D:\git\YunOJ; node .tools/uiprobe/shoot.mjs --tag x       # 整页截图到 shots/
+# 一键全量：类型检查 → 生产构建 → 双端审计 → 对比度 → 4 组交互断言
+pwsh -File scripts/uiprobe/verify-ui.ps1            # 加 -SkipBuild 可跳过构建（更快）
+
+# 单跑某一项
+cd D:\git\YunOJ\frontend; .\node_modules\.bin\tsc.cmd -p tsconfig.app.json --noEmit
+# 注意：根 tsconfig.json 是 references 方案，`npx tsc --noEmit` 什么都不检查（永远 0 错）
+cd D:\git\YunOJ; node scripts/uiprobe/audit.mjs --verbose     # 布局指标 + a11y + HTTP 错误
+cd D:\git\YunOJ; node scripts/uiprobe/probe.mjs               # 题库交互断言
+cd D:\git\YunOJ; node scripts/uiprobe/probe-problem.mjs       # 单题工作台断言
+cd D:\git\YunOJ; node scripts/uiprobe/probe-shell.mjs         # 导航/首页/排名断言
+cd D:\git\YunOJ; node scripts/uiprobe/probe-profile.mjs       # 个人中心/收藏/通知断言
+cd D:\git\YunOJ; node scripts/uiprobe/probe-problem-settings.mjs  # 提供者/显示分数/附件（需管理员）
+cd D:\git\YunOJ; node scripts/uiprobe/shoot.mjs --tag x       # 整页截图到 shots/
 ```
 
 判定标准：审计输出无「无标签控件 / 横向溢出 / HTTP 4xx-5xx」，表格行高 44px、表头 38px；
-登录统一用 `.tools/uiprobe/auth.mjs` 的 `getToken()`（带缓存，后端登录有限流）。
+登录统一用 `scripts/uiprobe/auth.mjs` 的 `getToken()`（带缓存，后端登录有限流）；
+管理员凭据从仓库根目录 `.env` 的 `UI_ADMIN_*` 读取（见 `scripts/uiprobe/env.mjs`）。

@@ -24,6 +24,7 @@ const ROUTES = [
   ['收藏', '/favorites'],
   ['通知', '/notifications'],
   ['设置', '/settings'],
+  ['题目设置', '/problem/437/edit?tab=settings'],
 ]
 
 const token = await getToken(USER, PASS)

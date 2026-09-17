@@ -30,3 +30,11 @@ export function formatRunTime(ms: number): string {
   if (ms <= 0) return '—'
   return `${ms} ms`
 }
+
+/** 文件大小字节数 -> 人类可读（题目附件等） */
+export function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}

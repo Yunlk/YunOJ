@@ -167,7 +167,7 @@ export default function TestcaseAdmin() {
       />
 
       {/* 与编辑页共用同一套三段式导航 */}
-      <ProblemAdminTabs problemId={problem.id} />
+      <ProblemAdminTabs problemId={problem.id} active="tests" />
 
       {error && <div className="error-message">{error}</div>}
 

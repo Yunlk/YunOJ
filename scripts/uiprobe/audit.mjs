@@ -50,6 +50,7 @@ const ROUTES = [
   ['管理·评测', '/admin/judge'],
   ['管理·通知', '/admin/notifications'],
   ['题目编辑', '/problem/437/edit'],
+  ['题目设置', '/problem/437/edit?tab=settings'],
   ['题目新建', '/problem/new'],
   ['测试点', '/admin/problems/437/tests'],
   ['新建比赛', '/contest/new'],

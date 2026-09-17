@@ -117,6 +117,42 @@ main.problem-workspace-shell {
   right: var(--space-4);
 }
 
+/* ---------- 附件（题面下方，选手下载） ---------- */
+
+.attachment-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.attachment-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attachment-link:hover {
+  text-decoration: underline;
+}
+
+.attachment-size {
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
 .wb-title {
   margin: 0;
   font-size: var(--fs-18);

@@ -24,6 +24,7 @@ import type {
   ProfileData,
   RankingEntry,
   ProblemDetail,
+  ProblemAttachment,
   ProblemFacets,
   ProblemListItem,
   Sample,
@@ -328,6 +329,10 @@ export interface ProblemInput {
 	testcase_scores: number[]
   submission_limit: number
   status: string
+  /** 提供者/来源（可空，如「Codeforces 1900E」） */
+  provider: string
+  /** 是否向选手展示该题分数 */
+  show_score: boolean
 }
 
 // ---- 题目管理后台 ----
@@ -433,6 +438,37 @@ export async function updateTestcase(
 
 export async function deleteTestcase(id: number | string, ordinal: number) {
   await api.delete(`/problems/${id}/testcases/${ordinal}`)
+}
+
+// ---- 题目附件 ----
+
+export async function getProblemAttachments(id: number | string) {
+  const res = await api.get<{ items: ProblemAttachment[]; total: number }>(`/problems/${id}/attachments`)
+  return res.data
+}
+
+export async function uploadProblemAttachment(id: number | string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const res = await api.post<ProblemAttachment>(`/problems/${id}/attachments`, form)
+  return res.data
+}
+
+export async function deleteProblemAttachment(id: number | string, attachmentId: number) {
+  await api.delete(`/problems/${id}/attachments/${attachmentId}`)
+}
+
+/** 附件下载地址（走带令牌的 axios，避免 <a href> 丢失 Authorization 头）。 */
+export async function downloadProblemAttachment(id: number | string, attachment: ProblemAttachment) {
+  const res = await api.get<Blob>(`/problems/${id}/attachments/${attachment.id}/download`, {
+    responseType: 'blob',
+  })
+  const url = URL.createObjectURL(res.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = attachment.filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 export async function reorderTestcases(id: number | string, ordinals: number[]) {

@@ -10,7 +10,7 @@
  */
 
 /* ==================== 题目管理三段式导航 ==================== */
-/* 题面设置 / 数据设置 / 题目管理：跟表单同一列宽、紧贴页头下方 */
+/* 题面设置 / 题目设置 / 数据设置：跟表单同一列宽、紧贴页头下方 */
 .admin-form-page .problem-admin-tabs,
 .problem-admin-tabs {
   margin: -4px 0 var(--space-5);
@@ -24,6 +24,18 @@
 .problem-admin-tabs .tab-disabled:hover {
   background: transparent;
   color: var(--c-text-3);
+}
+
+/* ==================== 题目附件（题目设置里） ==================== */
+/* 文件名可能很长，固定列宽 + 省略号，避免把操作列挤走 */
+.app-shell .attachment-table {
+  table-layout: fixed;
+}
+
+.app-shell .attachment-table .attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ==================== 管理员表格 ==================== */

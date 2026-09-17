@@ -14,6 +14,7 @@ import {
 } from '../api'
 import DifficultyBadge from '../components/DifficultyBadge'
 import Markdown from '../components/Markdown'
+import ProblemAttachmentList from '../components/ProblemAttachmentList'
 import ProblemStatement from '../components/ProblemStatement'
 import ProblemWorkbench from '../components/ProblemWorkbench'
 import SubmissionPanel from '../components/SubmissionPanel'
@@ -264,6 +265,7 @@ export default function ProblemDetail() {
         problem={problem}
         onRunSample={(sample, index) => setPendingSample({ sample, index })}
       />
+      <ProblemAttachmentList problemId={problem.id} />
     </div>
   )
 
@@ -277,6 +279,8 @@ export default function ProblemDetail() {
       focusSubmissionId={submittedId}
       timeLimitMs={problem.time_limit_ms}
       memoryLimitKb={problem.memory_limit_kb}
+      // 题目关闭「显示分数」后不出现得分列（与后端脱敏保持一致）
+      showScore={problem.show_score !== false}
       onBack={() => setRightView('editor')}
       load={loadProblemSubmissions}
     />
@@ -380,7 +384,6 @@ export default function ProblemDetail() {
         onOptimizeChange={setOptimize}
         submitting={submitting}
         submitError={submitError}
-        submittedId={submittedId}
         onSubmit={() => void submit()}
         onRun={runProblemTest}
         tab={tab}
@@ -414,6 +417,7 @@ export default function ProblemDetail() {
         meta={
           <div className="wb-meta">
             <DifficultyBadge value={problem.difficulty} />
+            {problem.provider && <span className="wb-meta-item">提供者 {problem.provider}</span>}
             <span className="wb-meta-item">时间限制 {formatTimeLimit(problem.time_limit_ms)}</span>
             <span className="wb-meta-item">内存限制 {formatMemory(problem.memory_limit_kb)}</span>
             <span className="wb-meta-item">

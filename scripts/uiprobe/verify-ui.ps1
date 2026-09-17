@@ -82,7 +82,7 @@ Step '审计 · 选手端' -expectFailMarker '无标签控件|横向溢出|HTTP 
 # 4) 布局 / 可访问性审计：比赛与管理端
 Step '审计 · 比赛与管理端' -expectFailMarker '无标签控件|横向溢出|HTTP 4' {
   Push-Location $root
-  node scripts/uiprobe/audit.mjs --user $Admin --pass $AdminPass --only /contest/226,/contest/226/standings,/contest/226/submissions,/contest/226/problem/437,/admin/problems,/admin/users,/admin/judge,/admin/problems/437/tests,/problem/437/edit,/problem/437/submit-file,/contest/new,/demo/rolling
+  node scripts/uiprobe/audit.mjs --user $Admin --pass $AdminPass --only /contest/226,/contest/226/standings,/contest/226/submissions,/contest/226/problem/437,/admin/problems,/admin/users,/admin/judge,/admin/problems/437/tests,/problem/437/edit,/problem/437/edit?tab=settings,/problem/437/submit-file,/contest/new,/demo/rolling
   Pop-Location
 }
 
@@ -93,13 +93,25 @@ Step '对比度 (WCAG AA)' -expectFailMarker '低于 AA 的文字：[1-9]' {
   Pop-Location
 }
 
-# 6) 交互断言
+# 6) 交互断言（probe-problem-settings 需要管理员凭据，用 $Admin 跑）
 foreach ($probe in 'probe.mjs', 'probe-problem.mjs', 'probe-shell.mjs') {
   Step "交互断言 · $probe" {
     Push-Location $root
     node "scripts/uiprobe/$probe" --user $Student --pass $StudentPass
     Pop-Location
   }
+}
+
+Step "交互断言 · probe-profile.mjs" {
+  Push-Location $root
+  node scripts/uiprobe/probe-profile.mjs --user $Student --pass $StudentPass
+  Pop-Location
+}
+
+Step "交互断言 · probe-problem-settings.mjs" {
+  Push-Location $root
+  node scripts/uiprobe/probe-problem-settings.mjs
+  Pop-Location
 }
 
 Write-Host "`n================ 汇总 ================" -ForegroundColor Cyan

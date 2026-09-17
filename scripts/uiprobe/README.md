@@ -13,7 +13,7 @@
 | 组件层 | `frontend/src/styles/components.css` | `.button*`、`.card/.panel/.side-card`、`.data-table`（44px 行 / 38px 表头）、`.tag-chip`、`.badge*`、`.status-badge/.status-flag`、`.tabs/.tab`、`.empty-state`、`.pagination`、`.breadcrumb`、`.progress`、`.menu/.menu-item`、`.toast`、`.kv-list`、`.segmented` |
 | 题库页 | `frontend/src/pages/ProblemList.tsx` + `styles/pages/problems.css` | 状态列、状态/难度/标签多选、排序、每页条数、快捷入口（随机一题 / 我的收藏）、状态说明、`/` 快捷搜索；刷题进度卡只留在首页，样式归 `styles/pages/home.css` |
 | 单题页 | `frontend/src/pages/ProblemDetail.tsx` + `components/ProblemWorkbench.tsx` + `styles/pages/problem.css` | 默认「题面 + 编辑器」工作台；左栏 题目/题解/讨论（提交结果不占左栏），提交后**右栏**换成评测结果（`.submission-panel`），可用右上角「返回代码」切回编辑器；右栏编辑器 + 自测抽屉，可拖拽分栏、上一题/下一题 |
-| 题目管理 | `components/ProblemAdminTabs.tsx` + `pages/ProblemForm.tsx` + `pages/TestcaseAdmin.tsx` + `styles/pages/admin.css` | 编辑/新建/测试点三页共用「题面设置 · 数据设置 · 题目管理」导航；新建题目还没有 id 时「数据设置」置灰并提示先保存 |
+| 题目管理 | `components/ProblemAdminTabs.tsx` + `pages/ProblemForm.tsx` + `pages/TestcaseAdmin.tsx` + `components/ProblemAttachments.tsx` + `styles/pages/admin.css` | 一个题目的三块工作区共用一套导航：**题面设置**（标题/题面/格式/样例，`/problem/:id/edit`）· **题目设置**（提供者、难度、标签、显示分数、状态、限制与评测器、附件，同页 `?tab=settings`）· **数据设置**（`/admin/problems/:id/tests`，新建题目还没有 id 时置灰）。主按钮是「保存并去配置数据」，存完直接进数据设置 |
 
 新增后端接口（已实现，可直接调用）：
 - `GET /api/problems/facets` → `{ total, solved, difficulties[], tags[] }`
@@ -24,6 +24,11 @@
 - `GET /api/rankings?keyword=` 按用户名过滤（名次仍为全站名次）。
 - `GET /api/profile/favorites` 的每条 item 现在带 `my_status`（`accepted` / `wrong_answer` / 空串=未做，字段始终存在），收藏页不再需要额外拉状态映射。
 - `POST /api/notifications/read-all` → `{ marked: n }`，一次 SQL 批量已读；前端封装为 `markAllNotificationsRead()`。
+- 题目设置（迁移 22）：`problems` 新增 `provider`（提供者/来源，公开）与 `show_score`（是否展示该题分数，公开）。
+  `show_score=false` 时，**非管理员**的提交列表/详情里 `score` 归零、`case_scores` 为 `null`（管理员始终可见）。
+- 题目附件：`GET /api/problems/{id}/attachments`（已发布题目匿名可读）· `POST`（管理员，multipart `file`，单文件 ≤32MB、每题 ≤20 个）·
+  `DELETE /api/problems/{id}/attachments/{attachment_id}` · `GET /api/problems/{id}/attachments/{attachment_id}/download`（带 RFC 5987 文件名）。
+  文件落在 `{DATA_DIR}/problem-attachments/{problem_id}/`，库内只存元数据。
 
 ## 2. 必须遵守的规则
 

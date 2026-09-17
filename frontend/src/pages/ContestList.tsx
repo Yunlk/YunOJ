@@ -183,15 +183,13 @@ function ContestRows({
   )
 }
 
-/** 已结束的比赛：紧凑行，重点是我的参与情况与名次。 */
+/** 已结束的比赛：紧凑行，重点是名次。 */
 function EndedRows({
   items,
   rankMap,
-  loggedIn,
 }: {
   items: Contest[]
   rankMap: Record<number, RankState>
-  loggedIn: boolean
 }) {
   const navigate = useNavigate()
   return (
@@ -202,7 +200,6 @@ function EndedRows({
           <col />
           <col className="col-mode" />
           <col className="col-time" />
-          <col className="col-reg" />
           <col className="col-rank" />
           <col className="col-actions" />
         </colgroup>
@@ -212,7 +209,6 @@ function EndedRows({
             <th>比赛</th>
             <th>赛制</th>
             <th>比赛时间</th>
-            <th>参与</th>
             <th className="cell-right">我的排名</th>
             <th className="cell-actions">
               <span className="visually-hidden">操作</span>
@@ -242,11 +238,6 @@ function EndedRows({
                   <span title="开始时间">{formatTime(contest.start_time)}</span>
                   <span className="muted" title="结束时间">
                     至 {formatTime(contest.end_time)}
-                  </span>
-                </td>
-                <td>
-                  <span className={`contest-reg-badge ${regClass(contest, 'ended')}`}>
-                    {regLabel(contest, 'ended', loggedIn)}
                   </span>
                 </td>
                 <td className="cell-right cell-num">
@@ -389,11 +380,6 @@ export default function ContestList() {
       <PageHeader
         title="比赛"
         description="列表按状态分组，进行中的比赛显示实时剩余时间；报名、赛中进题与赛后看榜都在比赛详情中完成。"
-        actions={
-          <Link to="/ranking" className="button button-secondary">
-            全站排名
-          </Link>
-        }
       />
 
       {error && <div className="error-message">{error}</div>}
@@ -427,9 +413,6 @@ export default function ContestList() {
           />
           <span>只看我报名的</span>
         </label>
-        <Link to="/contest/new" className="button button-ghost button-sm">
-          新建比赛
-        </Link>
       </div>
 
       <div className="table-summary">
@@ -478,7 +461,7 @@ export default function ContestList() {
                 <span className="contest-group-count">{group.items.length} 场</span>
               </h2>
               {group.phase === 'ended' ? (
-                <EndedRows items={group.items} rankMap={rankMap} loggedIn={loggedIn} />
+                <EndedRows items={group.items} rankMap={rankMap} />
               ) : (
                 <ContestRows
                   phase={group.phase}

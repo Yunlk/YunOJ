@@ -211,9 +211,6 @@ export default function ProblemList() {
   }
 
   const hasFilters = Boolean(keyword || myStatus || difficulties.length || tags.length || sort !== 'id')
-  const solved = facets?.solved ?? 0
-  const grandTotal = facets?.total ?? 0
-  const solvedPercent = grandTotal > 0 ? Math.round((solved / grandTotal) * 100) : 0
 
   return (
     <div className="problems-page">
@@ -222,14 +219,9 @@ export default function ProblemList() {
         title="题库"
         description="按状态、难度与标签定位练习；题号左侧标出你的作答状态，右侧可直接开始刷题。"
         actions={
-          <>
-            <button type="button" className="button button-secondary" onClick={() => void continueAttempt()}>
-              继续未完成
-            </button>
-            <button type="button" className="button button-secondary" onClick={() => void randomProblem()}>
-              随机一题
-            </button>
-          </>
+          <button type="button" className="button button-secondary" onClick={() => void continueAttempt()}>
+            继续未完成
+          </button>
         }
       />
 
@@ -503,56 +495,13 @@ export default function ProblemList() {
 
         <aside className="problems-side">
           <section className="side-card">
-            <h2 className="side-card-title">我的进度</h2>
-            <div className="progress-summary">
-              <strong>{solved}</strong>
-              <span>/ {grandTotal} 题</span>
-              <span className="progress-percent">{solvedPercent}%</span>
-            </div>
-            <div className="progress" role="progressbar" aria-valuenow={solvedPercent} aria-valuemin={0} aria-valuemax={100}>
-              <div className="progress-bar accepted" style={{ width: `${solvedPercent}%` }} />
-            </div>
-            <ul className="difficulty-progress">
-              {(facets?.difficulties ?? [])
-                .filter((d) => d.total > 0)
-                .map((d) => {
-                  const info = getDifficulty(d.difficulty)
-                  const percent = d.total > 0 ? Math.round((d.solved / d.total) * 100) : 0
-                  return (
-                    <li key={d.difficulty}>
-                      <button
-                        type="button"
-                        className={`difficulty-progress-row ${info.className}${difficulties.includes(d.difficulty) ? ' active' : ''}`}
-                        onClick={() => toggleDifficulty(d.difficulty)}
-                      >
-                        <span className="difficulty-progress-label">{info.label}</span>
-                        <span className="difficulty-progress-bar">
-                          <span style={{ width: `${percent}%` }} />
-                        </span>
-                        <span className="difficulty-progress-count">
-                          {d.solved}/{d.total}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-            </ul>
-          </section>
-
-          <section className="side-card">
             <h2 className="side-card-title">快捷入口</h2>
             <div className="side-actions">
-              <button type="button" className="button button-secondary button-block" onClick={() => void continueAttempt()}>
-                继续未完成的题
-              </button>
               <button type="button" className="button button-secondary button-block" onClick={() => void randomProblem()}>
                 随机一题
               </button>
               <Link to="/favorites" className="button button-ghost button-block">
                 我的收藏
-              </Link>
-              <Link to="/status" className="button button-ghost button-block">
-                我的提交
               </Link>
             </div>
           </section>

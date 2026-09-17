@@ -54,6 +54,93 @@
   flex: 0 0 auto;
 }
 
+/* ---------- 刷题进度（首页侧栏） ---------- */
+
+.progress-summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.progress-summary strong {
+  color: var(--c-positive);
+  font-size: var(--fs-22);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-summary span {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.progress-percent {
+  margin-left: auto;
+  color: var(--c-text-3) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.difficulty-progress {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.difficulty-progress-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.difficulty-progress-row:hover {
+  background: var(--c-surface-2);
+}
+
+.difficulty-progress-row.active {
+  border-color: var(--difficulty-color, var(--c-primary));
+  background: var(--difficulty-bg, var(--c-primary-soft));
+}
+
+.difficulty-progress-label {
+  color: var(--difficulty-color, var(--c-text-2));
+  font-weight: 650;
+}
+
+.difficulty-progress-bar {
+  display: block;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface-3);
+  overflow: hidden;
+}
+
+.difficulty-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--difficulty-color, var(--c-primary));
+}
+
+.difficulty-progress-count {
+  color: var(--c-text-3);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 /* ---------- 比赛 ---------- */
 
 .home-contests {

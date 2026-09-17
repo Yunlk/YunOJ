@@ -105,17 +105,13 @@ type AssignmentProgress struct {
 	TotalScore   int64  `json:"total_score"`
 }
 
-// HomeSummary 首页公开概览数据。
+// HomeSummary 首页公开概览数据：只带首页真正渲染的比赛分组，
+// 平台总量（用户/题目/提交数）与「最近添加的题目」已从首页下线，不再查询。
 type HomeSummary struct {
-	UserCount        int64         `json:"user_count"`
-	ProblemCount     int64         `json:"problem_count"`
-	ContestCount     int64         `json:"contest_count"`
-	SubmissionCount  int64         `json:"submission_count"`
-	GroupCount       int64         `json:"group_count"`
-	AssignmentCount  int64         `json:"assignment_count"`
-	ActiveContests   []Contest     `json:"active_contests"`
-	UpcomingContests []Contest     `json:"upcoming_contests"`
-	RecentProblems   []HomeProblem `json:"recent_problems"`
+	ActiveContests   []Contest `json:"active_contests"`
+	UpcomingContests []Contest `json:"upcoming_contests"`
+	// RecentContests 最近结束的公开比赛（按结束时间倒序），首页侧栏「最近举行的比赛」用。
+	RecentContests []Contest `json:"recent_contests"`
 }
 
 // HomeProblem 是首页公开题目摘要，避免把题面正文和评测器源码带到公开接口。
@@ -224,11 +220,31 @@ type Problem struct {
 	// 自迁移 5 起弃用：比赛提交上限迁移到 contests.submission_limit / contest_problems.submission_limit。
 	SubmissionLimit int `json:"submission_limit"`
 	// Status 题目状态：draft | published | disabled（未发布题目不可通过公共接口访问）
-	Status    string    `json:"status"`
+	Status string `json:"status"`
+	// Provider 提供者/来源：题面之外的归属信息，如「Codeforces 1900E」「2024 校赛」。
+	Provider string `json:"provider"`
+	// ShowScore 是否展示该题分数。false 时普通用户的提交不返回得分与测试点得分，
+	// 只给结论与耗时/内存；管理员始终可见（排障需要）。
+	ShowScore bool      `json:"show_score"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// TestcaseCount 测试点数量（查询时聚合，不落库）
 	TestcaseCount int64 `json:"-"`
+	// AttachmentCount 附件数量（查询时聚合，不落库）
+	AttachmentCount int64 `json:"-"`
+}
+
+// ProblemAttachment 题目附件元数据。文件本体在 {DataDir}/problem-attachments/{problem_id}/ 下。
+type ProblemAttachment struct {
+	ID          int64     `json:"id"`
+	ProblemID   int64     `json:"problem_id"`
+	Filename    string    `json:"filename"`
+	ContentType string    `json:"content_type"`
+	SizeBytes   int64     `json:"size_bytes"`
+	StoragePath string    `json:"-"`
+	UploadedBy  *int64    `json:"uploaded_by,omitempty"`
+	Uploader    string    `json:"uploader,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // 题目类型。
@@ -312,6 +328,9 @@ type Submission struct {
 	SystemTested bool `json:"system_tested"`
 	// IsHacked 已被他人 Hack 成功，判定已降级、分数作废
 	IsHacked bool `json:"is_hacked"`
+	// ShowScore 所属题目的「显示分数」开关（problems.show_score）。
+	// false 时非管理员的响应里 Score/CaseScores 会被抹掉，只保留结论与耗时/内存。
+	ShowScore bool `json:"show_score"`
 }
 
 // ---------- Open Hacking（Codeforces 风格选手间 Hack） ----------

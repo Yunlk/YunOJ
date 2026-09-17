@@ -26,7 +26,7 @@ func scanProblem(row rowScanner) (model.Problem, error) {
 		&p.Tags, &p.AcceptedCount, &p.SubmissionCount,
 		&p.Type, &p.CheckerMode, &p.SPJSource, &p.InteractorSource,
 		&p.HackGeneratorSource, &p.HackReferenceSource, &p.HackTargetSource, &scores, &p.SubmissionLimit,
-		&p.Status, &p.TestcaseCount, &p.CreatedAt, &p.UpdatedAt)
+		&p.Status, &p.Provider, &p.ShowScore, &p.TestcaseCount, &p.AttachmentCount, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return model.Problem{}, err
 	}
@@ -47,7 +47,9 @@ const problemColumns = `id, title, statement, input_format, output_format,
 	hint, samples, time_limit_ms, memory_limit_kb, difficulty, tags,
 	accepted_count, submission_count, type, checker_mode, spj_source, interactor_source,
 	hack_generator_source, hack_reference_source, hack_target_source, testcase_scores, submission_limit, status,
+	provider, show_score,
 	(SELECT count(*) FROM problem_testcases pt WHERE pt.problem_id = problems.id) AS testcase_count,
+	(SELECT count(*) FROM problem_attachments pa WHERE pa.problem_id = problems.id) AS attachment_count,
 	created_at, updated_at`
 
 // ProblemFilter 题目列表过滤条件。字段为 nil/空表示不过滤。
@@ -328,14 +330,15 @@ func (s *Store) CreateProblem(ctx context.Context, p *model.Problem) error {
 		`INSERT INTO problems (title, statement, input_format, output_format, hint,
 			samples, time_limit_ms, memory_limit_kb, difficulty, tags,
 		type, checker_mode, spj_source, interactor_source, hack_generator_source, hack_reference_source, hack_target_source,
-			testcase_scores, submission_limit, status)
+			testcase_scores, submission_limit, status, provider, show_score)
 			 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20)
+			$11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19, $20, $21, $22)
 			 RETURNING id, created_at, updated_at`,
 		p.Title, p.Statement, p.InputFormat, p.OutputFormat, p.Hint,
 		string(samples), p.TimeLimitMs, p.MemoryLimitKb, p.Difficulty, p.Tags,
 		p.Type, p.CheckerMode, p.SPJSource, p.InteractorSource,
 		p.HackGeneratorSource, p.HackReferenceSource, p.HackTargetSource, string(scores), p.SubmissionLimit, p.Status,
+		p.Provider, p.ShowScore,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
 
@@ -359,12 +362,13 @@ func (s *Store) UpdateProblem(ctx context.Context, p *model.Problem) error {
 			difficulty = $10, tags = $11, type = $12, checker_mode = $13,
 			spj_source = $14, interactor_source = $15, hack_generator_source = $16,
 			hack_reference_source = $17, hack_target_source = $18, testcase_scores = $19::jsonb,
-			submission_limit = $20, status = $21, updated_at = now()
+			submission_limit = $20, status = $21, provider = $22, show_score = $23, updated_at = now()
 		 WHERE id = $1`,
 		p.ID, p.Title, p.Statement, p.InputFormat, p.OutputFormat, p.Hint,
 		string(samples), p.TimeLimitMs, p.MemoryLimitKb, p.Difficulty, p.Tags,
 		p.Type, p.CheckerMode, p.SPJSource, p.InteractorSource,
 		p.HackGeneratorSource, p.HackReferenceSource, p.HackTargetSource, string(scores), p.SubmissionLimit, p.Status,
+		p.Provider, p.ShowScore,
 	)
 	if err != nil {
 		return err

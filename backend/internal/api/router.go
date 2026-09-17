@@ -55,6 +55,9 @@ func (a *API) Router() http.Handler {
 		r.Get("/api/problems/{id}", a.handleGetProblem)
 		r.Get("/api/problems/{id}/neighbors", a.handleProblemNeighbors)
 		r.Get("/api/problems/{id}/learning", a.handleProblemLearning)
+		// 题目附件：已发布题目对所有人开放，未发布仅管理员可见（见 canViewProblem）
+		r.Get("/api/problems/{id}/attachments", a.handleListProblemAttachments)
+		r.Get("/api/problems/{id}/attachments/{attachment_id}/download", a.handleDownloadProblemAttachment)
 		r.Get("/api/submissions/{id}", a.handleGetSubmission)
 		r.Get("/api/users/{id}/avatar", a.handleServeUserAvatar)
 		r.Get("/api/markdown-images/{filename}", a.handleServeMarkdownImage)
@@ -154,6 +157,8 @@ func (a *API) Router() http.Handler {
 		r.Put("/api/problems/{id}", a.handleUpdateProblem)
 		r.Delete("/api/problems/{id}", a.handleDeleteProblem)
 		r.Post("/api/problems/{id}/tests", a.handleUploadTests)
+		r.Post("/api/problems/{id}/attachments", a.handleUploadProblemAttachment)
+		r.Delete("/api/problems/{id}/attachments/{attachment_id}", a.handleDeleteProblemAttachment)
 		r.Post("/api/problems/{id}/copy", a.handleCopyProblem)
 		r.Patch("/api/problems/{id}/status", a.handleUpdateProblemStatus)
 		r.Get("/api/problems/{id}/usage", a.handleProblemUsage)

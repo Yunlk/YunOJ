@@ -250,13 +250,18 @@ func (a *API) handleListSubmissions(w http.ResponseWriter, r *http.Request) {
 	}
 	list := make([]submissionListItem, 0, len(items))
 	for _, s := range items {
-		list = append(list, submissionListItem{
+		item := submissionListItem{
 			ID: s.ID, ProblemID: s.ProblemID, ProblemTitle: s.ProblemTitle,
 			UserID: s.UserID, Username: s.Username, Language: s.Language,
 			Status: s.Status, TimeMs: s.TimeMs, WallTimeMs: s.WallTimeMs, MemoryKb: s.MemoryKb,
 			Score: s.Score, CreatedAt: s.CreatedAt,
 			PretestOnly: s.PretestOnly, SystemTested: s.SystemTested, IsHacked: s.IsHacked,
-		})
+		}
+		// 题目关闭「显示分数」时，非管理员看不到得分（管理员排障需要真实值）
+		if !isAdmin && !s.ShowScore {
+			item.Score = 0
+		}
+		list = append(list, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": list, "total": total})
 }
@@ -315,6 +320,11 @@ func (a *API) handleGetSubmission(w http.ResponseWriter, r *http.Request) {
 			detail.CaseResults = &cases
 			detail.CaseScores = &scores
 		}
+	}
+	// 题目关闭「显示分数」：非管理员只看到结论与耗时/内存，看不到得分（管理员始终可见）
+	if !isAdmin && !s.ShowScore {
+		detail.Score = 0
+		detail.CaseScores = nil
 	}
 	writeJSON(w, http.StatusOK, detail)
 }

@@ -186,8 +186,12 @@ type problemDetailDTO struct {
 	TestcaseScores  []int          `json:"testcase_scores"`
 	SubmissionLimit int            `json:"submission_limit"`
 	Status          string         `json:"status"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
+	// Provider 提供者/来源（公开）
+	Provider string `json:"provider"`
+	// ShowScore 是否展示该题分数（公开：前端据此隐藏得分列）
+	ShowScore bool      `json:"show_score"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// 管理员专属：评测器源码与测试点数量
 	SPJSource           string `json:"spj_source,omitempty"`
 	InteractorSource    string `json:"interactor_source,omitempty"`
@@ -195,6 +199,7 @@ type problemDetailDTO struct {
 	HackReferenceSource string `json:"hack_reference_source,omitempty"`
 	HackTargetSource    string `json:"hack_target_source,omitempty"`
 	TestcaseCount       int64  `json:"testcase_count,omitempty"`
+	AttachmentCount     int64  `json:"attachment_count,omitempty"`
 	IsFavorite          bool   `json:"is_favorite,omitempty"`
 }
 
@@ -232,6 +237,7 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 		AcceptedCount: p.AcceptedCount, SubmissionCount: p.SubmissionCount,
 		Type: p.Type, CheckerMode: p.CheckerMode, TestcaseScores: p.TestcaseScores,
 		SubmissionLimit: p.SubmissionLimit, Status: p.Status,
+		Provider: p.Provider, ShowScore: p.ShowScore,
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 	}
 	if loggedIn {
@@ -245,6 +251,7 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 		dto.HackGeneratorSource = p.HackGeneratorSource
 		dto.HackReferenceSource = p.HackReferenceSource
 		dto.TestcaseCount = p.TestcaseCount
+		dto.AttachmentCount = p.AttachmentCount
 	}
 	if p.Type == model.ProblemTypeHack {
 		// Hack 题的目标程序是题面的一部分，参赛者需要据此构造攻击数据。
@@ -285,6 +292,15 @@ type problemPayload struct {
 	SubmissionLimit int `json:"submission_limit"`
 	// Status 题目状态：draft | published | disabled（空 = published）
 	Status string `json:"status"`
+	// Provider 提供者/来源（可空）
+	Provider string `json:"provider"`
+	// ShowScore 是否展示该题分数（默认 true）
+	ShowScore *bool `json:"show_score"`
+}
+
+// payloadShowScore 缺省为 true（老客户端不带该字段时保持原行为）。
+func payloadShowScore(p problemPayload) bool {
+	return p.ShowScore == nil || *p.ShowScore
 }
 
 // problemPublicSubmitAllowed 题目是否允许公开提交（published 或管理员）。
@@ -535,6 +551,9 @@ func validateProblem(p problemPayload) string {
 	default:
 		return "无效的题目状态（draft/published/disabled）"
 	}
+	if utf8.RuneCountInString(strings.TrimSpace(p.Provider)) > 128 {
+		return "提供者/来源最多 128 字符"
+	}
 	return ""
 }
 
@@ -585,6 +604,8 @@ func payloadToProblem(payload problemPayload) model.Problem {
 		TestcaseScores:      payload.TestcaseScores,
 		SubmissionLimit:     payload.SubmissionLimit,
 		Status:              status,
+		Provider:            strings.TrimSpace(payload.Provider),
+		ShowScore:           payloadShowScore(payload),
 	}
 }
 

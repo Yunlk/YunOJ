@@ -63,13 +63,14 @@ func (s *Store) ListUserProblemStatuses(ctx context.Context, userID int64, probl
 
 const submissionListColumns = `s.id, s.problem_id, p.title, s.user_id, u.username,
 	s.language, s.status, s.time_ms, s.wall_time_ms, s.memory_kb, s.score,
+	p.show_score,
 	s.pretest_only, s.system_tested, s.is_hacked, s.created_at`
 
 func scanSubmissionList(row rowScanner) (model.Submission, error) {
 	var sub model.Submission
 	err := row.Scan(&sub.ID, &sub.ProblemID, &sub.ProblemTitle, &sub.UserID,
 		&sub.Username, &sub.Language, &sub.Status, &sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb,
-		&sub.Score, &sub.PretestOnly, &sub.SystemTested, &sub.IsHacked, &sub.CreatedAt)
+		&sub.Score, &sub.ShowScore, &sub.PretestOnly, &sub.SystemTested, &sub.IsHacked, &sub.CreatedAt)
 	return sub, err
 }
 
@@ -172,6 +173,7 @@ func (s *Store) GetSubmission(ctx context.Context, id int64) (model.Submission, 
 			s.code, s.status, s.compile_error, s.case_results,
 			s.time_ms, s.wall_time_ms, s.memory_kb, s.optimize, s.contest_id, s.score,
 			s.case_scores, s.is_frozen, s.pretest_only, s.system_tested, s.is_hacked,
+			p.show_score,
 			s.created_at, s.judged_at
 		 FROM submissions s
 		 JOIN problems p ON p.id = s.problem_id
@@ -181,7 +183,7 @@ func (s *Store) GetSubmission(ctx context.Context, id int64) (model.Submission, 
 		&sub.Language, &sub.Code, &sub.Status, &sub.CompileError, &caseResults,
 		&sub.TimeMs, &sub.WallTimeMs, &sub.MemoryKb, &sub.Optimize, &sub.ContestID, &sub.Score,
 		&caseScores, &sub.IsFrozen, &sub.PretestOnly, &sub.SystemTested, &sub.IsHacked,
-		&sub.CreatedAt, &sub.JudgedAt)
+		&sub.ShowScore, &sub.CreatedAt, &sub.JudgedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return model.Submission{}, ErrNotFound
 	}

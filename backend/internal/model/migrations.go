@@ -493,6 +493,30 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS idx_contest_hacks_target ON contest_hacks (target_submission_id)`,
 		},
 	},
+	{
+		version: 22,
+		name:    "problem_provider_score_and_attachments",
+		stmts: []string{
+			// 提供者/来源：题面之外的归属信息，如「Codeforces 1900E」。
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT ''`,
+			// 是否展示该题分数：关掉后普通用户的提交不再返回得分与测试点得分（管理员始终可见）。
+			`ALTER TABLE problems ADD COLUMN IF NOT EXISTS show_score BOOLEAN NOT NULL DEFAULT true`,
+			// 题目附件：额外下发的文件（题面补充包、模板、样例数据等）。
+			// 文件内容存 {DataDir}/problem-attachments/{problem_id}/，库内只放元数据与相对路径。
+			`CREATE TABLE IF NOT EXISTS problem_attachments (
+				id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+				problem_id   BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				filename     TEXT NOT NULL,
+				content_type TEXT NOT NULL DEFAULT '',
+				size_bytes   BIGINT NOT NULL DEFAULT 0,
+				storage_path TEXT NOT NULL,
+				uploaded_by  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+				created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+			)`,
+			`CREATE INDEX IF NOT EXISTS idx_problem_attachments_problem
+				ON problem_attachments (problem_id, id)`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

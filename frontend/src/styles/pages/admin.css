@@ -9,6 +9,23 @@
  * 禁止在这里新造按钮、表格、卡片样式 —— 那些属于 components.css。
  */
 
+/* ==================== 题目管理三段式导航 ==================== */
+/* 题面设置 / 数据设置 / 题目管理：跟表单同一列宽、紧贴页头下方 */
+.admin-form-page .problem-admin-tabs,
+.problem-admin-tabs {
+  margin: -4px 0 var(--space-5);
+}
+
+.problem-admin-tabs .tab-disabled {
+  color: var(--c-text-3);
+  cursor: not-allowed;
+}
+
+.problem-admin-tabs .tab-disabled:hover {
+  background: transparent;
+  color: var(--c-text-3);
+}
+
 /* ==================== 管理员表格 ==================== */
 /* 两行单元格（名称 + 编号/版本/心跳）由 styles.css 里历史的
    .judge-node-table td small / .admin-users-table 规则负责，这里不重复声明；

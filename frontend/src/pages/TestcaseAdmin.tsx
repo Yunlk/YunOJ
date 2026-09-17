@@ -7,6 +7,7 @@ import {
 } from '../api'
 import type { ProblemDetail, TestcasesResp, ZipPreview } from '../types'
 import PageHeader from '../components/PageHeader'
+import ProblemAdminTabs from '../components/ProblemAdminTabs'
 
 const PROBLEM_TYPE_LABELS: Record<string, string> = {
   standard: '标准',
@@ -161,10 +162,12 @@ export default function TestcaseAdmin() {
         title={`测试点 · ${problem.title}`}
         description="上传、排序并校验评测数据。"
         actions={<div className="page-actions">
-          <Link to={`/problem/${problem.id}/edit`} className="button button-secondary">返回编辑</Link>
           <Link to={`/problem/${problem.id}`} className="button button-secondary">预览题目</Link>
         </div>}
       />
+
+      {/* 与编辑页共用同一套三段式导航 */}
+      <ProblemAdminTabs problemId={problem.id} />
 
       {error && <div className="error-message">{error}</div>}
 

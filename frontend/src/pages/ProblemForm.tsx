@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { createProblem, extractError, getProblem, updateProblem } from '../api'
 import Markdown from '../components/Markdown'
 import PageHeader from '../components/PageHeader'
+import ProblemAdminTabs from '../components/ProblemAdminTabs'
 import type { CheckerMode, ProblemType, Sample } from '../types'
 import { DIFFICULTIES } from '../utils/difficulty'
 
@@ -240,10 +241,12 @@ export default function ProblemForm() {
         actions={isEdit ? (
           <div className="page-actions">
             <Link to={`/problem/${id}`} className="button button-secondary">返回题目</Link>
-            <Link to={`/admin/problems/${id}/tests`} className="button button-secondary">测试点管理</Link>
           </div>
         ) : undefined}
       />
+
+      {/* 题面 / 数据 / 列表 三段式导航，避免在编辑页与测试点页之间来回找 */}
+      <ProblemAdminTabs problemId={isEdit ? id : undefined} />
 
       <form onSubmit={submit} className="problem-form">
         <div className="layout-split">

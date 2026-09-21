@@ -384,6 +384,23 @@ func (a *API) handleContestProblem(w http.ResponseWriter, r *http.Request) {
 		dto.HackGeneratorSource = p.HackGeneratorSource
 		dto.HackReferenceSource = p.HackReferenceSource
 		dto.TestcaseCount = p.TestcaseCount
+		// 管理员需要模板来预览/核对；同时给初始代码，与选手端编辑器保持一致。
+		if harnesses, hErr := a.store.ListProblemHarnesses(ctx, p.ID); hErr == nil {
+			dto.Harnesses = make(map[string]harnessDTO, len(harnesses))
+			dto.InitialCodes = make(map[string]string, len(harnesses))
+			for _, h := range harnesses {
+				dto.Harnesses[h.Language] = harnessDTO{Template: h.Template, InitialCode: h.InitialCode}
+				dto.InitialCodes[h.Language] = h.InitialCode
+			}
+		}
+	} else if p.Type == model.ProblemTypeFunction {
+		// 函数题：选手需要初始代码才能拿到函数签名（模板不下发，属题目实现细节）。
+		if harnesses, hErr := a.store.ListProblemHarnesses(ctx, p.ID); hErr == nil {
+			dto.InitialCodes = make(map[string]string, len(harnesses))
+			for _, h := range harnesses {
+				dto.InitialCodes[h.Language] = h.InitialCode
+			}
+		}
 	}
 	if p.Type == model.ProblemTypeHack {
 		dto.HackTargetSource = p.HackTargetSource

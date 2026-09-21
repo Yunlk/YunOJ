@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   extractError,
@@ -39,7 +39,12 @@ export default function ContestProblemPage() {
   const [languages, setLanguages] = useState<Language[]>([])
   const draftScope = `contest:${contestId}:problem:${problemId}:user:${user?.id ?? 'guest'}`
   const [language, setLanguage] = useState('')
-  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language)
+  // 函数题：预填题目给出的函数骨架（本地草稿优先，见 useCodeDraft）。
+  const seedCode = useCallback(
+    (lang: string) => view?.problem.initial_codes?.[lang] ?? '',
+    [view],
+  )
+  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language, seedCode)
   const [optimize, setOptimize] = useState(true)
   const [busy, setBusy] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -80,6 +85,20 @@ export default function ContestProblemPage() {
     rememberDraftLanguage(draftScope, next)
     setLanguage(next)
   }
+
+  // 函数题骨架随题面一起到达，可能晚于「语言选定」：这时 useCodeDraft 已跑过一轮，
+  // 需要补一次种子。只在编辑器还没有内容时补，避免覆盖选手已写的代码。
+  const seededRef = useRef('')
+  useEffect(() => {
+    if (!view || !language) return
+    const seed = view.problem.initial_codes?.[language]
+    if (!seed) return
+    const mark = `${problemId}:${language}`
+    if (seededRef.current === mark) return
+    seededRef.current = mark
+    if (code.trim()) return
+    setCode(seed)
+  }, [code, language, problemId, setCode, view])
 
   const submit = async () => {
     if (!contest) return

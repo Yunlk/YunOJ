@@ -66,6 +66,10 @@ export function harnessProblems(harnesses: Record<string, ProblemHarness>): stri
     if (!h.template.includes(HARNESS_PLACEHOLDER)) {
       problems.push(`${language}：${PLACEHOLDER_HINT}`)
     }
+    // 初始代码是选手打开 IDE 看到的函数骨架，留空会让选手面对空编辑器。
+    if (!h.initial_code.trim()) {
+      problems.push(`${language}：初始代码不能为空（选手打开编辑器时要看到函数骨架）`)
+    }
   }
   return problems
 }

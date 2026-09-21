@@ -142,8 +142,11 @@ export default function ProblemHarnesses({ value, onChange, languages }: Problem
                   placeholder={'int solve(int a, int b) {\n    // TODO: 在这里实现\n    \n}'}
                 />
                 <p className="field-hint">
-                  这段会出现在选手的编辑器里（通常是函数签名与注释）。留空则编辑器从空白开始。
+                  这段会出现在选手的编辑器里（即函数签名与注释）—— 选手打开题目就该看到「函数的样子」。
                 </p>
+                {!editor.initial_code.trim() && (
+                  <p className="error-message">初始代码不能为空，否则选手打开编辑器是空白的。</p>
+                )}
               </div>
             </div>
           )}

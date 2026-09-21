@@ -9,6 +9,7 @@ import {
   runContestTest,
   submitToContest,
 } from '../api'
+import ProblemAttachmentList from '../components/ProblemAttachmentList'
 import ProblemWorkbench from '../components/ProblemWorkbench'
 import ContestHackPanel from '../components/ContestHackPanel'
 import SubmissionPanel from '../components/SubmissionPanel'
@@ -299,6 +300,7 @@ export default function ContestProblemPage() {
             {hackSection}
           </>
         )}
+        statementFooter={<ProblemAttachmentList problemId={problemId} />}
         editorFooter={problemNavigation}
         submissionPanel={(
           <SubmissionPanel

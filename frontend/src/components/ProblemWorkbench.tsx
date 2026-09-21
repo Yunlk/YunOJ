@@ -113,6 +113,15 @@ export default function ProblemWorkbench({
   submissionPanel,
 }: ProblemWorkbenchProps) {
   const hackMode = problem.type === 'hack'
+  // 函数题：题目下发了函数骨架时，工具栏提供「恢复函数」把编辑器还原成骨架。
+  // 只在有骨架、且当前内容与骨架不同时可用（避免点了没反应）。
+  const skeleton = problem.initial_codes?.[language] ?? ''
+  const canRestoreSkeleton = problem.type === 'function' && skeleton !== '' && code !== skeleton
+  const restoreSkeleton = () => {
+    if (!canRestoreSkeleton) return
+    if (!window.confirm('把编辑器内容恢复成题目给出的函数骨架？当前代码会被替换。')) return
+    onCodeChange(skeleton)
+  }
   // 兼容模式：未提供 panes 时，左栏只放题面，右栏在编辑器与提交面板之间切换
   const legacy = !panes
   const [split, setSplit] = useState(() => {
@@ -238,6 +247,16 @@ export default function ProblemWorkbench({
       <div className="wb-editor-toolbar">
         <span className="wb-code-label">{hackMode ? 'Hack 数据' : '代码'}</span>
         <div className="wb-toolbar-right">
+          {canRestoreSkeleton && (
+            <button
+              type="button"
+              className="button button-ghost button-sm"
+              onClick={restoreSkeleton}
+              title="把编辑器内容恢复成题目给出的函数骨架"
+            >
+              恢复函数
+            </button>
+          )}
           {!hackMode && (
             <div className="wb-settings">
               <button type="button" className="button button-ghost button-sm" onClick={() => setSettingsOpen((v) => !v)}>

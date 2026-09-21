@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { createProblem, extractError, getProblem, updateProblem } from '../api'
+import { createProblem, extractError, getLanguages, getProblem, updateProblem } from '../api'
 import Markdown from '../components/Markdown'
 import PageHeader from '../components/PageHeader'
 import ProblemAdminTabs from '../components/ProblemAdminTabs'
 import ProblemAttachments from '../components/ProblemAttachments'
-import type { CheckerMode, ProblemType, Sample } from '../types'
+import ProblemHarnesses from '../components/ProblemHarnesses'
+import type { CheckerMode, Language, ProblemHarness, ProblemType, Sample } from '../types'
 import { DIFFICULTIES } from '../utils/difficulty'
+import { harnessProblems } from '../utils/harness'
 
 const emptySample = (): Sample => ({ input: '', output: '', note: '' })
 
@@ -16,6 +18,7 @@ const TYPE_LABELS: Record<ProblemType, string> = {
   spj: 'Special Judge（自定义判定/部分分）',
   interactive: '交互题（与交互器通信）',
   output_only: '输出题（仅提交答案）',
+  function: '函数题（只写函数体）',
 }
 
 interface FormState {
@@ -72,12 +75,35 @@ export default function ProblemForm() {
 
   const [form, setForm] = useState<FormState>(DEFAULT_FORM)
   const [samples, setSamples] = useState<Sample[]>([emptySample()])
+  const [harnesses, setHarnesses] = useState<Record<string, ProblemHarness>>({})
+  const [languages, setLanguages] = useState<Language[]>([])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [preview, setPreview] = useState(false)
   const dirtyRef = useRef(false)
+
+  // 语言注册表用于「添加语言模板」下拉；失败不阻断表单（可手填模板）。
+  useEffect(() => {
+    let cancelled = false
+    getLanguages()
+      .then((items) => {
+        if (!cancelled) setLanguages(items)
+      })
+      .catch(() => {
+        /* 忽略：没有语言列表时仍可编辑已配置的模板 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const updateHarnesses = useCallback((next: Record<string, ProblemHarness>) => {
+    dirtyRef.current = true
+    setSavedAt(null)
+    setHarnesses(next)
+  }, [])
 
   useEffect(() => {
     if (!isEdit) return
@@ -108,6 +134,7 @@ export default function ProblemForm() {
           hack_target_source: p.hack_target_source ?? '',
         })
         setSamples(p.samples.length > 0 ? p.samples.map((s) => ({ ...s })) : [emptySample()])
+        setHarnesses(p.harnesses ?? {})
       })
       .catch((err) => setError(extractError(err)))
       .finally(() => {
@@ -191,6 +218,17 @@ export default function ProblemForm() {
       setError('Hack 题必须提供判题参考解源码')
       return
     }
+    if (form.type === 'function') {
+      const problems = harnessProblems(harnesses)
+      if (Object.keys(harnesses).length === 0) {
+        setError('函数题至少需要配置一种语言的驱动模板')
+        return
+      }
+      if (problems.length > 0) {
+        setError(problems[0])
+        return
+      }
+    }
 
     const payload = {
       title: form.title.trim(),
@@ -215,6 +253,8 @@ export default function ProblemForm() {
       status: form.status,
       provider: form.provider.trim(),
       show_score: form.show_score,
+      // 只有函数题才带语言模板；其余类型必须省略（后端会拒绝脏数据）
+      ...(form.type === 'function' ? { harnesses } : {}),
     }
 
     setSaving(true)
@@ -585,6 +625,10 @@ export default function ProblemForm() {
             )}
             {form.type === 'output_only' && (
               <div className="info-message">输出题：选手仅提交答案文件，不使用测试点。限制与样例照常展示。</div>
+            )}
+
+            {form.type === 'function' && (
+              <ProblemHarnesses value={harnesses} onChange={updateHarnesses} languages={languages} />
             )}
 
             <ProblemAttachments problemId={isEdit ? id : undefined} />

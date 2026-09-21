@@ -11,6 +11,7 @@ import ProblemAdminTabs from '../components/ProblemAdminTabs'
 
 const PROBLEM_TYPE_LABELS: Record<string, string> = {
   standard: '标准',
+  function: '函数题',
   hack: 'Hack',
   spj: 'SPJ',
   interactive: '交互',

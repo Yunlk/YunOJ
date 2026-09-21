@@ -26,6 +26,7 @@ import type {
   ProblemDetail,
   ProblemAttachment,
   ProblemFacets,
+  ProblemHarness,
   ProblemListItem,
   Sample,
   SubmissionDetail,
@@ -321,18 +322,20 @@ export interface ProblemInput {
   tags: string[]
   type: string
   checker_mode: 'token' | 'exact'
-	spj_source: string
-	interactor_source: string
-	hack_generator_source: string
-	hack_reference_source: string
-	hack_target_source: string
-	testcase_scores: number[]
+  spj_source: string
+  interactor_source: string
+  hack_generator_source: string
+  hack_reference_source: string
+  hack_target_source: string
+  testcase_scores: number[]
   submission_limit: number
   status: string
   /** 提供者/来源（可空，如「Codeforces 1900E」） */
   provider: string
   /** 是否向选手展示该题分数 */
   show_score: boolean
+  /** 函数题的语言模板（全量替换语义：没带的语言即删除；非函数题必须为空/省略） */
+  harnesses?: Record<string, ProblemHarness>
 }
 
 // ---- 题目管理后台 ----

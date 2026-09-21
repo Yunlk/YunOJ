@@ -229,13 +229,21 @@ export interface ProblemFacets {
 }
 
 export type ProblemStatus = 'draft' | 'published' | 'disabled'
-export type ProblemType = 'standard' | 'hack' | 'spj' | 'interactive' | 'output_only'
+export type ProblemType = 'standard' | 'hack' | 'spj' | 'interactive' | 'output_only' | 'function'
 export type CheckerMode = 'token' | 'exact'
 
 export interface Sample {
   input: string
   output: string
   note: string
+}
+
+/** 函数题单语言的驱动模板与初始代码。 */
+export interface ProblemHarness {
+  /** 驱动模板：负责 IO 与调用选手函数，用 {{code}} 标记选手代码位置 */
+  template: string
+  /** 编辑器打开时预填的骨架（函数签名与注释） */
+  initial_code: string
 }
 
 export interface ProblemDetail extends ProblemListItem {
@@ -257,12 +265,16 @@ export interface ProblemDetail extends ProblemListItem {
   show_score: boolean
   is_favorite?: boolean
   // 管理员专属
-	spj_source?: string
-	interactor_source?: string
-	hack_generator_source?: string
-	hack_reference_source?: string
-	hack_target_source?: string
-	testcase_count?: number
+  spj_source?: string
+  interactor_source?: string
+  hack_generator_source?: string
+  hack_reference_source?: string
+  hack_target_source?: string
+  testcase_count?: number
+  /** 函数题：管理员拿到全部语言模板（编辑用） */
+  harnesses?: Record<string, ProblemHarness>
+  /** 函数题：选手拿到各语言的初始代码（预填编辑器） */
+  initial_codes?: Record<string, string>
 }
 
 export interface TestcaseItem {

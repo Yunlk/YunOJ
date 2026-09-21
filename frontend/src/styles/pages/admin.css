@@ -400,6 +400,54 @@
   margin: var(--space-2) 0 0;
 }
 
+/* ==================== 函数题语言模板 ==================== */
+/* 语言 tab 和「添加语言」下拉同一行；模板两个 textarea 上下排，等宽。 */
+.app-shell .harness-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.app-shell .harness-langs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.app-shell .harness-add {
+  width: auto;
+  min-width: 148px;
+  flex: 0 0 auto;
+}
+
+/* 模板有问题的语言：在 tab 上给一个红色数量徽标（沿用 .tab-count 的尺寸）。 */
+.app-shell .harness-tab-bad {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+}
+
+.app-shell .harness-editor {
+  margin-top: var(--space-4);
+}
+
+/* 驱动模板/初始代码都是代码，用等宽字体且允许纵向拉伸。 */
+.app-shell .harness-editor .code-editor-textarea {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+  min-height: 168px;
+  resize: vertical;
+  tab-size: 4;
+}
+
+.app-shell .harness-problems {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
+  list-style: disc;
+}
+
 /* ==================== 窄屏 ==================== */
 
 @media (max-width: 960px) {

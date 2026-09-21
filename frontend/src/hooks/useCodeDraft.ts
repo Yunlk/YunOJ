@@ -35,11 +35,15 @@ export function rememberDraftLanguage(scope: string, language: string): void {
   if (language) write(languageKey(scope), language)
 }
 
-export function useCodeDraft(scope: string, language: string) {
+export function useCodeDraft(scope: string, language: string, seedFor?: (language: string) => string) {
   const [code, setCode] = useState('')
   const codeRef = useRef('')
   const keyRef = useRef('')
   const timerRef = useRef<number | null>(null)
+  // 初始代码（函数题的函数骨架）放在 ref 里：它随题目数据到达而变化，
+  // 但不能因为父组件重渲染就让 effect 重跑、把选手正在编辑的内容冲掉。
+  const seedRef = useRef(seedFor)
+  seedRef.current = seedFor
 
   const flush = useCallback(() => {
     if (timerRef.current !== null) {
@@ -54,8 +58,10 @@ export function useCodeDraft(scope: string, language: string) {
     const nextKey = language ? codeKey(scope, language) : ''
     keyRef.current = nextKey
     const restored = nextKey ? read(nextKey) : ''
-    codeRef.current = restored
-    setCode(restored)
+    // 本地草稿优先；没有草稿时才用题目给的初始代码（函数题骨架）。
+    const seeded = restored || (language && seedRef.current ? seedRef.current(language) : '')
+    codeRef.current = seeded
+    setCode(seeded)
   }, [flush, language, scope])
 
   useEffect(() => () => flush(), [flush])

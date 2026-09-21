@@ -50,7 +50,12 @@ export default function ProblemDetail() {
   const [languages, setLanguages] = useState<Language[]>([])
   const draftScope = `${assignmentId ? `assignment:${assignmentId}:` : ''}problem:${id}:user:${user?.id ?? 'guest'}`
   const [language, setLanguage] = useState('')
-  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language)
+  // 函数题：打开时预填题目给的函数骨架（本地草稿优先，见 useCodeDraft）。
+  const seedCode = useCallback(
+    (lang: string) => problem?.initial_codes?.[lang] ?? '',
+    [problem],
+  )
+  const { code, setCode, flushDraft } = useCodeDraft(draftScope, language, seedCode)
   const [optimize, setOptimize] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -143,6 +148,21 @@ export default function ProblemDetail() {
     rememberDraftLanguage(draftScope, next)
     setLanguage(next)
   }
+
+  // 函数题的骨架随题目详情一起到达，可能比「语言选定」更晚：
+  // 这时 useCodeDraft 已经跑过一轮，需要补一次种子。
+  // 只在该语言还没有任何内容时补，避免覆盖选手正在写（或已清空）的代码。
+  const seededRef = useRef('')
+  useEffect(() => {
+    if (!problem || !language) return
+    const seed = problem.initial_codes?.[language]
+    if (!seed) return
+    const mark = `${problem.id}:${language}`
+    if (seededRef.current === mark) return
+    seededRef.current = mark
+    if (code.trim()) return
+    setCode(seed)
+  }, [code, language, problem, setCode])
 
   const submit = async () => {
     if (!user) {

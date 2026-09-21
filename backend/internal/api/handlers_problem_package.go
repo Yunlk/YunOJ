@@ -57,7 +57,21 @@ func problemPackagePayload(p model.Problem) problemPayload {
 		InteractorSource: p.InteractorSource, HackGeneratorSource: p.HackGeneratorSource,
 		HackReferenceSource: p.HackReferenceSource, HackTargetSource: p.HackTargetSource, TestcaseScores: p.TestcaseScores,
 		SubmissionLimit: p.SubmissionLimit, Status: p.Status,
+		Provider: p.Provider, ShowScore: &p.ShowScore,
 	}
+}
+
+// problemPackagePayloadWithHarnesses 打包时带上函数题的语言模板。
+func problemPackagePayloadWithHarnesses(p model.Problem, harnesses []model.ProblemHarness) problemPayload {
+	payload := problemPackagePayload(p)
+	if len(harnesses) == 0 {
+		return payload
+	}
+	payload.Harnesses = make(map[string]harnessPayload, len(harnesses))
+	for _, h := range harnesses {
+		payload.Harnesses[h.Language] = harnessPayload{Template: h.Template, InitialCode: h.InitialCode}
+	}
+	return payload
 }
 
 func readProblemPackageEntry(f *zip.File) ([]byte, error) {
@@ -211,7 +225,14 @@ func (a *API) handleExportProblemPackage(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "导出失败")
 		return
 	}
-	manifest := problemPackageManifest{Version: 1, Problem: problemPackagePayload(p)}
+	// 函数题的语言模板随迁移包一起走，否则导入后无法评测。
+	harnesses, err := a.store.ListProblemHarnesses(r.Context(), id)
+	if err != nil {
+		slogError(r, "读取函数题模板", err)
+		writeError(w, http.StatusInternalServerError, "导出失败")
+		return
+	}
+	manifest := problemPackageManifest{Version: 1, Problem: problemPackagePayloadWithHarnesses(p, harnesses)}
 	var cases []model.ProblemTestCase
 	if p.Type != model.ProblemTypeOutputOnly {
 		cases, err = a.store.ListTestcases(r.Context(), id)
@@ -349,6 +370,12 @@ func (a *API) handleImportProblemPackage(w http.ResponseWriter, r *http.Request)
 	cleanup := func() {
 		_ = a.store.DeleteProblem(r.Context(), p.ID)
 		_ = data.RemoveTests(a.cfg.DataDir, p.ID)
+	}
+	if err := a.saveHarnesses(r.Context(), p.ID, payloadHarnesses(manifest.Problem)); err != nil {
+		slogError(r, "导入函数题模板", err)
+		cleanup()
+		writeError(w, http.StatusInternalServerError, "导入失败：函数题模板保存失败")
+		return
 	}
 	if p.Type != model.ProblemTypeOutputOnly {
 		var tests bytes.Buffer

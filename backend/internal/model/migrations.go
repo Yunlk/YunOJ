@@ -517,6 +517,25 @@ var migrations = []migration{
 				ON problem_attachments (problem_id, id)`,
 		},
 	},
+	{
+		version: 23,
+		name:    "problem_function_harness",
+		stmts: []string{
+			// 函数题（LeetCode 风格）：题目给出函数签名与「驱动模板 + 初始代码」，
+			// 选手只写函数体；评测时把选手代码拼进模板后再编译运行。
+			// 每道题每种语言一份：template 里用 {{code}} 占位选手代码，
+			// initial_code 是编辑器打开时预填的骨架（含签名与注释）。
+			`CREATE TABLE IF NOT EXISTS problem_harnesses (
+				problem_id   BIGINT NOT NULL REFERENCES problems(id) ON DELETE CASCADE,
+				language     TEXT NOT NULL,
+				template     TEXT NOT NULL DEFAULT '',
+				initial_code TEXT NOT NULL DEFAULT '',
+				created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (problem_id, language)
+			)`,
+		},
+	},
 }
 
 // Migrate 按版本顺序应用尚未执行的迁移。所有语句都是幂等的

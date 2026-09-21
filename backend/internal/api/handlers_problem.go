@@ -1,17 +1,20 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/yunoj/yunoj/internal/data"
+	"github.com/yunoj/yunoj/internal/langs"
 	"github.com/yunoj/yunoj/internal/model"
 	"github.com/yunoj/yunoj/internal/store"
 )
@@ -201,6 +204,15 @@ type problemDetailDTO struct {
 	TestcaseCount       int64  `json:"testcase_count,omitempty"`
 	AttachmentCount     int64  `json:"attachment_count,omitempty"`
 	IsFavorite          bool   `json:"is_favorite,omitempty"`
+	// 函数题：管理员拿到全部语言模板（编辑用），选手只拿到初始代码（预填编辑器）。
+	Harnesses    map[string]harnessDTO `json:"harnesses,omitempty"`
+	InitialCodes map[string]string     `json:"initial_codes,omitempty"`
+}
+
+// harnessDTO 函数题单语言的模板与初始代码（详情接口用）。
+type harnessDTO struct {
+	Template    string `json:"template"`
+	InitialCode string `json:"initial_code"`
 }
 
 // handleGetProblem 题目详情。
@@ -252,6 +264,26 @@ func (a *API) handleGetProblem(w http.ResponseWriter, r *http.Request) {
 		dto.HackReferenceSource = p.HackReferenceSource
 		dto.TestcaseCount = p.TestcaseCount
 		dto.AttachmentCount = p.AttachmentCount
+		// 管理员需要看到并编辑全部语言模板；同时也给初始代码，
+		// 这样管理员预览题目时看到的编辑器和选手完全一致。
+		if harnesses, hErr := a.store.ListProblemHarnesses(r.Context(), p.ID); hErr == nil {
+			dto.Harnesses = make(map[string]harnessDTO, len(harnesses))
+			dto.InitialCodes = make(map[string]string, len(harnesses))
+			for _, h := range harnesses {
+				dto.Harnesses[h.Language] = harnessDTO{
+					Template: h.Template, InitialCode: h.InitialCode,
+				}
+				dto.InitialCodes[h.Language] = h.InitialCode
+			}
+		}
+	} else if p.Type == model.ProblemTypeFunction {
+		// 选手只需要初始代码（模板属于题目实现细节，且暴露模板等于泄露 IO 约定）。
+		if harnesses, hErr := a.store.ListProblemHarnesses(r.Context(), p.ID); hErr == nil {
+			dto.InitialCodes = make(map[string]string, len(harnesses))
+			for _, h := range harnesses {
+				dto.InitialCodes[h.Language] = h.InitialCode
+			}
+		}
 	}
 	if p.Type == model.ProblemTypeHack {
 		// Hack 题的目标程序是题面的一部分，参赛者需要据此构造攻击数据。
@@ -272,7 +304,7 @@ type problemPayload struct {
 	MemoryLimitKb int            `json:"memory_limit_kb"`
 	Difficulty    int            `json:"difficulty"`
 	Tags          []string       `json:"tags"`
-	// Type 题目类型：standard | hack | spj | interactive | output_only（空 = standard）
+	// Type 题目类型：standard | hack | spj | interactive | output_only | function（空 = standard）
 	Type string `json:"type"`
 	// CheckerMode 标准题输出判定：token | exact（空 = token）
 	CheckerMode string `json:"checker_mode"`
@@ -296,6 +328,17 @@ type problemPayload struct {
 	Provider string `json:"provider"`
 	// ShowScore 是否展示该题分数（默认 true）
 	ShowScore *bool `json:"show_score"`
+	// Harnesses 函数题（type=function）的语言模板：{"cpp": {...}, "python": {...}}
+	// 全量替换语义：请求里没带的语言即删除。非函数题忽略该字段。
+	Harnesses map[string]harnessPayload `json:"harnesses"`
+}
+
+// harnessPayload 函数题单语言的模板与初始代码。
+type harnessPayload struct {
+	// Template 驱动模板，必须含 {{code}} 占位符。
+	Template string `json:"template"`
+	// InitialCode 编辑器预填的骨架（可空，空则前端只填模板里的占位说明）。
+	InitialCode string `json:"initial_code"`
 }
 
 // payloadShowScore 缺省为 true（老客户端不带该字段时保持原行为）。
@@ -327,6 +370,11 @@ func (a *API) handleCreateProblem(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.CreateProblem(r.Context(), &p); err != nil {
 		slogError(r, "创建题目", err)
 		writeError(w, http.StatusInternalServerError, "创建失败")
+		return
+	}
+	if err := a.saveHarnesses(r.Context(), p.ID, payloadHarnesses(payload)); err != nil {
+		slogError(r, "保存函数题模板", err)
+		writeError(w, http.StatusInternalServerError, "题目已创建，但函数题模板保存失败")
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -362,6 +410,12 @@ func (a *API) handleUpdateProblem(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slogError(r, "更新题目", err)
 		writeError(w, http.StatusInternalServerError, "更新失败")
+		return
+	}
+	// 模板全量替换：请求里没带的语言即删除；改成非函数题则清空。
+	if err := a.saveHarnesses(r.Context(), p.ID, payloadHarnesses(payload)); err != nil {
+		slogError(r, "保存函数题模板", err)
+		writeError(w, http.StatusInternalServerError, "题目已保存，但函数题模板保存失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, p)
@@ -496,7 +550,8 @@ func validateProblem(p problemPayload) string {
 		ptype = model.ProblemTypeStandard
 	}
 	switch ptype {
-	case model.ProblemTypeStandard, model.ProblemTypeHack, model.ProblemTypeSPJ, model.ProblemTypeInteractive, model.ProblemTypeOutputOnly:
+	case model.ProblemTypeStandard, model.ProblemTypeHack, model.ProblemTypeSPJ, model.ProblemTypeInteractive,
+		model.ProblemTypeOutputOnly, model.ProblemTypeFunction:
 	default:
 		return "无效的题目类型"
 	}
@@ -509,8 +564,8 @@ func validateProblem(p problemPayload) string {
 	default:
 		return "无效的输出判定模式（token/exact）"
 	}
-	if ptype != model.ProblemTypeStandard && checkerMode != model.CheckerModeToken {
-		return "仅标准题支持 Exact 输出判定"
+	if ptype != model.ProblemTypeStandard && ptype != model.ProblemTypeFunction && checkerMode != model.CheckerModeToken {
+		return "仅标准题与函数题支持 Exact 输出判定"
 	}
 	if ptype == model.ProblemTypeSPJ && strings.TrimSpace(p.SPJSource) == "" {
 		return "SPJ 题目必须提供 spj_source"
@@ -553,6 +608,55 @@ func validateProblem(p problemPayload) string {
 	}
 	if utf8.RuneCountInString(strings.TrimSpace(p.Provider)) > 128 {
 		return "提供者/来源最多 128 字符"
+	}
+	if msg := validateHarnesses(ptype, p.Harnesses); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+// 函数题模板总量上限：单语言 64KB，全体语言合计 256KB。
+const (
+	maxHarnessSourceBytes = 64 << 10
+	maxHarnessTotalBytes  = 256 << 10
+)
+
+// validateHarnesses 校验函数题的语言模板配置。
+// 非函数题不允许带模板（避免切类型后残留脏数据）。
+func validateHarnesses(ptype string, harnesses map[string]harnessPayload) string {
+	if ptype != model.ProblemTypeFunction {
+		if len(harnesses) > 0 {
+			return "只有函数题（function）可以配置语言模板"
+		}
+		return ""
+	}
+	if len(harnesses) == 0 {
+		return "函数题至少需要配置一种语言的驱动模板"
+	}
+	if len(harnesses) > 16 {
+		return "函数题最多配置 16 种语言"
+	}
+	total := 0
+	for key, h := range harnesses {
+		if !langs.ValidKey(key) {
+			return "无效的语言键: " + key
+		}
+		if strings.TrimSpace(h.Template) == "" {
+			return key + " 的驱动模板不能为空"
+		}
+		if !strings.Contains(h.Template, model.HarnessPlaceholder) {
+			return key + " 的驱动模板必须包含 " + model.HarnessPlaceholder + " 占位符（选手代码会替换到这里）"
+		}
+		if len(h.Template) > maxHarnessSourceBytes {
+			return key + " 的驱动模板过长（最大 64KB）"
+		}
+		if len(h.InitialCode) > maxHarnessSourceBytes {
+			return key + " 的初始代码过长（最大 64KB）"
+		}
+		total += len(h.Template) + len(h.InitialCode)
+	}
+	if total > maxHarnessTotalBytes {
+		return "函数题模板总量过大（最大 256KB）"
 	}
 	return ""
 }
@@ -612,4 +716,32 @@ func payloadToProblem(payload problemPayload) model.Problem {
 // slogError 统一的内部错误日志。
 func slogError(r *http.Request, action string, err error) {
 	slog.Error(action, "path", r.URL.Path, "err", err)
+}
+
+// payloadHarnesses 把请求里的语言模板转成模型切片（按语言键排序，稳定存储）。
+// 非函数题返回 nil，调用方据此清空该题已有的模板。
+func payloadHarnesses(p problemPayload) []model.ProblemHarness {
+	if p.Type != model.ProblemTypeFunction || len(p.Harnesses) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(p.Harnesses))
+	for key := range p.Harnesses {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]model.ProblemHarness, 0, len(keys))
+	for _, key := range keys {
+		h := p.Harnesses[key]
+		out = append(out, model.ProblemHarness{
+			Language:    key,
+			Template:    h.Template,
+			InitialCode: h.InitialCode,
+		})
+	}
+	return out
+}
+
+// saveHarnesses 保存函数题模板。非函数题调用也安全（清空残留模板）。
+func (a *API) saveHarnesses(ctx context.Context, problemID int64, harnesses []model.ProblemHarness) error {
+	return a.store.ReplaceProblemHarnesses(ctx, problemID, harnesses)
 }

@@ -274,18 +274,21 @@ func (s *Store) SetJudgedWithWall(ctx context.Context, id int64, status, compile
 		timeMs, wallTimeMs, memoryKb, 0, false, "", "", 0, false)
 }
 
-// SetJudgedClaimed 仅允许当前评测租约写回结果。
+// SetJudgedClaimed 仅允许当前评测租约写回结果（不带逐点分数，见 WithWall 版本）。
 func (s *Store) SetJudgedClaimed(ctx context.Context, id int64, nodeID, workerID string, attempt int,
 	status, compileError string, caseResults []model.CaseResult, timeMs, memoryKb int) error {
 	return s.SetJudgedClaimedWithWall(ctx, id, nodeID, workerID, attempt,
-		status, compileError, caseResults, timeMs, 0, memoryKb)
+		status, compileError, caseResults, nil, timeMs, 0, memoryKb, 0)
 }
 
-// SetJudgedClaimedWithWall 仅允许当前评测租约写回结果，并保存墙钟耗时。
+// SetJudgedClaimedWithWall 是普通（非比赛）提交的带租约最终写回，保存墙钟耗时与分数。
+// 逐点分数与总分同样要落库：题目页/提交详情靠它展示「100 分」「部分分」，
+// 早期这里写死 0，导致练习提交通过后也显示 0 分。
 func (s *Store) SetJudgedClaimedWithWall(ctx context.Context, id int64, nodeID, workerID string, attempt int,
-	status, compileError string, caseResults []model.CaseResult, timeMs, wallTimeMs, memoryKb int) error {
-	return s.setJudgedFull(ctx, id, status, compileError, caseResults, nil,
-		timeMs, wallTimeMs, memoryKb, 0, false, nodeID, workerID, attempt, true)
+	status, compileError string, caseResults []model.CaseResult, caseScores []int,
+	timeMs, wallTimeMs, memoryKb, score int) error {
+	return s.setJudgedFull(ctx, id, status, compileError, caseResults, caseScores,
+		timeMs, wallTimeMs, memoryKb, score, false, nodeID, workerID, attempt, true)
 }
 
 // SetJudgedFull 写入最终判定结果，支持比赛计分（逐点分数、总分与冻结标记）。

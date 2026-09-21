@@ -247,6 +247,22 @@ type ProblemAttachment struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+// ProblemHarness 函数题在某种语言下的「驱动模板 + 初始代码」。
+// Template 里必须有 {{code}} 占位符，评测时被选手提交的代码替换掉，
+// 拼装后的完整源码走与标准题相同的编译/比对流程。
+type ProblemHarness struct {
+	ProblemID int64  `json:"problem_id"`
+	Language  string `json:"language"`
+	// Template 驱动模板：包含 main/IO 样板，用 {{code}} 标记选手代码的位置。
+	Template string `json:"template"`
+	// InitialCode 编辑器预填的初始代码（函数签名与说明），选手在此基础上补全。
+	InitialCode string    `json:"initial_code"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// HarnessPlaceholder 是驱动模板里选手代码的占位符。
+const HarnessPlaceholder = "{{code}}"
+
 // 题目类型。
 const (
 	ProblemTypeStandard    = "standard"
@@ -254,6 +270,8 @@ const (
 	ProblemTypeSPJ         = "spj"
 	ProblemTypeInteractive = "interactive"
 	ProblemTypeOutputOnly  = "output_only"
+	// ProblemTypeFunction 函数题：只写函数体，驱动模板负责 IO 与调用。
+	ProblemTypeFunction = "function"
 )
 
 // 标准题输出判定模式。SPJ/交互题使用各自的评测器协议。

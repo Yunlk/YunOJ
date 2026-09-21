@@ -221,6 +221,12 @@ func ByKey(key string) (Language, bool) {
 	return Language{}, false
 }
 
+// ValidKey 判断语言键是否为已注册语言（函数题模板校验用）。
+func ValidKey(key string) bool {
+	_, ok := ByKey(key)
+	return ok
+}
+
 func setRegistry(languages []Language) {
 	registryMu.Lock()
 	registry = cloneLanguages(languages)

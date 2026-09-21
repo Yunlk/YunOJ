@@ -77,7 +77,7 @@ func (a *API) handleListTestcases(w http.ResponseWriter, r *http.Request) {
 		"count":        len(dtos),
 		"total_score":  total,
 		"problem_type": p.Type,
-		// 完整性：output_only 不要求；其余需 ≥1 个测试点且总分 100
+		// 完整性：output_only 不要求；其余（含函数题）需 ≥1 个测试点且总分 100
 		"score_valid": p.Type == model.ProblemTypeOutputOnly ||
 			(len(dtos) > 0 && total == 100),
 	})
@@ -647,7 +647,7 @@ func (a *API) handleReorderTestcases(w http.ResponseWriter, r *http.Request) {
 
 // enforceScoreInvariant 分值完整性约束：
 //   - 草稿/停用题目：允许任意中间状态（总分不要求 100）；
-//   - 已发布题目：standard/hack/spj/interactive 必须 ≥1 个测试点且总分恰好 100
+//   - 已发布题目：standard/hack/spj/interactive/function 必须 ≥1 个测试点且总分恰好 100
 //     （Codeforces 风格 Hack 目标程序模式例外，不依赖题目测试点；发布校验见 handleUpdateProblemStatus）。
 func enforceScoreInvariant(p model.Problem, tcs []model.ProblemTestCase) string {
 	if p.Status != model.ProblemStatusPublished {

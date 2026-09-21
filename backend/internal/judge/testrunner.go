@@ -72,7 +72,23 @@ func (r *Runner) Test(ctx context.Context, task TestTask) TestResult {
 	}
 
 	boxDir := r.Sandbox.BoxDir(r.BoxID)
-	if err := os.WriteFile(filepath.Join(boxDir, lang.SourceFile), []byte(task.Code), 0o644); err != nil {
+	problem, err := r.Store.GetProblem(ctx, task.ProblemID)
+	if err != nil {
+		res.CompileError = "题目不存在"
+		return res
+	}
+	// 函数题：自测与正式评测走同一套拼装规则（只写函数体才套模板）。
+	source := task.Code
+	if problem.Type == model.ProblemTypeFunction {
+		stitched, ok, reason := r.functionSource(ctx, problem, lang.Key, task.Code)
+		if !ok {
+			res.Status = model.StatusCompileError
+			res.CompileError = reason
+			return res
+		}
+		source = stitched
+	}
+	if err := os.WriteFile(filepath.Join(boxDir, lang.SourceFile), []byte(source), 0o644); err != nil {
 		res.CompileError = "写入源码失败"
 		return res
 	}
@@ -82,12 +98,6 @@ func (r *Runner) Test(ctx context.Context, task TestTask) TestResult {
 			res.CompileError = stderr
 			return res
 		}
-	}
-
-	problem, err := r.Store.GetProblem(ctx, task.ProblemID)
-	if err != nil {
-		res.CompileError = "题目不存在"
-		return res
 	}
 
 	res.Status = model.StatusAccepted

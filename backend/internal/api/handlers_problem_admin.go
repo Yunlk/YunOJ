@@ -52,6 +52,8 @@ func (a *API) handleCopyProblem(w http.ResponseWriter, r *http.Request) {
 		TestcaseScores:      src.TestcaseScores,
 		SubmissionLimit:     src.SubmissionLimit,
 		Status:              model.ProblemStatusDraft,
+		Provider:            src.Provider,
+		ShowScore:           src.ShowScore,
 	}
 	if err := a.store.CreateProblem(r.Context(), &dst); err != nil {
 		slogError(r, "复制题目", err)
@@ -61,6 +63,10 @@ func (a *API) handleCopyProblem(w http.ResponseWriter, r *http.Request) {
 	// 测试数据文件 + manifest
 	if err := data.CopyTests(a.cfg.DataDir, src.ID, dst.ID); err != nil {
 		slogError(r, "复制测试数据", err)
+	}
+	// 函数题的语言模板也要一起复制，否则副本没法评测。
+	if err := a.store.CopyProblemHarnesses(r.Context(), src.ID, dst.ID); err != nil {
+		slogError(r, "复制函数题模板", err)
 	}
 	if tcs, err := a.store.ListTestcases(r.Context(), src.ID); err == nil && len(tcs) > 0 {
 		for i := range tcs {

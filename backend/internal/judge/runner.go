@@ -68,8 +68,8 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 				sub.TimeMs, sub.WallTimeMs, sub.MemoryKb, 0, sub.IsFrozen)
 		}
 		return r.Store.SetJudgedClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
-			model.StatusWrongAnswer, sub.CompileError, sub.CaseResults,
-			sub.TimeMs, sub.WallTimeMs, sub.MemoryKb)
+			model.StatusWrongAnswer, sub.CompileError, sub.CaseResults, sub.CaseScores,
+			sub.TimeMs, sub.WallTimeMs, sub.MemoryKb, 0)
 	}
 
 	problem, err := r.Store.GetProblem(ctx, sub.ProblemID)
@@ -149,6 +149,18 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 					}
 				}
 			}
+			// 函数题：把选手代码与题目的语言模板拼装成一个完整程序。
+			// 拼装失败（模板没配/代码为空）按编译错误处理，不进入沙箱。
+			source := sub.Code
+			if problem.Type == model.ProblemTypeFunction {
+				stitched, ok, reason := r.functionSource(ctx, problem, lang.Key, sub.Code)
+				if !ok {
+					compileError = reason
+					verdict = model.StatusCompileError
+				} else {
+					source = stitched
+				}
+			}
 			// 调度器：按题目类型分发到对应评测流水线
 			switch problem.Type {
 			case model.ProblemTypeSPJ:
@@ -157,9 +169,11 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeInteractiveInBox(ctx, sub, problem, lang, judgeCases)
 			case model.ProblemTypeHack:
 				verdict, compileError, results, scores, timeMs, memoryKb = r.judgeHackInBox(ctx, sub, problem, lang, judgeCases)
-			case model.ProblemTypeStandard, "":
-				verdict, compileError, results, timeMs, memoryKb = r.judgeInBox(ctx, sub, problem, lang, judgeCases)
-				scores = computeStandardScores(judgeCases, results)
+			case model.ProblemTypeStandard, model.ProblemTypeFunction, "":
+				if compileError == "" {
+					verdict, compileError, results, timeMs, memoryKb = r.judgeInBox(ctx, sub, problem, lang, source, judgeCases)
+					scores = computeStandardScores(judgeCases, results)
+				}
 			default:
 				compileError = "暂不支持的题目类型: " + problem.Type
 			}
@@ -197,8 +211,13 @@ func (r *Runner) Judge(ctx context.Context, submissionID int64) error {
 			_ = r.Queue.PublishContestUpdate(ctx, *sub.ContestID)
 		}
 	} else {
+		// 练习提交：逐点分数与总分同样落库（题目页/详情要展示得分与部分分）。
+		total := 0
+		for _, s := range scores {
+			total += s
+		}
 		if err := r.Store.SetJudgedClaimedWithWall(ctx, submissionID, r.NodeID, r.WorkerID, attempt,
-			verdict, compileError, results, timeMs, wallTimeMs, memoryKb); err != nil {
+			verdict, compileError, results, scores, timeMs, wallTimeMs, memoryKb, total); err != nil {
 			return err
 		}
 	}
@@ -388,13 +407,13 @@ func applyCaseVerdict(verdict, caseStatus string) (next string, stop bool) {
 
 // judgeInBox 在沙箱内完成「写源码 → 编译 → 逐点运行比较」全流程。
 func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem model.Problem,
-	lang langs.Language, judgeCases []judgeCase) (
+	lang langs.Language, source string, judgeCases []judgeCase) (
 	verdict, compileError string, results []model.CaseResult, timeMs, memoryKb int) {
 
 	boxDir := r.Sandbox.BoxDir(r.BoxID)
 
-	// 1. 写入源码
-	if err := os.WriteFile(filepath.Join(boxDir, lang.SourceFile), []byte(sub.Code), 0o644); err != nil {
+	// 1. 写入源码（函数题的 source 已由调用方拼装完成）
+	if err := os.WriteFile(filepath.Join(boxDir, lang.SourceFile), []byte(source), 0o644); err != nil {
 		return model.StatusSystemError, "写入源码失败", nil, 0, 0
 	}
 
@@ -429,6 +448,20 @@ func (r *Runner) judgeInBox(ctx context.Context, sub model.Submission, problem m
 		}
 	}
 	return verdict, "", results, timeMs, memoryKb
+}
+
+// functionSource 取函数题该语言的驱动模板并拼装源码。
+// 失败时返回用户可见的原因（按编译错误展示）。
+func (r *Runner) functionSource(ctx context.Context, problem model.Problem, languageKey, code string) (string, bool, string) {
+	harness, err := r.Store.GetProblemHarness(ctx, problem.ID, languageKey)
+	if err != nil {
+		// 该语言没配模板：明确告知而不是给出莫名其妙的编译错误。
+		return "", false, "本题暂不支持该语言的函数题提交（题目未配置 " + languageKey + " 模板）"
+	}
+	if !harnessTemplateReady(harness) {
+		return "", false, "题目模板缺少 " + model.HarnessPlaceholder + " 占位符，请联系管理员"
+	}
+	return harnessSource(harness, languageKey, code)
 }
 
 // compile 在沙箱内编译，失败时返回截断后的编译错误信息。

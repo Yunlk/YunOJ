@@ -79,7 +79,13 @@ const basePayload = (overrides = {}) => ({
 
 let problemId = 0
 let contestId = 0
+let attachmentId = 0
 const cleanup = async () => {
+  if (attachmentId && problemId) {
+    await fetch(`${API}/problems/${problemId}/attachments/${attachmentId}`, {
+      method: 'DELETE', headers: adminAuth,
+    })
+  }
   if (contestId) {
     await fetch(`${API}/contests/${contestId}`, { method: 'DELETE', headers: adminAuth })
   }
@@ -107,6 +113,13 @@ try {
     body: JSON.stringify(basePayload({ type: 'standard' })),
   })
   check('非函数题带语言模板时创建被拒', strayHarness.status === 400, String(strayHarness.status))
+
+  // 初始代码是选手打开 IDE 看到的函数骨架（力扣风格），留空必须被拒。
+  const emptyInitial = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth,
+    body: JSON.stringify(basePayload({ harnesses: { cpp: { template: CPP_TEMPLATE, initial_code: '   ' } } })),
+  })
+  check('初始代码为空时创建被拒（否则选手面对空编辑器）', emptyInitial.status === 400, String(emptyInitial.status))
 
   /* ---------- 2. 建题 ---------- */
   console.log('\n== 建立函数题 ==')
@@ -436,6 +449,68 @@ int main() {
     )
     check('比赛内解题页编辑器预填函数骨架', /add/.test(contestEditor),
       contestEditor.slice(0, 80).replace(/\s+/g, ' '))
+
+    /* ---- 比赛内附件：必须显示（比赛专用题常为草稿，公共可见性规则看不到它） ---- */
+    // 关键点：把题目切成草稿态。比赛专用题绝大多数是草稿，
+    // 此时「已发布题目对所有人可见」的规则不适用，只有参赛者才该看到附件。
+    const toDraft = await fetch(`${API}/problems/${problemId}`, {
+      method: 'PUT', headers: adminAuth, body: JSON.stringify(basePayload({ status: 'draft' })),
+    })
+    check('可以把比赛题切回草稿态（模拟比赛专用题）', toDraft.ok, String(toDraft.status))
+
+    const attForm = new FormData()
+    attForm.append('file', new Blob(['probe-attachment']), 'probe-比赛附件.txt')
+    const attUp = await fetch(`${API}/problems/${problemId}/attachments`, {
+      method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: attForm,
+    })
+    const attBody = await attUp.json().catch(() => null)
+    attachmentId = attBody?.id ?? 0
+    check('管理员可给题目上传附件', attUp.ok && attachmentId > 0,
+      `${attUp.status} ${JSON.stringify(attBody).slice(0, 120)}`)
+
+    if (attachmentId) {
+      // 选手经比赛报名后必须能列出并下载草稿题的附件（这正是修复点之前会 404 的场景）
+      const stuList = await fetch(`${API}/problems/${problemId}/attachments`, { headers: studentAuth })
+      const stuBody = await stuList.json().catch(() => null)
+      check('参赛选手能列出草稿比赛题的附件',
+        stuList.ok && (stuBody?.items ?? []).some((a) => a.id === attachmentId),
+        `${stuList.status} ${JSON.stringify(stuBody).slice(0, 140)}`)
+
+      const stuDl = await fetch(`${API}/problems/${problemId}/attachments/${attachmentId}/download`, {
+        headers: studentAuth,
+      })
+      check('参赛选手能下载草稿比赛题的附件', stuDl.ok, String(stuDl.status))
+
+      // 未报名/未登录的人不应经此放行（草稿题 + 非参赛者 → 404）
+      const anonList = await fetch(`${API}/problems/${problemId}/attachments`)
+      check('未登录者看不到草稿比赛题的附件', anonList.status === 404, String(anonList.status))
+      const anonDl = await fetch(`${API}/problems/${problemId}/attachments/${attachmentId}/download`)
+      check('未登录者下载草稿比赛题附件返回 404', anonDl.status === 404, String(anonDl.status))
+
+      // 界面上附件区必须渲染出来
+      await contestPage.reload({ waitUntil: 'networkidle' })
+      const attCount = await contestPage.locator('.attachment-list .attachment-link').count()
+      check('比赛内解题页显示附件区', attCount >= 1, `${attCount} 个`)
+    }
+
+    /* ---- 「恢复函数」按钮：改坏代码后一键还原骨架 ---- */
+    // 走真实交互：点编辑器 → 全选 → 输入垃圾代码 → 按钮出现 → 点击 → 确认 → 还原
+    const editorBox = contestPage.locator('.monaco-editor').first()
+    await editorBox.click()
+    await contestPage.keyboard.press('Control+A')
+    await contestPage.keyboard.type('int add(int a,int b){return a-b;} // 改坏了')
+    await contestPage.waitForTimeout(600)
+    const restoreBtn = contestPage.getByRole('button', { name: '恢复函数' })
+    check('改坏代码后出现「恢复函数」按钮', (await restoreBtn.count()) === 1)
+    contestPage.once('dialog', (d) => d.accept())
+    await restoreBtn.click()
+    await contestPage.waitForTimeout(600)
+    const restored = await contestPage.evaluate(() =>
+      Array.from(document.querySelectorAll('.view-lines .view-line')).map((l) => l.textContent).join('\n'),
+    )
+    check('点「恢复函数」后编辑器还原成函数骨架',
+      /add/.test(restored) && !/改坏了/.test(restored), restored.slice(0, 80).replace(/\s+/g, ' '))
+    check('与骨架一致时按钮自动隐藏（避免点了没反应）', (await restoreBtn.count()) === 0)
     await contestCtx.close()
   }
   await browser.close()

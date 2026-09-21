@@ -32,8 +32,13 @@
 - 函数题（迁移 23，`type=function`）：`problem_harnesses` 按语言存「驱动模板 + 初始代码」，模板用 `{{code}}` 占位选手代码。
   评测前把选手代码拼进模板再走标准编译/比对；选手若提交自带 `main` / `if __name__` 的完整程序则原样评测（不会重复定义入口）。
   - 管理端 `problemPayload.harnesses`（`{"cpp":{"template","initial_code"}}`，**全量替换**；非函数题带此字段会被 400 拒绝）。
+    `initial_code` **必填**（选手打开 IDE 就该看到函数骨架），留空 400。
   - 详情接口：管理员拿到 `harnesses` 与 `initial_codes`，选手只拿 `initial_codes`（模板是 IO 约定，不下发）。
     比赛题面接口 `/api/contests/{id}/problems/{pid}` 同样如此（原来两者都不下发，函数题在比赛里就没法预填）。
+  - 选手端编辑器工具栏有「恢复函数」按钮（`problem.initial_codes[language]` 存在且与当前代码不同时出现）。
+  - **附件可见性**：`canViewProblem` 额外放行「已报名且已开赛的比赛内题目」——
+    比赛专用题常是草稿态，此前参赛者在比赛里看不到该题附件（`ProblemVisibleViaContest` 实现）。
+    未登录/未报名者访问草稿题附件仍是 404，回归断言在 `probe-function-problem.mjs` 的比赛段落里。
   - 校验：函数题至少一种语言模板，每个模板必须含 `{{code}}`；发布要求测试点总分 100。
   - 判定复用标准通路：`checker_mode=token|exact` 都支持。exact 下「token 相同但空白不同」判 **PE**（不是 WA），
     这是 `CompareOutput` 既有设计，不是函数题特例。
@@ -118,9 +123,10 @@ cd D:\git\YunOJ; node scripts/uiprobe/shoot.mjs --tag <你的标签> --only <你
 - `node scripts/uiprobe/audit.mjs --verbose`：布局指标 + 首屏文本 + a11y + HTTP 错误
 - `node scripts/uiprobe/shoot.mjs --tag x --only /a,/b`：整页截图到 `scripts/uiprobe/shots/`
 - `node scripts/uiprobe/probe.mjs` / `probe-problem.mjs` / `probe-shell.mjs`：题库存题/工作台/导航交互断言（可仿写自己的）
-- `node scripts/uiprobe/probe-function-problem.mjs`：函数题端到端验收（44 项）——建题 → 传测试点 → 发布 → 「只写函数体」AC 满分 →
+- `node scripts/uiprobe/probe-function-problem.mjs`：函数题端到端验收（55 项）——建题 → 传测试点 → 发布 → 「只写函数体」AC 满分 →
   完整程序也 AC → 错解 WA 而非编译错误 → 未配模板的语言给出明确原因 → 自测拼装 → 管理端模板编辑器 → 选手端预填骨架 →
-  Exact 判定通路 → 迁移包往返 → 比赛内函数题（下发初始代码、提交拼装、编辑器预填）→ 清理。
+  Exact 判定通路 → 迁移包往返 → 比赛内函数题（下发初始代码、提交拼装、编辑器预填、**草稿题附件对参赛者可见**、
+  **「恢复函数」按钮还原骨架**）→ 清理。
   **需要后端与 judge 都在运行**（会真实评测，约 2 分钟），且需要管理员凭据。
 - **登录统一走 `scripts/uiprobe/auth.mjs` 的 `getToken(user, pass)`**：30 分钟磁盘缓存（写入 `.cache/`，已 gitignore）。
   后端登录有速率限制（同用户名 5 分钟 12 次），直接 fetch 登录很容易触发 `429`，遇到就等 3-5 分钟或换账号。

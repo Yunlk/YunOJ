@@ -347,6 +347,31 @@ func (s *Store) IsContestTeam(ctx context.Context, contestID, teamID int64) (boo
 	return exists, err
 }
 
+// ProblemVisibleViaContest 判断用户能否经「已报名的比赛」看到某道题。
+// 规则与比赛内题面接口一致：已报名，且比赛已开始（赛后仍可回看）。
+// 比赛专用题常为草稿态，公共可见性规则（canViewProblem）看不到它，
+// 但参赛者在比赛内必须能看到该题的附件。
+func (s *Store) ProblemVisibleViaContest(ctx context.Context, problemID, userID int64) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM contest_problems cp
+			JOIN contests c ON c.id = cp.contest_id
+			WHERE cp.problem_id = $1
+			  AND c.start_time <= now()
+			  AND EXISTS (
+				SELECT 1 FROM contest_teams t
+				WHERE t.contest_id = cp.contest_id
+				  AND (t.team_id = $2 OR EXISTS (
+					SELECT 1 FROM contest_team_members m
+					WHERE m.contest_id = t.contest_id AND m.team_id = t.team_id AND m.user_id = $2
+				  ))
+			  )
+		)`,
+		problemID, userID).Scan(&exists)
+	return exists, err
+}
+
 // GetActiveContest 返回当前正在进行的一场比赛（供导航栏倒计时使用）。
 func (s *Store) GetActiveContest(ctx context.Context) (model.Contest, error) {
 	var c model.Contest

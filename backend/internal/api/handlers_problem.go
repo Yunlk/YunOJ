@@ -647,6 +647,11 @@ func validateHarnesses(ptype string, harnesses map[string]harnessPayload) string
 		if !strings.Contains(h.Template, model.HarnessPlaceholder) {
 			return key + " 的驱动模板必须包含 " + model.HarnessPlaceholder + " 占位符（选手代码会替换到这里）"
 		}
+		// 初始代码是选手在 IDE 里看到的函数骨架（力扣风格：打开就是函数的样子）。
+		// 留空会让选手面对一个空编辑器，所以强制必填。
+		if strings.TrimSpace(h.InitialCode) == "" {
+			return key + " 的初始代码不能为空（选手打开编辑器时要看到函数骨架）"
+		}
 		if len(h.Template) > maxHarnessSourceBytes {
 			return key + " 的驱动模板过长（最大 64KB）"
 		}

@@ -312,12 +312,20 @@ func urlEncodeRFC5987(s string) string {
 }
 
 // canViewProblem 公共接口的可见性：已发布题目对所有人可见，未发布仅管理员可见。
+// 另外放行「已报名比赛内」的题目：比赛专用题常是草稿态，但参赛者必须能看到附件。
 func (a *API) canViewProblem(r *http.Request, p model.Problem) bool {
 	if p.Status == model.ProblemStatusPublished {
 		return true
 	}
 	u, ok := userFromCtx(r.Context())
-	return ok && u.Role == model.RoleAdmin
+	if !ok {
+		return false
+	}
+	if u.Role == model.RoleAdmin {
+		return true
+	}
+	visible, err := a.store.ProblemVisibleViaContest(r.Context(), p.ID, u.ID)
+	return err == nil && visible
 }
 
 func firstErr(errs ...error) error {

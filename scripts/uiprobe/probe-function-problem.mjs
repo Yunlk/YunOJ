@@ -1,0 +1,285 @@
+// 函数题（LeetCode 风格）端到端验收。
+//
+// 覆盖：建题 → 配语言模板（含占位符校验）→ 传测试点 → 发布 →
+//       提交「只写函数体」→ 必须 AC 且拿满分；
+//       提交「完整程序」→ 也必须 AC（不能被拼装逻辑弄成重复 main）；
+//       提交缺占位符的模板 → 保存被拒；
+//       非函数题带模板 → 保存被拒；
+//       选手端能拿到初始代码、拿不到模板；
+//       自测（/test）对函数题同样走拼装。
+// 跑完自动删除测试题目与测试数据。
+import { chromium } from 'playwright-core'
+import { getToken } from './auth.mjs'
+import { requireAdminCreds, STUDENT_USER, STUDENT_PASS } from './env.mjs'
+
+const API = process.env.YUNOJ_API ?? 'http://127.0.0.1:8090/api'
+const BASE = process.env.YUNOJ_WEB ?? 'http://127.0.0.1:5173'
+
+let pass = 0
+let fail = 0
+const check = (name, ok, detail = '') => {
+  if (ok) {
+    pass++
+    console.log(`  ✓ ${name}`)
+  } else {
+    fail++
+    console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ''}`)
+  }
+}
+
+const admin = requireAdminCreds()
+const adminToken = await getToken(admin.user, admin.pass)
+const adminAuth = { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' }
+const studentToken = await getToken(STUDENT_USER, STUDENT_PASS)
+const studentAuth = { Authorization: `Bearer ${studentToken}`, 'Content-Type': 'application/json' }
+
+const CPP_TEMPLATE = `#include <bits/stdc++.h>
+using namespace std;
+
+{{code}}
+
+int main() {
+    int a, b;
+    if (!(cin >> a >> b)) return 0;
+    cout << add(a, b) << endl;
+    return 0;
+}`
+
+const CPP_INITIAL = `int add(int a, int b) {
+    // TODO: 在这里实现
+    return 0;
+}`
+
+const basePayload = (overrides = {}) => ({
+  title: 'probe 函数题（临时）',
+  statement: '读入两个整数，输出它们的和。**你只需要实现 `add` 函数。**',
+  input_format: '两个整数 a b',
+  output_format: '一个整数 a+b',
+  hint: '',
+  samples: [{ input: '1 2', output: '3', note: '' }],
+  time_limit_ms: 1000,
+  memory_limit_kb: 262144,
+  difficulty: 1,
+  tags: ['probe'],
+  type: 'function',
+  checker_mode: 'token',
+  spj_source: '',
+  interactor_source: '',
+  hack_generator_source: '',
+  hack_reference_source: '',
+  hack_target_source: '',
+  testcase_scores: [],
+  submission_limit: 0,
+  status: 'draft',
+  provider: '',
+  show_score: true,
+  harnesses: { cpp: { template: CPP_TEMPLATE, initial_code: CPP_INITIAL } },
+  ...overrides,
+})
+
+let problemId = 0
+const cleanup = async () => {
+  if (!problemId) return
+  await fetch(`${API}/problems/${problemId}`, { method: 'DELETE', headers: adminAuth })
+}
+
+try {
+  /* ---------- 1. 校验：函数题的模板约束 ---------- */
+  console.log('\n== 校验 ==')
+  const noPlaceholder = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth,
+    body: JSON.stringify(basePayload({ harnesses: { cpp: { template: 'int main(){}', initial_code: '' } } })),
+  })
+  check('模板缺少 {{code}} 占位符时创建被拒', noPlaceholder.status === 400, String(noPlaceholder.status))
+
+  const noHarness = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth,
+    body: JSON.stringify(basePayload({ harnesses: {} })),
+  })
+  check('函数题不给任何语言模板时创建被拒', noHarness.status === 400, String(noHarness.status))
+
+  const strayHarness = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth,
+    body: JSON.stringify(basePayload({ type: 'standard' })),
+  })
+  check('非函数题带语言模板时创建被拒', strayHarness.status === 400, String(strayHarness.status))
+
+  /* ---------- 2. 建题 ---------- */
+  console.log('\n== 建立函数题 ==')
+  const created = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth, body: JSON.stringify(basePayload()),
+  })
+  const problem = await created.json()
+  problemId = problem?.id ?? 0
+  check('函数题创建成功', created.status === 201 && problemId > 0, `${created.status} ${JSON.stringify(problem).slice(0, 120)}`)
+
+  const detail = await (await fetch(`${API}/problems/${problemId}`, { headers: adminAuth })).json()
+  check('详情里 type 为 function', detail.type === 'function', String(detail.type))
+  check('管理员能读回模板', detail.harnesses?.cpp?.template?.includes('{{code}}') === true)
+  check('管理员能读回初始代码', detail.harnesses?.cpp?.initial_code === CPP_INITIAL)
+
+  const asStudent = await (await fetch(`${API}/problems/${problemId}`, { headers: studentAuth })).json()
+  check('选手拿不到驱动模板（只给初始代码）', asStudent.harnesses === undefined,
+    JSON.stringify(Object.keys(asStudent.harnesses ?? {})))
+  check('未发布题目选手看不到（404/403）', asStudent.error !== undefined || asStudent.id === undefined,
+    JSON.stringify(asStudent).slice(0, 80))
+
+  /* ---------- 3. 测试点 ---------- */
+  console.log('\n== 测试点与发布 ==')
+  const addCase = async (inText, outText, score) => {
+    const form = new FormData()
+    form.append('in', new Blob([inText]), 'in.txt')
+    form.append('out', new Blob([outText]), 'out.txt')
+    form.append('score', String(score))
+    return fetch(`${API}/problems/${problemId}/testcases`, { method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: form })
+  }
+  const c1 = await addCase('1 2\n', '3\n', 50)
+  const c2 = await addCase('10 20\n', '30\n', 50)
+  check('测试点 1 添加成功', c1.status === 201, String(c1.status))
+  check('测试点 2 添加成功', c2.status === 201, String(c2.status))
+
+  const published = await fetch(`${API}/problems/${problemId}`, {
+    method: 'PUT', headers: adminAuth, body: JSON.stringify(basePayload({ status: 'published' })),
+  })
+  check('函数题可以发布（总分 100）', published.status === 200, `${published.status} ${published.ok ? '' : await published.text()}`)
+
+  // 发布后选手应当能拿到初始代码
+  const studentView = await (await fetch(`${API}/problems/${problemId}`, { headers: studentAuth })).json()
+  check('发布后选手能读到初始代码（用于预填编辑器）', studentView.initial_codes?.cpp === CPP_INITIAL,
+    JSON.stringify(studentView.initial_codes))
+
+  /* ---------- 4. 提交：只写函数体 ---------- */
+  console.log('\n== 提交评测 ==')
+  // 后端对同一用户有 10 秒提交间隔限流（这是产品行为，不是 bug）：
+  // 连发会拿到 429 而没有 id，因此这里串行提交并在必要时等待重试。
+  const submit = async (code, language = 'cpp') => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const res = await fetch(`${API}/submissions`, {
+        method: 'POST', headers: studentAuth,
+        body: JSON.stringify({ problem_id: problemId, language, code }),
+      })
+      if (res.status === 429) {
+        await new Promise((r) => setTimeout(r, 11000))
+        continue
+      }
+      const body = await res.json()
+      if (!res.ok) throw new Error(`提交失败 ${res.status}: ${JSON.stringify(body)}`)
+      return { status: res.status, id: body?.id ?? 0 }
+    }
+    throw new Error('提交持续被限流，未取得提交 ID')
+  }
+  const waitVerdict = async (id, timeoutMs = 120000) => {
+    const started = Date.now()
+    while (Date.now() - started < timeoutMs) {
+      const res = await fetch(`${API}/submissions/${id}`, { headers: adminAuth })
+      const s = await res.json()
+      if (s.status && !['pending', 'judging', 'queued', 'running'].includes(s.status)) return s
+      await new Promise((r) => setTimeout(r, 900))
+    }
+    return null
+  }
+
+  const bodyOnly = await submit('int add(int a, int b) {\n    return a + b;\n}')
+  const v1 = await waitVerdict(bodyOnly.id)
+  check('只写函数体 → Accepted', v1?.status === 'accepted', `${v1?.status} ${v1?.compile_error ?? ''}`.slice(0, 200))
+  check('只写函数体 → 满分 100', v1?.score === 100, `score=${v1?.score}`)
+
+  // 完整程序也必须能过（拼装逻辑不能制造重复 main）
+  const fullProgram = `#include <iostream>
+int main() {
+    int a, b;
+    std::cin >> a >> b;
+    std::cout << a + b << std::endl;
+    return 0;
+}`
+  const full = await submit(fullProgram)
+  const v2 = await waitVerdict(full.id)
+  check('提交完整程序 → 也 Accepted（不会重复定义 main）', v2?.status === 'accepted',
+    `${v2?.status} ${v2?.compile_error ?? ''}`.slice(0, 300))
+
+  // 错误答案要判 WA，而不是因为拼装问题变成编译错误
+  const wrong = await submit('int add(int a, int b) {\n    return a - b;\n}')
+  const v3 = await waitVerdict(wrong.id)
+  check('错误函数体 → Wrong Answer（不是编译错误）', v3?.status === 'wrong_answer',
+    `${v3?.status} ${v3?.compile_error ?? ''}`.slice(0, 200))
+
+  // 没配模板的语言应当给出明确原因
+  const pySubmit = await submit('def add(a, b):\n    return a + b', 'python')
+  const v4 = await waitVerdict(pySubmit.id)
+  check('未配置模板的语言给出明确提示', v4?.status === 'compile_error' && /模板/.test(v4?.compile_error ?? ''),
+    `${v4?.status} ${v4?.compile_error ?? ''}`.slice(0, 160))
+
+  /* ---------- 5. 自测也走拼装 ---------- */
+  const runRes = await fetch(`${API}/problems/${problemId}/test`, {
+    method: 'POST', headers: studentAuth,
+    body: JSON.stringify({ language: 'cpp', code: 'int add(int a, int b) {\n    return a + b;\n}', optimize: true, input: '3 4\n' }),
+  })
+  const runBody = await runRes.json().catch(() => null)
+  check('自测：函数体拼装后能运行并输出 7',
+    runRes.ok && String(runBody?.stdout ?? '').trim() === '7', JSON.stringify(runBody).slice(0, 200))
+
+  /* ---------- 6. 管理端界面 ---------- */
+  console.log('\n== 界面 ==')
+  const browser = await chromium.launch({ channel: 'chrome' })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await context.addInitScript((t) => localStorage.setItem('yunoj_token', t), adminToken)
+  const page = await context.newPage()
+  const errors = []
+  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('response', (r) => {
+    if (r.status() >= 500) errors.push(`HTTP ${r.status()} ${r.url().replace(BASE, '')}`)
+  })
+
+  await page.goto(`${BASE}/problem/${problemId}/edit?tab=settings`, { waitUntil: 'networkidle' })
+  await page.getByRole('button', { name: /函数题/ }).first().click()
+  await page.waitForTimeout(400)
+  check('题目设置里出现「函数题语言模板」区', (await page.locator('.harness-fieldset').count()) === 1)
+  check('模板编辑器带出该语言的模板内容',
+    (await page.locator('#h-template').inputValue()).includes('{{code}}'))
+  check('初始代码也带出来了', (await page.locator('#h-initial').inputValue()).includes('add'))
+  check('可以添加其它语言的模板', (await page.locator('.harness-add').count()) === 1)
+
+  await page.goto(`${BASE}/problem/${problemId}`, { waitUntil: 'networkidle' })
+  // 读 Monaco 渲染出的代码行：.monaco-editor 整体 innerText 只包含行号栏，读不到代码。
+  await page
+    .waitForFunction(
+      () => document.querySelectorAll('.view-lines .view-line').length > 0,
+      { timeout: 15000 },
+    )
+    .catch(() => {})
+  const editorText = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('.view-lines .view-line'))
+      .map((l) => l.textContent)
+      .join('\n'),
+  )
+  check('管理员预览时编辑器也预填骨架', /add/.test(editorText), editorText.slice(0, 80).replace(/\s+/g, ' '))
+
+  // 用选手身份再验一次：预填是给选手用的，必须确认选手侧真的能看到骨架。
+  const studentCtx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await studentCtx.addInitScript((t) => localStorage.setItem('yunoj_token', t), studentToken)
+  const studentPage = await studentCtx.newPage()
+  await studentPage.goto(`${BASE}/problem/${problemId}`, { waitUntil: 'networkidle' })
+  await studentPage
+    .waitForFunction(
+      () => document.querySelectorAll('.view-lines .view-line').length > 0,
+      { timeout: 15000 },
+    )
+    .catch(() => {})
+  const studentEditor = await studentPage.evaluate(() =>
+    Array.from(document.querySelectorAll('.view-lines .view-line'))
+      .map((l) => l.textContent)
+      .join('\n'),
+  )
+  check('选手编辑器预填了函数骨架（含 add）', /add/.test(studentEditor),
+    studentEditor.slice(0, 80).replace(/\s+/g, ' '))
+  await studentCtx.close()
+  await browser.close()
+  check('界面无脚本错误与 5xx', errors.length === 0, [...new Set(errors)].slice(0, 3).join(' | '))
+} finally {
+  await cleanup()
+  const gone = await fetch(`${API}/problems/${problemId}`, { headers: adminAuth })
+  check('临时函数题已清理', gone.status === 404, String(gone.status))
+}
+
+console.log(`\n结果：${pass} 通过 / ${fail} 失败`)
+process.exitCode = fail === 0 ? 0 : 1

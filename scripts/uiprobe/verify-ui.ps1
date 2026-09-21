@@ -114,6 +114,12 @@ Step "交互断言 · probe-problem-settings.mjs" {
   Pop-Location
 }
 
+Step "交互断言 · probe-function-problem.mjs" {
+  Push-Location $root
+  node scripts/uiprobe/probe-function-problem.mjs
+  Pop-Location
+}
+
 Write-Host "`n================ 汇总 ================" -ForegroundColor Cyan
 foreach ($k in $results.Keys) {
   $color = if ($results[$k] -eq 'PASS') { 'Green' } else { 'Red' }

@@ -61,6 +61,8 @@ const ROUTES = [
   ['admin-users', '/admin/users'],
   ['admin-judge', '/admin/judge'],
   ['problem-edit', '/problem/437/edit'],
+  ['problem-settings', '/problem/437/edit?tab=settings'],
+  ['demo-ui', '/demo/ui'],
   ['problem-new', '/problem/new'],
   ['problem-tests', '/admin/problems/437/tests'],
   ['contest-new', '/contest/new'],

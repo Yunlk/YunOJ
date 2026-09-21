@@ -29,6 +29,13 @@
 - 题目附件：`GET /api/problems/{id}/attachments`（已发布题目匿名可读）· `POST`（管理员，multipart `file`，单文件 ≤32MB、每题 ≤20 个）·
   `DELETE /api/problems/{id}/attachments/{attachment_id}` · `GET /api/problems/{id}/attachments/{attachment_id}/download`（带 RFC 5987 文件名）。
   文件落在 `{DATA_DIR}/problem-attachments/{problem_id}/`，库内只存元数据。
+- 函数题（迁移 23，`type=function`）：`problem_harnesses` 按语言存「驱动模板 + 初始代码」，模板用 `{{code}}` 占位选手代码。
+  评测前把选手代码拼进模板再走标准编译/比对；选手若提交自带 `main` / `if __name__` 的完整程序则原样评测（不会重复定义入口）。
+  - 管理端 `problemPayload.harnesses`（`{"cpp":{"template","initial_code"}}`，**全量替换**；非函数题带此字段会被 400 拒绝）。
+  - 详情接口：管理员拿到 `harnesses` 与 `initial_codes`，选手只拿 `initial_codes`（模板是 IO 约定，不下发）。
+  - 校验：函数题至少一种语言模板，每个模板必须含 `{{code}}`；发布要求测试点总分 100。
+  - 自测（`/test`、`/test-samples`）与正式评测共用同一条拼装路径。
+  - 注意：提交限流为每用户 10 秒一次（429），脚本连发提交需自行等待重试。
 
 ## 2. 必须遵守的规则
 
@@ -107,6 +114,9 @@ cd D:\git\YunOJ; node scripts/uiprobe/shoot.mjs --tag <你的标签> --only <你
 - `node scripts/uiprobe/audit.mjs --verbose`：布局指标 + 首屏文本 + a11y + HTTP 错误
 - `node scripts/uiprobe/shoot.mjs --tag x --only /a,/b`：整页截图到 `scripts/uiprobe/shots/`
 - `node scripts/uiprobe/probe.mjs` / `probe-problem.mjs` / `probe-shell.mjs`：题库存题/工作台/导航交互断言（可仿写自己的）
+- `node scripts/uiprobe/probe-function-problem.mjs`：函数题端到端验收（建题 → 传测试点 → 发布 → 「只写函数体」AC 满分 →
+  完整程序也 AC → 错解 WA 而非编译错误 → 未配模板的语言给出明确原因 → 自测拼装 → 管理端模板编辑器 → 选手端预填骨架 → 清理）。
+  **需要后端与 judge 都在运行**（会真实评测，约 1 分钟），且需要管理员凭据。
 - **登录统一走 `scripts/uiprobe/auth.mjs` 的 `getToken(user, pass)`**：30 分钟磁盘缓存（写入 `.cache/`，已 gitignore）。
   后端登录有速率限制（同用户名 5 分钟 12 次），直接 fetch 登录很容易触发 `429`，遇到就等 3-5 分钟或换账号。
 - **凭据一律不写进受版本控制的文件**（`scripts/uiprobe/env.mjs` 负责读取）：

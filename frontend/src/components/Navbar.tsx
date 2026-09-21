@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { TOKEN_KEY, getActiveContest } from '../api'
+import { TOKEN_KEY } from '../api'
 import CommandPalette from './CommandPalette'
 import { useAuth } from '../context/AuthContext'
-import type { Contest } from '../types'
-import { formatRemaining, useClock } from '../utils/clock'
 import { ratingClass } from '../utils/rating'
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -14,7 +12,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
 }
 
 /**
- * 顶部导航：刷题优先（题库/比赛/提交记录/排名）+ 全局快速跳转 + 进行中比赛提示。
+ * 顶部导航：刷题优先（题库/比赛/提交记录/排名）+ 全局快速跳转。
  */
 export default function Navbar() {
   const { user, setUser } = useAuth()
@@ -22,32 +20,12 @@ export default function Navbar() {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [activeContest, setActiveContest] = useState<Contest | null>(null)
-  const now = useClock()
   const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined)
   // 下拉菜单项：.menu-item 提供整行可点区域与悬停态；active 由 .appbar-panel a.active 着色
   const menuClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'menu-item active' : 'menu-item')
   const adminActive = location.pathname.startsWith('/admin/') || location.pathname === '/contest/new'
 
   useEffect(() => setMenuOpen(false), [location.pathname])
-
-  // 进行中的比赛：进站就能看到剩余时间，不必先点进比赛列表
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      getActiveContest()
-        .then((contest) => {
-          if (!cancelled) setActiveContest(contest)
-        })
-        .catch(() => {})
-    }
-    load()
-    const timer = window.setInterval(load, 60000)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [location.pathname])
 
   // Ctrl/⌘+K 或 / 唤起快速跳转；页面自带搜索框时（[data-search-shortcut]）让位给页面
   useEffect(() => {
@@ -79,7 +57,6 @@ export default function Navbar() {
     navigate('/')
   }
 
-  const remaining = activeContest ? new Date(activeContest.end_time).getTime() - now : 0
   return (
     <>
       <header className="appbar">
@@ -160,14 +137,6 @@ export default function Navbar() {
                 </details>
               )}
             </nav>
-
-            {activeContest && remaining > 0 && (
-              <NavLink to={`/contest/${activeContest.id}`} className="appbar-contest" title={activeContest.title}>
-                <span className="appbar-contest-dot" aria-hidden="true" />
-                <span className="appbar-contest-title">{activeContest.title}</span>
-                <span className="appbar-contest-time">{formatRemaining(remaining)}</span>
-              </NavLink>
-            )}
 
             <div className="appbar-actions">
               {user ? (

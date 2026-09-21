@@ -168,46 +168,6 @@
   font-size: var(--fs-11);
 }
 
-/* ---------- 进行中比赛 ---------- */
-
-.appbar-contest {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  max-width: 260px;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid #2f6b4a;
-  border-radius: var(--radius);
-  background: #17361f;
-  color: #b6f0c9;
-  font-size: var(--fs-12);
-}
-
-.appbar-contest:hover {
-  border-color: #3f8f63;
-  background: #1b4227;
-  color: #d8ffe6;
-}
-
-.appbar-contest-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #4ade80;
-}
-
-.appbar-contest-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.appbar-contest-time {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
 .appbar-actions {
   display: flex;
   align-items: center;
@@ -421,10 +381,6 @@
     position: static;
     min-width: 0;
     box-shadow: none;
-  }
-
-  .appbar-contest {
-    max-width: none;
   }
 
   .appbar-actions {

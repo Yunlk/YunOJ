@@ -293,12 +293,6 @@ export async function getProblemNeighbors(id: number | string) {
   return res.data
 }
 
-/** 当前进行中的比赛（没有则 null）。导航栏倒计时用，避免拉整份首页数据。 */
-export async function getActiveContest() {
-  const res = await api.get<{ contest: Contest | null }>('/contests/active')
-  return res.data.contest
-}
-
 export async function toggleProblemFavorite(id: number | string) {
   const res = await api.post<{ favorite: boolean }>(`/problems/${id}/favorite`)
   return res.data.favorite

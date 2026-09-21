@@ -78,7 +78,11 @@ const basePayload = (overrides = {}) => ({
 })
 
 let problemId = 0
+let contestId = 0
 const cleanup = async () => {
+  if (contestId) {
+    await fetch(`${API}/contests/${contestId}`, { method: 'DELETE', headers: adminAuth })
+  }
   if (!problemId) return
   await fetch(`${API}/problems/${problemId}`, { method: 'DELETE', headers: adminAuth })
 }
@@ -273,12 +277,177 @@ int main() {
   check('选手编辑器预填了函数骨架（含 add）', /add/.test(studentEditor),
     studentEditor.slice(0, 80).replace(/\s+/g, ' '))
   await studentCtx.close()
+
+  /* ---------- 6. 函数题 + Exact 判定（复用标准判定通路） ---------- */
+  console.log('\n== 函数题 + Exact 判定 ==')
+  const exactCreated = await fetch(`${API}/problems`, {
+    method: 'POST', headers: adminAuth,
+    body: JSON.stringify(basePayload({ title: 'probe 函数题 exact（临时）', checker_mode: 'exact' })),
+  })
+  const exactProblem = await exactCreated.json().catch(() => null)
+  const exactId = exactProblem?.id ?? 0
+  check('函数题允许 Exact 判定', exactCreated.status === 201 && exactId > 0,
+    `${exactCreated.status} ${JSON.stringify(exactProblem).slice(0, 120)}`)
+  if (exactId) {
+    try {
+      const f = new FormData()
+      // 期望输出带尾随空行：token 判定会忽略，exact 判定必须要求逐字节一致
+      f.append('in', new Blob(['2 3\n']), 'in.txt')
+      f.append('out', new Blob(['5\n\n']), 'out.txt')
+      f.append('score', '100')
+      await fetch(`${API}/problems/${exactId}/testcases`, {
+        method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: f,
+      })
+      await fetch(`${API}/problems/${exactId}`, {
+        method: 'PUT', headers: adminAuth,
+        body: JSON.stringify(basePayload({ title: 'probe 函数题 exact（临时）', checker_mode: 'exact', status: 'published' })),
+      })
+      let exactSubId = 0
+      for (let attempt = 0; attempt < 8 && !exactSubId; attempt++) {
+        const res = await fetch(`${API}/submissions`, {
+          method: 'POST', headers: studentAuth,
+          body: JSON.stringify({ problem_id: exactId, language: 'cpp', code: 'int add(int a, int b) {\n    return a + b;\n}' }),
+        })
+        if (res.status === 429) {
+          await new Promise((r) => setTimeout(r, 11000))
+          continue
+        }
+        const body = await res.json()
+        if (!res.ok) throw new Error(`提交失败 ${res.status}: ${JSON.stringify(body)}`)
+        exactSubId = body?.id ?? 0
+      }
+      const ev = await waitVerdict(exactSubId)
+      // 期望输出 "5\n\n"、选手输出 "5\n"：exact 模式下 token 相同但空白不同 → 判 PE
+      // （CompareOutput 的设计：exact 且 token 相同则 PE，否则 WA；token 模式会直接 AC）。
+      // 拿到 PE 即证明函数题确实复用了 exact 判定通路，而不是退化成 token。
+      check('Exact 判定下空白差异判 PE（证明确实走了 exact 通路）',
+        ev?.status === 'presentation_error', `${ev?.status} ${ev?.compile_error ?? ''}`.slice(0, 160))
+    } finally {
+      await fetch(`${API}/problems/${exactId}`, { method: 'DELETE', headers: adminAuth })
+      const eg = await fetch(`${API}/problems/${exactId}`, { headers: adminAuth })
+      check('临时 exact 函数题已清理', eg.status === 404, String(eg.status))
+    }
+  }
+
+  /* ---------- 7. 迁移包往返：导出 → 导入后模板必须还在 ---------- */
+  console.log('\n== 迁移包往返 ==')
+  let importedId = 0
+  try {
+    const exp = await fetch(`${API}/problems/${problemId}/package`, { headers: adminAuth })
+    check('函数题可以导出迁移包', exp.ok, String(exp.status))
+    const zipBuf = Buffer.from(await exp.arrayBuffer())
+    check('迁移包非空', zipBuf.length > 0, `${zipBuf.length} bytes`)
+
+    const form = new FormData()
+    form.append('file', new Blob([zipBuf]), 'problem.zip')
+    const imp = await fetch(`${API}/problems/import`, {
+      method: 'POST', headers: { Authorization: `Bearer ${adminToken}` }, body: form,
+    })
+    const impBody = await imp.json().catch(() => null)
+    // 导入接口返回 201 与嵌套结构 { problem: { id, ... } }
+    importedId = impBody?.problem?.id ?? impBody?.id ?? 0
+    check('迁移包可以导入', imp.ok && importedId > 0, `${imp.status} ${JSON.stringify(impBody).slice(0, 160)}`)
+    if (importedId) {
+      const imported = await (await fetch(`${API}/problems/${importedId}`, { headers: adminAuth })).json()
+      check('导入后题型仍是函数题', imported.type === 'function', String(imported.type))
+      check('导入后驱动模板完整保留',
+        imported.harnesses?.cpp?.template === CPP_TEMPLATE,
+        JSON.stringify(imported.harnesses?.cpp?.template ?? null).slice(0, 90))
+      check('导入后初始代码完整保留', imported.harnesses?.cpp?.initial_code === CPP_INITIAL)
+    }
+  } finally {
+    if (importedId) await fetch(`${API}/problems/${importedId}`, { method: 'DELETE', headers: adminAuth })
+  }
+
+  /* ---------- 8. 比赛内的函数题：同样预填、同样拼装 ---------- */
+  console.log('\n== 比赛内函数题 ==')
+  // 建一场「进行中」的比赛，把函数题挂进去，用选手身份报名后验证：
+  // 比赛题面接口要给出 initial_codes，比赛提交也要走拼装（judge 按题目标 type 判定）。
+  const now = Date.now()
+  const contestPayload = {
+    title: 'probe 函数题比赛（临时）',
+    mode: 'ACM', feedback: 'realtime', score_mode: 'all_or_nothing',
+    penalty_minutes: 20, freeze_duration_minutes: 0, dynamic_delay_minutes: 0,
+    rank_keys: [], start_time: new Date(now - 3600_000).toISOString(),
+    end_time: new Date(now + 3600_000).toISOString(),
+    description: '', cover_image: '', visibility: 'public',
+    reg_start_time: null, reg_end_time: null,
+    submission_limit: 0, registration_mode: 'individual', max_team_size: 1,
+    allow_team_edit: false, pretest_only: false, hacking_enabled: false,
+  }
+  const contestRes = await fetch(`${API}/contests`, {
+    method: 'POST', headers: adminAuth, body: JSON.stringify(contestPayload),
+  })
+  const contestBody = await contestRes.json().catch(() => null)
+  contestId = contestBody?.id ?? contestBody?.contest?.id ?? 0
+  check('临时比赛创建成功', contestRes.ok && contestId > 0, `${contestRes.status} ${JSON.stringify(contestBody).slice(0, 140)}`)
+
+  if (contestId) {
+    const added = await fetch(`${API}/contests/${contestId}/problems`, {
+      method: 'POST', headers: adminAuth,
+      body: JSON.stringify({ problem_id: problemId, display_id: 'A', sort_order: 1, score: null, submission_limit: null, theme_color: '' }),
+    })
+    check('函数题加入比赛成功', added.ok, `${added.status} ${added.ok ? '' : await added.text()}`)
+
+    const reg = await fetch(`${API}/contests/${contestId}/register`, {
+      method: 'POST', headers: studentAuth, body: JSON.stringify({ team_name: '' }),
+    })
+    check('选手报名成功', reg.ok, `${reg.status} ${reg.ok ? '' : await reg.text()}`)
+
+    const cv = await fetch(`${API}/contests/${contestId}/problems/${problemId}`, { headers: studentAuth })
+    const cvBody = await cv.json().catch(() => null)
+    check('比赛题面给选手下发初始代码', cvBody?.problem?.initial_codes?.cpp === CPP_INITIAL,
+      JSON.stringify(cvBody?.problem?.initial_codes))
+    check('比赛题面不下发驱动模板', cvBody?.problem?.harnesses === undefined,
+      JSON.stringify(Object.keys(cvBody?.problem?.harnesses ?? {})))
+
+    // 比赛提交同样要拼装（选手只写函数体）
+    const contestSubmit = async (code, language = 'cpp') => {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const res = await fetch(`${API}/contests/${contestId}/submit`, {
+          method: 'POST', headers: studentAuth,
+          body: JSON.stringify({ problem_id: problemId, language, code }),
+        })
+        if (res.status === 429) {
+          await new Promise((r) => setTimeout(r, 11000))
+          continue
+        }
+        const body = await res.json()
+        if (!res.ok) throw new Error(`比赛提交失败 ${res.status}: ${JSON.stringify(body)}`)
+        return { id: body?.id ?? 0 }
+      }
+      throw new Error('比赛提交持续被限流')
+    }
+    const cSub = await contestSubmit('int add(int a, int b) {\n    return a + b;\n}')
+    const cv1 = await waitVerdict(cSub.id)
+    check('比赛内「只写函数体」→ Accepted', cv1?.status === 'accepted',
+      `${cv1?.status} ${cv1?.compile_error ?? ''}`.slice(0, 200))
+
+    // 比赛内界面：编辑器同样预填骨架
+    const contestCtx = await browser.newContext({ viewport: { width: 1440, height: 950 } })
+    await contestCtx.addInitScript((t) => localStorage.setItem('yunoj_token', t), studentToken)
+    const contestPage = await contestCtx.newPage()
+    await contestPage.goto(`${BASE}/contest/${contestId}/problem/${problemId}`, { waitUntil: 'networkidle' })
+    await contestPage
+      .waitForFunction(() => document.querySelectorAll('.view-lines .view-line').length > 0, { timeout: 15000 })
+      .catch(() => {})
+    const contestEditor = await contestPage.evaluate(() =>
+      Array.from(document.querySelectorAll('.view-lines .view-line')).map((l) => l.textContent).join('\n'),
+    )
+    check('比赛内解题页编辑器预填函数骨架', /add/.test(contestEditor),
+      contestEditor.slice(0, 80).replace(/\s+/g, ' '))
+    await contestCtx.close()
+  }
   await browser.close()
   check('界面无脚本错误与 5xx', errors.length === 0, [...new Set(errors)].slice(0, 3).join(' | '))
 } finally {
   await cleanup()
   const gone = await fetch(`${API}/problems/${problemId}`, { headers: adminAuth })
   check('临时函数题已清理', gone.status === 404, String(gone.status))
+  if (contestId) {
+    const cGone = await fetch(`${API}/contests/${contestId}`, { headers: adminAuth })
+    check('临时比赛已清理', cGone.status === 404, String(cGone.status))
+  }
 }
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`)

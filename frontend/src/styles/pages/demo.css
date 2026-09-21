@@ -1,0 +1,288 @@
+/*
+ * Rare UI 动效 demo（DemoUI 页面专用样式）
+ *
+ * 只使用 styles/tokens.css 的语义令牌与 styles/components.css 的基座类，
+ * 不新增任何颜色字面量、不引入任何第三方依赖。
+ * 动效全部是 CSS 关键帧 / 过渡；prefers-reduced-motion 下只保留最终状态。
+ */
+
+/* ==================== 通知铃铛 NotificationBell ==================== */
+
+.rare-bell {
+  position: relative;
+  display: inline-flex;
+}
+
+/* 摆动作用在图标上，不作用在按钮上，避免命中区域跟着旋转 */
+.rare-bell-swing {
+  display: inline-flex;
+  transform-origin: 50% 1px;
+}
+
+.rare-bell-swing.is-swinging {
+  animation: rare-bell-swing 0.9s cubic-bezier(0.3, 0.7, 0.4, 1) both;
+}
+
+/* 摆幅由内联的 --rare-swing-amp 决定：连点越大，摆得越猛 */
+@keyframes rare-bell-swing {
+  0% { transform: rotate(0deg); }
+  15% { transform: rotate(var(--rare-swing-amp, 14deg)); }
+  30% { transform: rotate(calc(var(--rare-swing-amp, 14deg) * -0.8)); }
+  45% { transform: rotate(calc(var(--rare-swing-amp, 14deg) * 0.6)); }
+  60% { transform: rotate(calc(var(--rare-swing-amp, 14deg) * -0.4)); }
+  75% { transform: rotate(calc(var(--rare-swing-amp, 14deg) * 0.22)); }
+  100% { transform: rotate(0deg); }
+}
+
+.rare-bell-icon {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.rare-bell-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 2px solid var(--c-surface);
+  border-radius: var(--radius-pill);
+  background: var(--c-danger);
+  color: var(--c-text-inverse);
+  font-size: var(--fs-11);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  transform-origin: 50% 50%;
+  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+
+/* 未读为 0：徽标收缩消失 */
+.rare-bell-badge.is-empty {
+  transform: scale(0);
+  opacity: 0;
+}
+
+/* 数字翻牌：每个数位是一列 0-9，靠 translateY 滚到目标数字 */
+.rare-roll-number {
+  display: inline-flex;
+  align-items: center;
+}
+
+.rare-roll-digit {
+  display: inline-block;
+  width: 1.08ch;
+  height: 1em;
+  overflow: hidden;
+}
+
+.rare-roll-track {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.38s cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.rare-roll-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1em;
+  line-height: 1;
+}
+
+.rare-roll-plus {
+  margin-left: 0.5px;
+}
+
+/* ==================== 数字滚动 AnimatedCounter ==================== */
+
+.rare-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.rare-counter-value {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.rare-counter-suffix {
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+/* ==================== 演示页 DemoUI ==================== */
+
+.demo-ui-page {
+  padding-bottom: var(--space-8);
+}
+
+.demo-ui-notice {
+  margin: 0 0 var(--space-5);
+}
+
+.demo-ui-notice code,
+.demo-ui-list code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-3);
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.demo-ui-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.demo-ui-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.demo-ui-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.demo-ui-note {
+  margin: 0;
+}
+
+/* 组件预览台：虚线框 + 浅底，和真实页面区分开 */
+.demo-ui-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  min-height: 128px;
+  padding: var(--space-5);
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+.demo-ui-stage-counter {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-5);
+}
+
+.demo-ui-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.demo-ui-score-label {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+
+.demo-ui-score .rare-counter-value {
+  color: var(--c-primary);
+  font-size: var(--fs-26);
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.demo-ui-score .rare-counter-suffix {
+  font-size: var(--fs-14);
+}
+
+.demo-ui-score-delta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  color: var(--c-text-3);
+  font-size: var(--fs-12);
+}
+
+.demo-ui-stats {
+  margin: 0;
+}
+
+.demo-ui-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface-2);
+}
+
+.demo-ui-readout-label {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+
+.demo-ui-readout-value {
+  color: var(--c-text);
+  font-size: var(--fs-14);
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-ui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: auto;
+}
+
+.demo-ui-notes {
+  margin-top: var(--space-5);
+}
+
+.demo-ui-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: 20px;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: var(--lh-base);
+}
+
+.demo-ui-list strong {
+  color: var(--c-text);
+}
+
+@media (max-width: 1080px) {
+  .demo-ui-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 系统开启“减少动态效果”：动画/过渡全部停用，只保留最终状态 */
+@media (prefers-reduced-motion: reduce) {
+  .rare-bell-swing.is-swinging {
+    animation: none;
+  }
+
+  .rare-bell-badge,
+  .rare-roll-track {
+    transition: none;
+  }
+}

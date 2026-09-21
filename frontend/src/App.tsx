@@ -32,6 +32,7 @@ import Profile from './pages/Profile'
 import Settings from './pages/Settings'
 import Ranking from './pages/Ranking'
 import RollingDemoPage from './pages/RollingDemoPage'
+import DemoUI from './pages/DemoUI'
 import Register from './pages/Register'
 import Status from './pages/Status'
 import SubmissionDetail from './pages/SubmissionDetail'
@@ -83,6 +84,8 @@ function AppLayout() {
             <Route path="/assignments/:id" element={<ProtectedRoute><AssignmentDetail /></ProtectedRoute>} />
             <Route path="/ranking" element={<Ranking />} />
             <Route path="/demo/rolling" element={<RollingDemoPage />} />
+            {/* Rare UI 风格动效组件评估页（零新依赖，用现有令牌手写） */}
+            <Route path="/demo/ui" element={<DemoUI />} />
             <Route path="/status" element={<ProtectedRoute><Status /></ProtectedRoute>} />
             <Route path="/contests" element={<ContestList />} />
             <Route path="/contest/new" element={<AdminRoute><ContestForm /></AdminRoute>} />

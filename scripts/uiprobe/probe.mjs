@@ -33,10 +33,17 @@ const rowCount = () => page.locator('.problems-table tbody tr').count()
 const firstRowText = async () => (await page.locator('.problems-table tbody tr').first().innerText()).replace(/\s+/g, ' ')
 
 console.log('\n== 题库页：筛选与状态 ==')
+// 分页契约是「每页 20 条」；题库总数不足 20 时应列出全部，因此期望值是 min(20, 总数)。
+// 早期这里写死 20，题库变少（清理测试数据）后会误报。
+const totalRes = await fetch(`${API}/problems?page=1&size=1`, {
+  headers: { Authorization: `Bearer ${token}` },
+})
+const totalProblems = totalRes.ok ? ((await totalRes.json()).total ?? 0) : 0
+const expectRows = Math.min(20, totalProblems)
 await page.goto(`${BASE}/problems`, { waitUntil: 'networkidle' })
 await page.waitForSelector('.problems-table tbody tr')
 const allRows = await rowCount()
-check('默认列出 20 行', allRows === 20, `实际 ${allRows}`)
+check(`默认列出 ${expectRows} 行（题库共 ${totalProblems} 题）`, allRows === expectRows, `实际 ${allRows}`)
 check('存在状态列', (await page.locator('.problems-table .problem-status').count()) > 0)
 const sideActions = (await page.locator('.side-actions').innerText()).replace(/\s+/g, ' ').trim()
 check('侧栏快捷入口只保留「随机一题 + 我的收藏」', sideActions === '随机一题 我的收藏', sideActions)

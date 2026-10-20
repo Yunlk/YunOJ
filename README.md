@@ -17,6 +17,39 @@ YunOJ 是面向校园教学、日常练习与程序设计竞赛的在线评测�
 - 全站排名：综合分、难度权重与用户名等级颜色
 - 测评集群：节点心跳、动态并发、平滑排空、语言启停、队列统计与操作审计
 
+## 界面预览
+
+| 首页 · 继续刷题 | 题库 · 筛选与状态 |
+| --- | --- |
+| ![首页](docs/screenshots/01-home.png) | ![题库](docs/screenshots/02-problems.png) |
+
+| 单题工作台 · 左题面右编辑器 | 比赛列表 · 按状态分组 |
+| --- | --- |
+| ![单题工作台](docs/screenshots/03-problem-workbench.png) | ![比赛列表](docs/screenshots/04-contests.png) |
+
+| 比赛内做题 · 附件与函数骨架 | 比赛榜单 · 滚榜 |
+| --- | --- |
+| ![比赛内做题](docs/screenshots/05-contest-problem.png) | ![榜单](docs/screenshots/06-standings.png) |
+
+| 提交记录 | 全站排名 |
+| --- | --- |
+| ![提交记录](docs/screenshots/07-status.png) | ![排名](docs/screenshots/08-ranking.png) |
+
+| 个人中心 | 函数题模板配置 |
+| --- | --- |
+| ![个人中心](docs/screenshots/09-profile.png) | ![函数题模板](docs/screenshots/10-problem-harness.png) |
+
+| 测评集群管理 | 动效组件演示 |
+| --- | --- |
+| ![测评集群](docs/screenshots/11-admin-judge.png) | ![动效演示](docs/screenshots/12-demo-ui.png) |
+
+截图放在 `docs/screenshots/`，由 `scripts/uiprobe/shoot-readme.mjs` 生成；每张都会断言页面有实际内容，
+避免拍成空状态。重新生成：
+
+```bash
+node scripts/uiprobe/shoot-readme.mjs docs/screenshots
+```
+
 ## 项目结构
 
 ```text
